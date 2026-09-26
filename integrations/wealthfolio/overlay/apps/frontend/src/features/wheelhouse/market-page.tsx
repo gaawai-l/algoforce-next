@@ -9,6 +9,8 @@ export default function MarketPage() {
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: true,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
   });
   const connected = status.isSuccess && !status.isFetching;
 

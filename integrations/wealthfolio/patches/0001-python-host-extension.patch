@@ -2,9 +2,7 @@ diff --git a/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx b/app
 index cbebb89..c4c1372 100644
 --- a/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx
 +++ b/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx
-@@ -27,6 +27,13 @@ type TFunction = ReturnType<typeof useTranslation>["t"];
- function buildStaticNavigation(t: TFunction): NavigationProps {
-   return {
+@@ -29,2 +29,9 @@ function buildStaticNavigation(t: TFunction): NavigationProps {
      primary: [
 +      {
 +        icon: <Icons.Insight className="size-6" />,
@@ -14,69 +12,48 @@ index cbebb89..c4c1372 100644
 +        label: "Local Python analysis",
 +      },
        {
-         icon: <Icons.Dashboard className="size-6" />,
-         title: t("common:dashboard"),
 diff --git a/apps/frontend/src/routes.tsx b/apps/frontend/src/routes.tsx
 index 75993bc..b867e88 100644
 --- a/apps/frontend/src/routes.tsx
 +++ b/apps/frontend/src/routes.tsx
-@@ -1,4 +1,5 @@
+@@ -1,2 +1,3 @@
  import { useEffect, useState } from "react";
 +import MarketPage from "@/features/wheelhouse/market-page";
  import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
- 
- import { AppLayout } from "@/pages/layouts/app-layout";
-@@ -109,6 +110,7 @@ export function AppRoutes() {
-           <Route path="performance" element={<PerformancePage />} />
-           <Route path="insights" element={<PortfolioInsightsPage />} />
+@@ -111,2 +112,3 @@ export function AppRoutes() {
            <Route path="health" element={<HealthPage />} />
 +          <Route path="market-intelligence" element={<MarketPage />} />
            <Route path="assistant" element={<AiAssistantPage />} />
-           <Route path="connect" element={<ConnectPage />} />
-           <Route
 diff --git a/apps/frontend/vite.addon-sandbox.config.ts b/apps/frontend/vite.addon-sandbox.config.ts
 index 45726fd..1c91a29 100644
 --- a/apps/frontend/vite.addon-sandbox.config.ts
 +++ b/apps/frontend/vite.addon-sandbox.config.ts
-@@ -34,7 +34,7 @@ export default defineConfig({
-     assetsInlineLimit: 20 * 1024 * 1024,
-     copyPublicDir: false,
+@@ -36,3 +36,3 @@ export default defineConfig({
      cssCodeSplit: false,
 -    emptyOutDir: !process.argv.includes("--watch"),
 +    emptyOutDir: false,
      minify: "esbuild",
-     outDir: "public/__generated__",
-     target: ["chrome107", "edge107", "firefox104", "safari16"],
 diff --git a/apps/frontend/vite.config.ts b/apps/frontend/vite.config.ts
-index bbbc18b..d60c70d 100644
+index bbbc18b..bbe4a39 100644
 --- a/apps/frontend/vite.config.ts
 +++ b/apps/frontend/vite.config.ts
-@@ -10,6 +10,10 @@ const enableProxy = process.env.WF_ENABLE_VITE_PROXY === "true";
- const devPort = Number.parseInt(process.env.VITE_DEV_PORT || "1420", 10);
- const serverProxy = enableProxy
+@@ -12,2 +12,6 @@ const serverProxy = enableProxy
    ? {
 +      "/api/wheelhouse": {
 +        target: process.env.WHEELHOUSE_API_TARGET || "http://127.0.0.1:8787",
 +        changeOrigin: true,
 +      },
        "/api": {
-         target: apiTarget,
-         changeOrigin: true,
-@@ -63,7 +67,7 @@ export default defineConfig({
-   server: {
-     port: Number.isFinite(devPort) ? devPort : 1420,
+@@ -65,5 +69,5 @@ export default defineConfig({
      strictPort: true,
 -    host: host ? "0.0.0.0" : false,
-+    host: host ? "0.0.0.0" : "127.0.0.1",
++    host: "127.0.0.1",
      headers: {
-       "Access-Control-Allow-Origin": "*",
+-      "Access-Control-Allow-Origin": "*",
++      "Access-Control-Allow-Origin": "http://127.0.0.1:1420",
      },
-@@ -90,7 +94,7 @@ export default defineConfig({
-     // outDir is outside the Vite root, so Vite won't clean it by default —
-     // stale hashed bundles then accumulate and Tauri embeds the ENTIRE dist
+@@ -92,3 +96,3 @@ export default defineConfig({
      // tree into release builds (tauri.conf.json frontendDist).
 -    emptyOutDir: true,
 +    emptyOutDir: false,
      rollupOptions: {
-       input: {
-         main: path.resolve(__dirname, "index.html"),

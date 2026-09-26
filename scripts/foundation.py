@@ -48,6 +48,18 @@ def sync_host() -> None:
         if applied.returncode != 0:
             run(["git", "-C", str(HOST), "apply", "--check", str(patch)])
             run(["git", "-C", str(HOST), "apply", str(patch)])
+    # Compare complete tracked trees, not just whether individual patch hunks match.
+    index_path = LOCAL / ("host-validation-index-" + secrets.token_hex(6))
+    index_env = {**os.environ, "GIT_INDEX_FILE": str(index_path)}
+    run(["git", "-C", str(HOST), "read-tree", "HEAD"], env=index_env)
+    for patch in sorted((INTEGRATION / "patches").glob("*.patch")):
+        run(["git", "-C", str(HOST), "apply", "--cached", str(patch)], env=index_env)
+    expected = subprocess.check_output(
+        ["git", "-C", str(HOST), "diff", "--cached", "--binary", "HEAD"], env=index_env
+    )
+    actual = subprocess.check_output(["git", "-C", str(HOST), "diff", "--binary", "HEAD"])
+    if actual != expected:
+        raise SystemExit("Unknown tracked host edits; preserving them and refusing to sync")
     state_path = LOCAL / "overlay-state.json"
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
     pending: list[tuple[Path, bytes, str, str]] = []
@@ -65,7 +77,8 @@ def sync_host() -> None:
         pending.append((target, content, relative, digest))
     for target, content, relative, digest in pending:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(content)
+        if not target.exists() or target.read_bytes() != content:
+            target.write_bytes(content)
         state[relative] = digest
     state_path.write_text(json.dumps(state, indent=2) + "\n")
     print(f"Wealthfolio {PIN['tag']} source and extension synchronized", flush=True)
@@ -111,9 +124,11 @@ def dev() -> None:
         "WF_ENABLE_VITE_PROXY": "true",
         "VITE_DEV_PORT": "1420",
         "WF_API_TARGET": "http://127.0.0.1:8088",
+        "VITE_API_TARGET": "http://127.0.0.1:8088",
         "WHEELHOUSE_PORT": "8787",
         "WHEELHOUSE_API_TARGET": "http://127.0.0.1:8787",
     }
+    env.pop("TAURI_DEV_HOST", None)
     children: list[subprocess.Popen[bytes]] = []
 
     def interrupt(_signum: int, _frame: object) -> None:

@@ -19,7 +19,7 @@ Docker 使用已有 bridge 网络，避免依赖本机可用的新网络地址�
 ## 模块职责与依赖
 
 - **宿主：** Wealthfolio 的导航、账户、组合、设置和本地存储。Market intelligence 是同一导航中的原生路由，页面复用宿主 Page/Button 等 UI。首期保持宿主样式；完整 Wheelhouse 视觉改造另行覆盖共享 shell。
-- **调用客户端：** 将 HTTP/超时/不兼容契约转换为明确错误，响应必须经过运行时校验；不在 Python 断开后继续显示连接成功。
+- **调用客户端：** 将 HTTP/超时/不兼容契约转换为明确错误，响应必须经过运行时校验；前台每 10 秒检查一次，单次请求 5 秒超时；失联后最迟约 15 秒撤下连接成功状态，切回页面也立即复验。
 - **Python HTTP Adapter：** 版本化响应、请求 ID、统一错误和最少量日志。只记录路由名、状态和耗时，不记录查询参数、金融值或异常消息。
 - **契约：** Pydantic 是 HTTP 结构来源，OpenAPI 生成 TypeScript 类型。契约版本与软件版本分开，前端拒绝不支持的契约版本。
 - **后续计算模块：** 作为 Python 内部模块接入，保持与 FastAPI、Wealthfolio 和数据库独立；已有业务实验代码需在 A2/A3 验收时逐项迁入。
@@ -32,7 +32,7 @@ Python 首期只提供状态查询。`ready` 表示进程和接口可用，不�
 - `.local/wealthfolio` 是忽略提交的上游 checkout。
 - `integrations/wealthfolio/patches` 保存已有源码的最小补丁。
 - `integrations/wealthfolio/overlay` 保存我们新增的宿主文件。
-- `make sync` 验证上游 commit、补丁适用性和 overlay 内容指纹，遇到无法归属的本地改动就停止，避免覆盖。
+- `make sync` 验证上游 commit、完整 tracked diff 与声明补丁一致性，以及 overlay 内容指纹；遇到未知的受跟踪文件或受管 overlay 修改就停止，避免覆盖。
 - 构建关闭自动清空输出目录；旧产物会保留，不能直接把累积的目录当作正式发布包。
 
 ## 阶段与验收
