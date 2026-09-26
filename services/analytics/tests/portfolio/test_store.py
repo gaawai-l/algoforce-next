@@ -232,3 +232,42 @@ def test_assignment_delivery_fill_cannot_be_imported_again_as_stock_trade(tmp_pa
                 update={"source_record_id": record["record_id"]}
             )
         )
+
+
+def test_legacy_capture_and_event_defaults_remain_idempotent_after_schema_extension(tmp_path):
+    import json
+
+    from wheelhouse_service.market import digest, timestamp
+
+    store = PortfolioStore(tmp_path / "legacy.sqlite")
+    capture = PortfolioCapture(
+        source="demo",
+        account_id="demo",
+        captured_at=NOW,
+        positions=[],
+        instruments=[],
+        quotes=[],
+        fx=[],
+        raw={},
+        errors={},
+    )
+    legacy = capture.model_dump(mode="json")
+    legacy.pop("snapshot_observed_at")
+    payload = json.dumps(legacy, separators=(",", ":"))
+    legacy_id = digest(payload)
+    store.create_cycle(CYCLE)
+    original = event(0, "sell_open", PUT, "1", "2")
+    old_event = original.model_dump(mode="json")
+    old_event.pop("evidence_issues")
+    with store.connection() as db:
+        db.execute(
+            "INSERT INTO captures VALUES(?,?,?,?,?)",
+            (legacy_id, "demo", "demo", timestamp(NOW), payload),
+        )
+        db.execute(
+            "INSERT INTO events VALUES(?,?,?)",
+            (original.event_id, CYCLE.cycle_id, json.dumps(old_event, separators=(",", ":"))),
+        )
+    assert store.ingest(capture) == legacy_id
+    assert store.append_event(original).premium_received == "200"
+    assert len(store.events(CYCLE.cycle_id)) == 1

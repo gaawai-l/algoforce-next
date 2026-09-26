@@ -42,6 +42,10 @@ class OpenSecTradeContext:
         assert kwargs==dict(acc_id=17,trd_env="REAL",start="2026-09-01",end="2026-09-20")
         return 0,Table([dict(cashflow_id="range-flow",create_time="2026-09-02 09:00:00",
                             clearing_date="2026-09-03",currency="USD",cashflow_amount=100)])
+    def order_fee_query(self,**kwargs):
+        assert kwargs["acc_id"]==17 and kwargs["trd_env"]=="REAL"
+        assert 1 <= len(kwargs["order_id_list"]) <= 20
+        return 0,Table([dict(order_id=value,fee_amount=1) for value in kwargs["order_id_list"]])
     def close(self): pass
 """)
     env = {**os.environ, "PYTHONPATH": str(tmp_path)}
@@ -95,3 +99,26 @@ class OpenSecTradeContext:
         check=True,
     )
     assert json.loads(denied.stdout)["ok"] is False
+
+    fee_response = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(
+            {"operation": "fees", "account_id": "17", "order_ids": [str(i) for i in range(20)]}
+        ),
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert len(json.loads(fee_response.stdout)["fees"]) == 20
+    overflow = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(
+            {"operation": "fees", "account_id": "17", "order_ids": [str(i) for i in range(21)]}
+        ),
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert json.loads(overflow.stdout)["ok"] is False

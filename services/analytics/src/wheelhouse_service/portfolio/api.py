@@ -1,13 +1,13 @@
 """Read-only brokerage queries and local analytical annotations; no trading endpoints."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Lock
-from time import monotonic
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Query
 from pydantic import AwareDatetime, Field
 
 from ..market import Model
@@ -29,6 +29,7 @@ from .models import (
 )
 from .risk import calculate_risk
 from .store import PortfolioStore
+from .sync import BrokerSync, SyncJob
 
 
 class NewCycle(Model):
@@ -75,11 +76,26 @@ class PortfolioWorkspace(Model):
     issues: list[str]
 
 
-def create_router(path: Path, reader: MoomooReader | None = None) -> APIRouter:
-    router = APIRouter(prefix="/api/wheelhouse/v1/portfolio", tags=["portfolio"])
+def create_router(
+    path: Path, reader: MoomooReader | None = None, *, start_worker: bool = True
+) -> APIRouter:
     collector = reader or MoomooReader()
-    sync_lock = Lock()
-    last_sync: dict[str, float] = {}
+    manager: BrokerSync | None = None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        nonlocal manager
+        manager = BrokerSync(PortfolioStore(path), collector)
+        if start_worker:
+            manager.start()
+        yield
+        manager.stop()
+
+    router = APIRouter(prefix="/api/wheelhouse/v1/portfolio", tags=["portfolio"], lifespan=lifespan)
+
+    def syncer() -> BrokerSync:
+        assert manager is not None, "Portfolio lifespan has not started"
+        return manager
 
     def store() -> PortfolioStore:
         return PortfolioStore(path)
@@ -101,21 +117,22 @@ def create_router(path: Path, reader: MoomooReader | None = None) -> APIRouter:
                 503, "OpenD unavailable; start and sign in through official OpenD"
             ) from exc
 
-    @router.post("/sync", response_model=PortfolioCapture)
-    def sync(request: SyncRequest) -> PortfolioCapture:
-        if not sync_lock.acquire(blocking=False):
-            raise HTTPException(409, "A brokerage query is already running")
-        try:
-            if monotonic() - last_sync.get(request.account_id, -1000) < 30:
-                raise HTTPException(429, "Allow 30 seconds between account syncs")
-            last_sync[request.account_id] = monotonic()
-            capture = collector.sync(request)
-            store().ingest(capture)
-            return capture
-        except BrokerUnavailable as exc:
-            raise HTTPException(503, "OpenD query unavailable; no demo fallback") from exc
-        finally:
-            sync_lock.release()
+    @router.post("/sync", response_model=SyncJob, status_code=202)
+    def sync(
+        request: SyncRequest, idempotency_key: str = Header(min_length=1, max_length=128)
+    ) -> SyncJob:
+        readiness = collector.status()
+        if not readiness["gateway_reachable"] or not readiness["sdk_installed"]:
+            raise HTTPException(503, "OpenD unavailable; start and sign in through official OpenD")
+        return syncer().submit(request, idempotency_key, now=datetime.now(UTC))
+
+    @router.get("/sync-jobs/{job_id}", response_model=SyncJob)
+    def sync_job(job_id: str) -> SyncJob:
+        return syncer().job(job_id)
+
+    @router.get("/sync-status", response_model=SyncJob | None)
+    def sync_status(account_id: str = Query(pattern=r"^[0-9]+$")) -> SyncJob | None:
+        return syncer().latest(account_id)
 
     @router.post("/demo")
     def demo() -> dict[str, str]:
@@ -130,10 +147,17 @@ def create_router(path: Path, reader: MoomooReader | None = None) -> APIRouter:
         capture = persistence.capture(source, account_id)
         now = datetime.now(UTC)
         stale = bool(
-            capture and source != "demo" and (now - capture.captured_at).total_seconds() > 900
+            capture
+            and source != "demo"
+            and (now - (capture.snapshot_observed_at or capture.captured_at)).total_seconds() > 900
         )
         marks = (
-            {p.code: p.mark for p in capture.positions if p.mark is not None}
+            {
+                p.code: p.mark
+                for p in capture.positions
+                if p.mark is not None
+                and (source == "demo" or 0 <= (now - p.observed_at).total_seconds() <= 900)
+            }
             if capture and not stale
             else {}
         )

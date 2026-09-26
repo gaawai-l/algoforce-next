@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Page, PageContent, PageHeader } from "@wealthfolio/ui";
 import {
   portfolioRequest,
+  currentSync,
   portfolioWorkspace,
   displayAmount as amount,
   type Account,
@@ -74,6 +75,24 @@ export default function PortfolioPage() {
     refetchInterval: 30000,
     retry: false,
   });
+  const syncStatus = useQuery({
+    queryKey: ["portfolio", "sync", account],
+    queryFn: () => currentSync(account),
+    enabled: source === "moomoo" && /^\d+$/.test(account),
+    refetchInterval: 1000,
+    retry: false,
+  });
+  const syncActive =
+    !!syncStatus.data &&
+    ["queued", "running", "retry_wait"].includes(syncStatus.data.state);
+  useEffect(() => {
+    if (syncStatus.data?.updated_at) {
+      void cache.invalidateQueries({
+        queryKey: ["portfolio", "workspace", source, account],
+      });
+      void cache.invalidateQueries({ queryKey: ["portfolio", "accounts"] });
+    }
+  }, [syncStatus.data?.updated_at, source, account, cache]);
   const data = workspace.data;
   const capture = data?.capture;
   const selected =
@@ -139,7 +158,7 @@ export default function PortfolioPage() {
         account: id,
       });
       setMessage(
-        "Read-only capture saved. Review coverage and unresolved metadata below.",
+        "Read-only sync queued. Snapshots are saved first; order fees continue in paced batches.",
       );
     });
   };
@@ -288,8 +307,10 @@ export default function PortfolioPage() {
           </div>
           {capture && (
             <p className="wh-muted">
-              Captured {stamp(capture.captured_at)} · {capture.base_currency}{" "}
-              base · {data?.state}.{" "}
+              Snapshot{" "}
+              {stamp(capture.snapshot_observed_at ?? capture.captured_at)} ·
+              Latest acquisition {stamp(capture.captured_at)} ·{" "}
+              {capture.base_currency} base · {data?.state}.{" "}
               {source === "demo"
                 ? "Risk evaluated at fixture time; no real account is connected."
                 : "Missing data stays unavailable. A successful capture does not establish complete account history."}
@@ -304,6 +325,25 @@ export default function PortfolioPage() {
             <p role="status" className="wh-feedback">
               {message}
             </p>
+          )}
+          {source === "moomoo" && syncStatus.data && (
+            <div className="wh-task" role="status">
+              <span>
+                Account sync: {syncStatus.data.state.replaceAll("_", " ")} ·{" "}
+                {syncStatus.data.phase}
+              </span>
+              <span>
+                Fees {syncStatus.data.completed_orders}/
+                {syncStatus.data.total_orders} orders · missing{" "}
+                {syncStatus.data.missing_orders}
+              </span>
+              {syncStatus.data.error && (
+                <span>{syncStatus.data.error}; saved data is preserved</span>
+              )}
+              {syncActive && (
+                <span>Next check {stamp(syncStatus.data.next_due)}</span>
+              )}
+            </div>
           )}
           {mode === "broker" && (
             <>
@@ -352,7 +392,11 @@ export default function PortfolioPage() {
                         max={new Date().toISOString().slice(0, 10)}
                       />
                     </label>
-                    <button disabled={busy}>Sync selected account</button>
+                    <button disabled={busy || syncActive}>
+                      {syncActive
+                        ? "Sync in progress…"
+                        : "Sync selected account"}
+                    </button>
                     <p className="wh-muted wh-wide">
                       Up to 90 days per request. Earlier availability must be
                       checked separately, including disabled accounts. Cash

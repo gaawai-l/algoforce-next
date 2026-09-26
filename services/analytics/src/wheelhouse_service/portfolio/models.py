@@ -102,6 +102,7 @@ class PortfolioCapture(Model):
     source: Source
     account_id: str = Field(min_length=1, max_length=80)
     captured_at: AwareDatetime
+    snapshot_observed_at: AwareDatetime | None = None
     base_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
     positions: list[Position]
     instruments: list[Instrument]
@@ -114,6 +115,8 @@ class PortfolioCapture(Model):
 
     @model_validator(mode="after")
     def unique_identifiers(self) -> Self:
+        if self.snapshot_observed_at and self.snapshot_observed_at > self.captured_at:
+            raise ValueError("Snapshot observation cannot follow capture acquisition")
         for values, field in (
             (self.positions, "code"),
             (self.instruments, "code"),

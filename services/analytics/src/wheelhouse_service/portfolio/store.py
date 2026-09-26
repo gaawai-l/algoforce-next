@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -71,12 +71,22 @@ class PortfolioStore:
         finally:
             db.close()
 
-    def ingest(self, capture: PortfolioCapture) -> str:
+    def ingest(
+        self, capture: PortfolioCapture, *, transaction: sqlite3.Connection | None = None
+    ) -> str:
         identifier = digest(capture.model_dump_json())
-        with self.connection() as db:
-            db.execute("BEGIN IMMEDIATE")
+        with self.connection() if transaction is None else nullcontext(transaction) as db:
+            if transaction is None:
+                db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM captures WHERE id=?", (identifier,)).fetchone():
                 return identifier
+            same_time = db.execute(
+                "SELECT id,payload FROM captures WHERE source=? AND account=? AND at=?",
+                (capture.source, capture.account_id, timestamp(capture.captured_at)),
+            ).fetchall()
+            for previous in same_time:
+                if PortfolioCapture.model_validate_json(previous["payload"]) == capture:
+                    return str(previous["id"])
             latest = db.execute(
                 "SELECT MAX(at) FROM captures WHERE source=? AND account=?",
                 (capture.source, capture.account_id),
@@ -435,7 +445,7 @@ class PortfolioStore:
             existing = db.execute(
                 "SELECT payload FROM events WHERE id=?", (event.event_id,)
             ).fetchone()
-            if existing and existing[0] != event.model_dump_json():
+            if existing and LedgerEvent.model_validate_json(existing[0]) != event:
                 raise ValueError("Event identity conflicts; history is immutable")
             if event.settlement_record_id and event.kind not in {"assign", "exercise"}:
                 raise ValueError("Delivery links are only valid for assignment or exercise")

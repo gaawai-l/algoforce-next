@@ -361,6 +361,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/portfolio/sync-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sync Job */
+        get: operations["sync_job_api_wheelhouse_v1_portfolio_sync_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/sync-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sync Status */
+        get: operations["sync_status_api_wheelhouse_v1_portfolio_sync_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -882,6 +916,8 @@ export interface components {
              * Format: date-time
              */
             captured_at: string;
+            /** Snapshot Observed At */
+            snapshot_observed_at: string | null;
             /**
              * Base Currency
              * @default USD
@@ -1324,6 +1360,43 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** SyncJob */
+        SyncJob: {
+            /** Job Id */
+            job_id: string;
+            /** Account Id */
+            account_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "retry_wait" | "succeeded" | "partial" | "failed";
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "snapshot" | "fees";
+            /** Attempts */
+            attempts: number;
+            /** Total Orders */
+            total_orders: number;
+            /** Completed Orders */
+            completed_orders: number;
+            /** Missing Orders */
+            missing_orders: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Next Due
+             * Format: date-time
+             */
+            next_due: string;
+            /** Error */
+            error: string | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -1701,7 +1774,9 @@ export interface operations {
     sync_api_wheelhouse_v1_portfolio_sync_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "idempotency-key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1712,12 +1787,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortfolioCapture"];
+                    "application/json": components["schemas"]["SyncJob"];
                 };
             };
             /** @description Validation Error */
@@ -1943,6 +2018,68 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_job_api_wheelhouse_v1_portfolio_sync_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_status_api_wheelhouse_v1_portfolio_sync_status_get: {
+        parameters: {
+            query: {
+                account_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncJob"] | null;
                 };
             };
             /** @description Validation Error */

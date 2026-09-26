@@ -7,7 +7,7 @@
 1. `make setup-broker` 安装固定版本官方 `moomoo-api 10.11.7108` 到独立 `.venv-moomoo`。本机已安装并完成导入验证。
 2. 从 [moomoo 官方 OpenD 文档](https://openapi.moomoo.com/moomoo-api-doc/en/intro/intro.html) 安装/启动 OpenD，并由账户所有者登录。应用仅访问 `127.0.0.1:11111`；不索取密码、不要求交易解锁。
 3. 在 Brokerage 点击 Discover read-only accounts，明确选择 FUTUSG / REAL 的实际 acc_id，输入开始/结束日期，再同步。Disabled 账户不被自动过滤，以便追查迁移前历史。
-4. 每次范围最多90天，账户查询之间至少30秒；这是本应用的批次限制，不代表券商只能查90天。费用首批最多20个成交订单；超出或无权限时保持缺失。资金流水按请求起止日期查询创建日期，原始清算/结算日期分别保留；需与券商对账后才能作为完整区间净入金。
+4. 每次范围最多90天，账户查询之间至少30秒；这是本应用的批次限制，不代表券商只能查90天。同步作为可恢复后台任务运行：先保存持仓/成交，再每批最多20个订单查询费用，批次至少相隔3.1秒；数量不再受20订单总上限限制。页面显示已完成/缺失订单数，漏返或无效费用标记partial而非零。服务重启后从已保存cursor继续。账户快照时间与费用取得时间分别保存；补费不刷新旧现金/持仓的新鲜度。资金流水按请求起止日期查询创建日期，原始清算/结算日期分别保留；需与券商对账后才能作为完整区间净入金。
 5. 检查原始持仓、现金、订单、成交、费用和资金流水。真实合约乘数/Greeks单位不凭代码或显示位数猜测，先在 metadata/observation 表单登记可核实的来源。
 
 2026-09-27 已从官方发布包安装并启动 OpenD GUI 10.11.7108，macOS 签名与公证检查通过；当前停留在登录页，尚未打开 API 端口，因此账户发现、真实账户历史覆盖和余额对账尚未完成。SDK导入与隔离协议测试通过不代表已连接账户。离线时UI显示OPEND OFFLINE，错误不会切换为演示数据。
@@ -32,7 +32,7 @@
 
 ## 存储与安全
 
-独立 `portfolio.sqlite` 与分析数据库相邻，位于忽略提交的 `.local/analytics/`，文件权限0600；migration与DeMark分开。SDK只读子进程有50秒超时，stdout/stderr不转发到服务日志， SDK日志在导入前禁用。无真实数据写入仓库、fixture或Wealthfolio账本；也没有复制到外部分析服务。
+独立 `portfolio.sqlite` 与分析数据库相邻，位于忽略提交的 `.local/analytics/`，文件权限0600；migration与DeMark分开。SDK只读子进程每次有50秒超时，后台任务90秒租约、每阶段最多3次尝试，stdout/stderr不转发到服务日志， SDK日志在导入前禁用。无真实数据写入仓库、fixture或Wealthfolio账本；也没有复制到外部分析服务。
 
 ## 验证来源
 
@@ -42,3 +42,5 @@
 - [官方持仓](https://openapi.moomoo.com/moomoo-api-doc/en/trade/get-position-list.html)
 - [官方市场快照字段](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-market-snapshot.html)
 - SDK包版本见 `scripts/broker/requirements.lock`，与Web服务依赖隔离。
+
+费用队列和恢复验证见 [后台费用验收](FEE-SYNC-VERIFICATION.md)。

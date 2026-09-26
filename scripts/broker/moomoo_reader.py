@@ -9,7 +9,7 @@ import sys
 result = {"ok": False, "code": "sdk_failure"}
 try:
     request = json.loads(sys.stdin.read())
-    if request.get("operation") not in {"accounts", "sync"}:
+    if request.get("operation") not in {"accounts", "sync", "fees"}:
         raise ValueError("unsupported_operation")
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         import logging
@@ -56,68 +56,85 @@ try:
                     raise RuntimeError("account_not_authorized")
                 args = {"acc_id": int(acc_id), "trd_env": m.TrdEnv.REAL}
                 captures, errors = {}, {}
-                queries = {
-                    "positions": lambda: ctx.position_list_query(**args, refresh_cache=True),
-                    "cash": lambda: ctx.accinfo_query(
-                        **args, currency=m.Currency.USD, refresh_cache=True
-                    ),
-                    "orders": lambda: ctx.history_order_list_query(
-                        **args, start=request["start"], end=request["end"]
-                    ),
-                    "deals": lambda: ctx.history_deal_list_query(
-                        **args, start=request["start"], end=request["end"]
-                    ),
-                }
-                for kind, query in queries.items():
-                    code, data = query()
-                    if code == m.RET_OK:
-                        captures[kind] = json.loads(
-                            data.to_json(orient="records", double_precision=15)
-                        )
-                    else:
-                        errors[kind] = "query_unavailable"
-                # Fees are per order, distinct from executions. Bound requests to provider limits.
-                ids = list(
-                    dict.fromkeys(
-                        str(row["order_id"])
-                        for row in captures.get("deals", [])
-                        if row.get("order_id")
-                    )
-                )
-                if ids and len(ids) <= 20:
-                    code, fees = ctx.order_fee_query(**args, order_id_list=ids)
-                    if code == m.RET_OK:
-                        captures["fees"] = json.loads(
-                            fees.to_json(orient="records", double_precision=15)
-                        )
-                    else:
-                        errors["fees"] = "query_unavailable"
-                else:
-                    errors["fees"] = "not_requested_or_requires_batches"
-                # The official range parameters filter creation dates, not clearing dates.
-                code, flows = ctx.get_acc_cash_flow(
-                    **args, start=request["start"], end=request["end"]
-                )
-                captures["_coverage"] = {
-                    "cash_flows": {
-                        "start": request["start"],
-                        "end": request["end"],
-                        "basis": "creation_date",
-                        "query_succeeded": code == m.RET_OK,
+                if request["operation"] == "fees":
+                    ids = request.get("order_ids")
+                    if (
+                        not isinstance(ids, list)
+                        or not 1 <= len(ids) <= 20
+                        or not all(isinstance(value, str) and value for value in ids)
+                        or len(ids) != len(set(ids))
+                    ):
+                        raise ValueError("invalid_fee_batch")
+                    code, data = ctx.order_fee_query(**args, order_id_list=ids)
+                    if code != m.RET_OK:
+                        raise RuntimeError("fee_query_failed")
+                    result = {
+                        "ok": True,
+                        "fees": json.loads(data.to_json(orient="records", double_precision=15)),
                     }
-                }
-                if code == m.RET_OK:
-                    captures["cash_flows"] = json.loads(
-                        flows.to_json(orient="records", double_precision=15)
-                    )
                 else:
-                    errors["cash_flows"] = "query_unavailable"
-                result = {
-                    "ok": True,
-                    "captures": captures,
-                    "errors": errors,
-                    "sdk_version": "10.11.7108",
-                }
+                    queries = {
+                        "positions": lambda: ctx.position_list_query(**args, refresh_cache=True),
+                        "cash": lambda: ctx.accinfo_query(
+                            **args, currency=m.Currency.USD, refresh_cache=True
+                        ),
+                        "orders": lambda: ctx.history_order_list_query(
+                            **args, start=request["start"], end=request["end"]
+                        ),
+                        "deals": lambda: ctx.history_deal_list_query(
+                            **args, start=request["start"], end=request["end"]
+                        ),
+                    }
+                    for kind, query in queries.items():
+                        code, data = query()
+                        if code == m.RET_OK:
+                            captures[kind] = json.loads(
+                                data.to_json(orient="records", double_precision=15)
+                            )
+                        else:
+                            errors[kind] = "query_unavailable"
+                    # Fees are per order; background sync uses the paced fees operation.
+                    ids = list(
+                        dict.fromkeys(
+                            str(row["order_id"])
+                            for row in captures.get("deals", [])
+                            if row.get("order_id")
+                        )
+                    )
+                    if request.get("include_fees", True) and ids and len(ids) <= 20:
+                        code, fees = ctx.order_fee_query(**args, order_id_list=ids)
+                        if code == m.RET_OK:
+                            captures["fees"] = json.loads(
+                                fees.to_json(orient="records", double_precision=15)
+                            )
+                        else:
+                            errors["fees"] = "query_unavailable"
+                    else:
+                        errors["fees"] = "not_requested_or_requires_batches"
+                    # The official range parameters filter creation dates, not clearing dates.
+                    code, flows = ctx.get_acc_cash_flow(
+                        **args, start=request["start"], end=request["end"]
+                    )
+                    captures["_coverage"] = {
+                        "cash_flows": {
+                            "start": request["start"],
+                            "end": request["end"],
+                            "basis": "creation_date",
+                            "query_succeeded": code == m.RET_OK,
+                        }
+                    }
+                    if code == m.RET_OK:
+                        captures["cash_flows"] = json.loads(
+                            flows.to_json(orient="records", double_precision=15)
+                        )
+                    else:
+                        errors["cash_flows"] = "query_unavailable"
+                    result = {
+                        "ok": True,
+                        "captures": captures,
+                        "errors": errors,
+                        "sdk_version": "10.11.7108",
+                    }
         finally:
             ctx.close()
 except Exception:

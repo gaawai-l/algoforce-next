@@ -42,7 +42,7 @@ class MoomooReader:
         }
 
     def _run(self, request: dict[str, Any]) -> dict[str, Any]:
-        if request.get("operation") not in {"accounts", "sync"}:
+        if request.get("operation") not in {"accounts", "sync", "fees"}:
             raise ValueError("Unsupported reader operation")
         state = self.status()
         if not state["sdk_installed"] or not state["gateway_reachable"]:
@@ -75,8 +75,17 @@ class MoomooReader:
         result: list[dict[str, Any]] = self._run({"operation": "accounts"})["accounts"]
         return result
 
-    def sync(self, request: SyncRequest) -> PortfolioCapture:
-        payload = self._run({"operation": "sync", **request.model_dump(mode="json")})
+    def fees(self, account: str, ids: list[str]) -> list[dict[str, Any]]:
+        if not account.isdigit() or not 1 <= len(ids) <= 20 or len(ids) != len(set(ids)):
+            raise ValueError("Invalid fee batch")
+        result = self._run({"operation": "fees", "account_id": account, "order_ids": ids})
+        rows: list[dict[str, Any]] = result["fees"]
+        return rows
+
+    def sync(self, request: SyncRequest, *, include_fees: bool = True) -> PortfolioCapture:
+        payload = self._run(
+            {"operation": "sync", "include_fees": include_fees, **request.model_dump(mode="json")}
+        )
         now = datetime.now(UTC)
         errors = dict(payload.get("errors", {}))
         positions = []
@@ -118,6 +127,7 @@ class MoomooReader:
             source="moomoo",
             account_id=request.account_id,
             captured_at=now,
+            snapshot_observed_at=now,
             positions=positions,
             instruments=[],
             quotes=[],

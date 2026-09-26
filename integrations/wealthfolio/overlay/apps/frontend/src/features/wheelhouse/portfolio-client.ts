@@ -4,6 +4,7 @@ import type { components } from "./api-schema";
 export type PortfolioWorkspace = components["schemas"]["PortfolioWorkspace"];
 export type Instrument = components["schemas"]["Instrument-Input"];
 export type LedgerEvent = components["schemas"]["LedgerEvent-Input"];
+export type SyncJob = components["schemas"]["SyncJob"];
 export type Source = "demo" | "moomoo";
 export interface Account {
   source: Source;
@@ -35,7 +36,13 @@ export async function portfolioRequest<T>(
 ): Promise<T> {
   const response = await fetch(prefix + path, {
     method: body === undefined ? "GET" : "POST",
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    headers:
+      body === undefined
+        ? {}
+        : {
+            "Content-Type": "application/json",
+            "Idempotency-Key": crypto.randomUUID(),
+          },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(60000),
     cache: "no-store",
@@ -95,6 +102,7 @@ export const portfolioSchema: z.ZodType<PortfolioWorkspace> = z.object({
       source: z.enum(["demo", "moomoo"]),
       account_id: z.string(),
       captured_at: time,
+      snapshot_observed_at: time.nullable(),
       base_currency: z.string(),
       positions: z.array(
         z.object({
@@ -204,6 +212,35 @@ export async function portfolioWorkspace(
   const parsed = portfolioSchema.safeParse(value);
   if (!parsed.success)
     throw new Error("Portfolio response contract is incompatible");
+  return parsed.data;
+}
+const syncJobSchema: z.ZodType<SyncJob> = z.object({
+  job_id: z.string(),
+  account_id: z.string(),
+  state: z.enum([
+    "queued",
+    "running",
+    "retry_wait",
+    "succeeded",
+    "partial",
+    "failed",
+  ]),
+  phase: z.enum(["snapshot", "fees"]),
+  attempts: z.number().int(),
+  total_orders: z.number().int(),
+  completed_orders: z.number().int(),
+  missing_orders: z.number().int(),
+  updated_at: time,
+  next_due: time,
+  error: z.string().nullable(),
+});
+export async function currentSync(account: string): Promise<SyncJob | null> {
+  const raw = await portfolioRequest<unknown>(
+    `/sync-status?${new URLSearchParams({ account_id: account })}`,
+  );
+  const parsed = syncJobSchema.nullable().safeParse(raw);
+  if (!parsed.success)
+    throw new Error("Sync response contract is incompatible");
   return parsed.data;
 }
 export const displayAmount = (value: string | null | undefined) =>

@@ -268,7 +268,8 @@ def create_app(database: Path | None = None, *, start_worker: bool = True) -> Fa
 
     app.include_router(
         portfolio_router(
-            (database.parent if database else Settings.from_env().data_dir) / "portfolio.sqlite"
+            (database.parent if database else Settings.from_env().data_dir) / "portfolio.sqlite",
+            start_worker=start_worker,
         )
     )
     return app

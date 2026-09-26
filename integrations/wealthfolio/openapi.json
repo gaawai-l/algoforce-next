@@ -530,23 +530,36 @@
         ],
         "summary": "Sync",
         "operationId": "sync_api_wheelhouse_v1_portfolio_sync_post",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SyncRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PortfolioCapture"
+                  "$ref": "#/components/schemas/SyncJob"
                 }
               }
             }
@@ -846,6 +859,99 @@
                   },
                   "type": "object",
                   "title": "Response Reconcile Api Wheelhouse V1 Portfolio Reconcile Fill Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/portfolio/sync-jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Sync Job",
+        "operationId": "sync_job_api_wheelhouse_v1_portfolio_sync_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/portfolio/sync-status": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Sync Status",
+        "operationId": "sync_status_api_wheelhouse_v1_portfolio_sync_status_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SyncJob"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Sync Status Api Wheelhouse V1 Portfolio Sync Status Get"
                 }
               }
             }
@@ -2046,6 +2152,18 @@
             "format": "date-time",
             "title": "Captured At"
           },
+          "snapshot_observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Observed At"
+          },
           "base_currency": {
             "type": "string",
             "pattern": "^[A-Z]{3}$",
@@ -2123,6 +2241,7 @@
           "source",
           "account_id",
           "captured_at",
+          "snapshot_observed_at",
           "base_currency",
           "positions",
           "instruments",
@@ -3477,6 +3596,91 @@
           "reason"
         ],
         "title": "FillReconciliation"
+      },
+      "SyncJob": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "account_id": {
+            "type": "string",
+            "title": "Account Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "retry_wait",
+              "succeeded",
+              "partial",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "snapshot",
+              "fees"
+            ],
+            "title": "Phase"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "total_orders": {
+            "type": "integer",
+            "title": "Total Orders"
+          },
+          "completed_orders": {
+            "type": "integer",
+            "title": "Completed Orders"
+          },
+          "missing_orders": {
+            "type": "integer",
+            "title": "Missing Orders"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "next_due": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next Due"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "account_id",
+          "state",
+          "phase",
+          "attempts",
+          "total_orders",
+          "completed_orders",
+          "missing_orders",
+          "updated_at",
+          "next_due",
+          "error"
+        ],
+        "title": "SyncJob"
       }
     }
   }
