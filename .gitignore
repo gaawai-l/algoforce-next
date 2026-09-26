@@ -1,0 +1,24 @@
+# Local browser automation output
+.playwright-mcp/
+
+# Operating system and runtime output
+.DS_Store
+__pycache__/
+*.py[cod]
+*.log
+node_modules/
+.venv/
+
+# Local credentials and private brokerage material
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+/data/
+/private/
+/broker-data/
