@@ -57,3 +57,30 @@ def test_gap_resets_warmup_and_old_snapshot_survives_correction(tmp_path):
     assert gap.data_state == "unavailable"
     assert gap.points[2].sma is None
     assert gap.warmup_complete is False
+
+
+def test_sma_precision_is_explicit_and_large_prices_are_not_truncated(tmp_path):
+    from wheelhouse_service.market import Bar, Batch
+
+    repo = Repository(tmp_path / "precision.sqlite")
+    at = START + timedelta(hours=4)
+    price = "123456789012345678.123456789012345678"
+    bars = [
+        Bar(
+            open_time=START + timedelta(hours=i),
+            close_time=START + timedelta(hours=i + 1),
+            open=price,
+            high="123456789012345679",
+            low="123456789012345677",
+            close=price,
+            is_closed=True,
+        )
+        for i in range(3)
+    ]
+    repo.ingest(Batch(stream=STREAM, fetched_at=at, bars=bars, raw_payload={}))
+    result = calculate(repo.read(STREAM, market_at=at, knowledge_at=at), Rules(window=2))
+    assert result.points[-1].sma == price
+    small = Repository(tmp_path / "rounding.sqlite")
+    small.ingest(batch((10, 10, 11), at))
+    rounded = calculate(small.read(STREAM, market_at=at, knowledge_at=at), Rules(window=3))
+    assert rounded.points[-1].sma == "10.333333333333333333"

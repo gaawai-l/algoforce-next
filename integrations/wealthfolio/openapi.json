@@ -1549,6 +1549,16 @@
               }
             ]
           },
+          "refresh_job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Job"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "schedule": {
             "anyOf": [
               {
@@ -1568,6 +1578,7 @@
           "current_state",
           "snapshot",
           "latest_job",
+          "refresh_job",
           "schedule"
         ],
         "title": "Workspace"

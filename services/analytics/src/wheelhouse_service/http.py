@@ -232,6 +232,7 @@ def create_app(database: Path | None = None, *, start_worker: bool = True) -> Fa
             current_state=state,
             snapshot=snapshot,
             latest_job=repo().latest_job(stream),
+            refresh_job=repo().latest_job(stream, refresh_only=True),
             schedule=repo().schedule(stream),
         )
 

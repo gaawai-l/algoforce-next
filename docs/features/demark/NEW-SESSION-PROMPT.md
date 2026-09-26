@@ -13,7 +13,7 @@
 5. 参考研究：`/Users/gary/code/AlgoForceNext/research/demark-completed-model-study-2026-09-26.md`。
 6. 早期实验说明：`/Users/gary/code/AlgoForceNext/docs/implementation/market-engine.md`。其中参数只是未经完整验证的实验选择，不能视为我已认可的最终 DeMark 规则。
 
-另一个会话正在完成 A2–A5 架构底座。此处的架构文件和 Python 接口可能继续变化，讨论前按实际文件确认。设计产物请放在 `docs/features/demark/`。设计讨论阶段不要修改底座、数据库迁移、任务调度、HTTP 契约、宿主补丁或 UI，避免并行冲突。现有根目录 `backend/`、`frontend/` 是历史实验，正式功能不要继续写在那里。
+A2–A5 架构底座已完成，最终范围与证据见 `docs/architecture/a2-a5-results.md`。讨论前按实际文件确认 Python 接口，不沿用早期实验接口。设计产物请放在 `docs/features/demark/`。设计讨论阶段不要修改底座、数据库迁移、任务调度、HTTP 契约、宿主补丁或 UI，避免并行冲突。现有根目录 `backend/`、`frontend/` 是历史实验，正式功能不要继续写在那里。
 
 二、DeMark 逻辑放在哪里
 

@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Page, PageContent, PageHeader } from "@wealthfolio/ui";
+import { useSearchParams } from "react-router-dom";
 import { MarketChart } from "./market-chart";
 import {
   PREFIX,
@@ -50,22 +51,56 @@ function Facts({ entries }: { entries: [string, string][] }) {
 
 export default function MarketPage() {
   const cache = useQueryClient();
-  const [source, setSource] = useState<Stream["source"]>("fixture");
-  const [symbol, setSymbol] = useState<Stream["symbol"]>("BTCUSDT");
-  const [timeframe, setTimeframe] = useState<Stream["timeframe"]>("1h");
-  const [method, setMethod] = useState<Method>("levels");
-  const [windowSize, setWindowSize] = useState(20);
+  const [search, setSearch] = useSearchParams();
+  const updateQuery = (name: string, value: string | null) => {
+    const next = new URLSearchParams(window.location.search);
+    if (value === null) next.delete(name);
+    else next.set(name, value);
+    if (["source", "symbol", "timeframe"].includes(name))
+      next.delete("snapshot");
+    if (
+      next.toString() !== new URLSearchParams(window.location.search).toString()
+    )
+      setSearch(next, { replace: true });
+  };
+  const source: Stream["source"] =
+    search.get("source") === "binance" ? "binance" : "fixture";
+  const symbol: Stream["symbol"] =
+    search.get("symbol") === "ETHUSDT" ? "ETHUSDT" : "BTCUSDT";
+  const timeframe: Stream["timeframe"] =
+    timeframes.find((tf) => tf === search.get("timeframe")) ?? "1h";
+  const method: Method =
+    methods.find((item) => item.id === search.get("method"))?.id ?? "levels";
+  const setSource = (value: Stream["source"]) => updateQuery("source", value);
+  const setSymbol = (value: Stream["symbol"]) => updateQuery("symbol", value);
+  const setTimeframe = (value: Stream["timeframe"]) =>
+    updateQuery("timeframe", value);
+  const setMethod = (value: Method) => updateQuery("method", value);
+  const initialWindow = Number(search.get("window") ?? 20);
+  const [windowSize, setWindowSize] = useState(
+    Number.isInteger(initialWindow) &&
+      initialWindow >= 2 &&
+      initialWindow <= 200
+      ? initialWindow
+      : 20,
+  );
   const [visibleBars, setVisibleBars] = useState(100);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedId = /^[a-f0-9]{64}$/.test(search.get("snapshot") ?? "")
+    ? search.get("snapshot")
+    : null;
+  const setSelectedId = (value: string | null) =>
+    updateQuery("snapshot", value);
   const [pending, setPending] = useState<{
     id: string;
     kind: "refresh" | "analyze";
   } | null>(null);
   const [marketCutoff, setMarketCutoff] = useState("");
+  const [cutoffEdited, setCutoffEdited] = useState(false);
   const [knowledgeMode, setKnowledgeMode] = useState("pinned");
   const [actionError, setActionError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const selection = useRef(0);
+  const previousScope = useRef(`${source}:${symbol}:${timeframe}`);
   const stream = useMemo<Stream>(
     () => ({
       source,
@@ -130,8 +165,12 @@ export default function MarketPage() {
     onError: (error: Error) => setActionError(error.message),
   });
   const candidate = selectedId ? saved.data : workspace.data?.snapshot;
-  const analysis = candidate?.stream.source === source && candidate.stream.symbol === symbol
-    && candidate.stream.timeframe === timeframe ? candidate : undefined;
+  const analysis =
+    candidate?.stream.source === source &&
+    candidate.stream.symbol === symbol &&
+    candidate.stream.timeframe === timeframe
+      ? candidate
+      : undefined;
   const offline = status.isError || workspace.isError;
   const busy = !!pending || schedule.isPending || submitting;
   const latestJob = task.data ?? workspace.data?.latest_job;
@@ -142,17 +181,22 @@ export default function MarketPage() {
       : (workspace.data?.current_state ?? "unavailable");
 
   useEffect(() => {
+    const scope = `${source}:${symbol}:${timeframe}`;
+    if (previousScope.current === scope) return;
+    previousScope.current = scope;
     selection.current += 1;
     setSelectedId(null);
     setPending(null);
     setActionError("");
+    setMarketCutoff("");
+    setCutoffEdited(false);
   }, [source, symbol, timeframe]);
   useEffect(() => {
-    if (analysis?.closed_bar_time)
+    if (!cutoffEdited && analysis?.closed_bar_time)
       setMarketCutoff(
         new Date(analysis.closed_bar_time).toISOString().slice(0, 19),
       );
-  }, [analysis?.snapshot_id, analysis?.closed_bar_time]);
+  }, [analysis?.snapshot_id, analysis?.closed_bar_time, cutoffEdited]);
   useEffect(() => {
     if (!pending || !task.data || activeStates.has(task.data.state)) return;
     if (task.data.state === "succeeded") {
@@ -176,7 +220,20 @@ export default function MarketPage() {
     const request: JobRequest = { kind, stream, rules };
     if (kind === "analyze") {
       if (!analysis || !marketCutoff) return;
-      const cutoff = new Date(marketCutoff + "Z").toISOString();
+      const entered = marketCutoff.replace(/Z$/, "");
+      const normalized = entered.length === 16 ? entered + ":00" : entered;
+      const parsedCutoff = new Date(normalized + "Z");
+      if (
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(normalized) ||
+        !Number.isFinite(parsedCutoff.getTime()) ||
+        parsedCutoff.toISOString().slice(0, 19) !== normalized
+      ) {
+        setActionError(
+          "Enter a valid UTC cutoff, for example 2026-09-25T12:00:00.",
+        );
+        return;
+      }
+      const cutoff = parsedCutoff.toISOString();
       request.market_at = cutoff;
       request.knowledge_at =
         knowledgeMode === "pinned" ? analysis.knowledge_at : cutoff;
@@ -258,7 +315,10 @@ export default function MarketPage() {
                 min="2"
                 max="200"
                 value={windowSize}
-                onChange={(e) => setWindowSize(Number(e.target.value))}
+                onChange={(e) => {
+                  setWindowSize(Number(e.target.value));
+                  updateQuery("window", e.target.value);
+                }}
               />
             </label>
             <button
@@ -299,12 +359,14 @@ export default function MarketPage() {
           </div>
           {(offline ||
             actionError ||
-            workspace.data?.latest_job?.error_code) && (
+            saved.isError ||
+            workspace.data?.refresh_job?.error_code) && (
             <div className="wh-alert" role="alert">
               {offline
                 ? "Analysis service unavailable. Any displayed chart is a saved result, not a live update."
                 : actionError ||
-                  `Last refresh: ${workspace.data?.latest_job?.error_code}. Saved results are preserved; no fallback source is used.`}
+                  (saved.isError ? saved.error.message : "") ||
+                  `Last refresh: ${workspace.data?.refresh_job?.error_code}. Saved results are preserved; no fallback source is used.`}
             </div>
           )}
           {latestJob && (
@@ -314,9 +376,11 @@ export default function MarketPage() {
                 {latestJob.attempts}/3
               </span>
               <span>
-                {latestJob.checkpoint_batch_id
-                  ? "Data checkpoint saved"
-                  : "Awaiting data checkpoint"}
+                {latestJob.request.kind === "analyze"
+                  ? "Using stored revisions"
+                  : latestJob.checkpoint_batch_id
+                    ? "Data checkpoint saved"
+                    : "Awaiting data checkpoint"}
               </span>
               {latestJob.state === "retry_wait" && (
                 <span>Retry {stamp(latestJob.next_attempt_at)}</span>
@@ -515,7 +579,11 @@ export default function MarketPage() {
               <select
                 aria-label="Saved analysis"
                 value={selectedId ?? ""}
-                onChange={(e) => setSelectedId(e.target.value || null)}
+                onChange={(e) => {
+                  setSelectedId(e.target.value || null);
+                  setMarketCutoff("");
+                  setCutoffEdited(false);
+                }}
               >
                 <option value="">Latest captured analysis</option>
                 {history.data?.map((item) => (
@@ -532,11 +600,13 @@ export default function MarketPage() {
                   <label>
                     Market cutoff (UTC)
                     <input
-                      type="datetime-local"
-                      step="1"
+                      type="text"
+                      placeholder="YYYY-MM-DDTHH:mm:ss"
                       value={marketCutoff}
-                      max={new Date().toISOString().slice(0, 19)}
-                      onChange={(e) => setMarketCutoff(e.target.value)}
+                      onChange={(e) => {
+                        setMarketCutoff(e.target.value);
+                        setCutoffEdited(true);
+                      }}
                     />
                   </label>
                   <label>

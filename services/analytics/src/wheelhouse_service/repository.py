@@ -109,8 +109,14 @@ class Repository:
                     "ORDER BY revision DESC LIMIT 1",
                     (batch.stream.key, timestamp(value.open_time)),
                 ).fetchone()
-                if old and timestamp(batch.fetched_at) < old["fetched_at"]:
-                    raise ValueError("Out-of-order acquisition would rewrite knowledge history")
+                last_observation = db.execute(
+                    "SELECT MAX(batches.fetched_at) FROM observations "
+                    "JOIN batches USING(batch_id) JOIN bar_revisions USING(revision_id) "
+                    "WHERE bar_revisions.stream_key=? AND bar_revisions.open_time=?",
+                    (batch.stream.key, timestamp(value.open_time)),
+                ).fetchone()[0]
+                if last_observation and timestamp(batch.fetched_at) < last_observation:
+                    raise ValueError("Out-of-order acquisition precedes the latest observation")
                 if old and old["content_hash"] == content_hash:
                     revision_id = old["revision_id"]
                 else:
@@ -120,7 +126,7 @@ class Repository:
                         and not value.is_closed
                     ):
                         raise ValueError("A closed bar cannot revert to forming")
-                    if old and timestamp(batch.fetched_at) == old["fetched_at"]:
+                    if old and timestamp(batch.fetched_at) == last_observation:
                         raise ValueError("Conflicting revision at the same acquisition time")
                     revision_id = uuid4().hex
                     revision = old["revision"] + 1 if old else 1
@@ -297,12 +303,13 @@ class Repository:
             raise KeyError("Job not found")
         return self._job(row)
 
-    def latest_job(self, stream: Stream) -> "Job | None":
+    def latest_job(self, stream: Stream, *, refresh_only: bool = False) -> "Job | None":
         with self.connection() as db:
             row = db.execute(
-                "SELECT * FROM jobs WHERE stream_key=? ORDER BY created_at DESC, "
-                "rowid DESC LIMIT 1",
-                (stream.key,),
+                "SELECT * FROM jobs WHERE stream_key=? "
+                "AND (?=0 OR json_extract(request, '$.kind')='refresh') "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                (stream.key, int(refresh_only)),
             ).fetchone()
         return self._job(row) if row else None
 
@@ -310,9 +317,10 @@ class Repository:
         with self.connection() as db:
             row = db.execute(
                 """SELECT snapshots.payload FROM jobs JOIN snapshots USING(snapshot_id)
+                JOIN batches ON jobs.checkpoint_batch_id=batches.batch_id
                 WHERE jobs.stream_key=? AND jobs.state='succeeded'
                 AND json_extract(jobs.request, '$.kind')='refresh'
-                ORDER BY jobs.updated_at DESC, jobs.rowid DESC LIMIT 1""",
+                ORDER BY batches.fetched_at DESC, jobs.updated_at DESC, jobs.rowid DESC LIMIT 1""",
                 (stream.key,),
             ).fetchone()
         return Analysis.model_validate_json(row[0]) if row else None
@@ -392,8 +400,18 @@ class Repository:
             )
 
     def complete(self, claim: "Claim", result: "Analysis", *, now: datetime) -> None:
+        if result.stream != claim.job.request.stream or result.rules != claim.job.request.rules:
+            raise ValueError("Result must match the claimed stream and rules")
         with self.connection(write=True) as db:
             self._owns(db, claim, now)
+            if claim.job.request.kind == "refresh":
+                captured = db.execute(
+                    "SELECT batches.fetched_at FROM jobs JOIN batches "
+                    "ON jobs.checkpoint_batch_id=batches.batch_id WHERE jobs.job_id=?",
+                    (claim.job.job_id,),
+                ).fetchone()
+                if captured is None or captured[0] != timestamp(result.knowledge_at):
+                    raise ValueError("Refresh result must use its persisted acquisition checkpoint")
             db.execute(
                 "INSERT OR IGNORE INTO snapshots VALUES (?, ?, ?, ?, ?)",
                 (

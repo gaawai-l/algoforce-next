@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from typing import Literal
 
 from .market import DURATIONS, Analysis, Dataset, Point, Rules, digest, timestamp
@@ -22,7 +22,8 @@ def data_state(
 
 
 def decimal_text(value: Decimal) -> str:
-    return format(value.normalize(), "f")
+    text = format(value, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 def calculate(dataset: Dataset, rules: Rules) -> Analysis:
@@ -49,11 +50,15 @@ def calculate(dataset: Dataset, rules: Rules) -> Analysis:
             else None
         )
         segment.append((Decimal(bar.close), Decimal(bar.high), Decimal(bar.low)))
-        average = (
-            sum((row[0] for row in segment[-rules.window :]), Decimal(0)) / rules.window
-            if len(segment) >= rules.window
-            else None
-        )
+        with localcontext() as context:
+            context.prec = 60
+            average = (
+                (
+                    sum((row[0] for row in segment[-rules.window :]), Decimal(0)) / rules.window
+                ).quantize(Decimal("1e-18"), rounding=ROUND_HALF_EVEN)
+                if len(segment) >= rules.window
+                else None
+            )
         points.append(
             Point(
                 at=bar.close_time,

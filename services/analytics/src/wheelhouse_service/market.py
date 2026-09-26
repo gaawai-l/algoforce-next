@@ -86,7 +86,10 @@ class Bar(Model):
             raise ValueError("Number must be finite and between zero and 1e18")
         if number.as_tuple().exponent < -18:  # type: ignore[operator]
             raise ValueError("At most 18 decimal places are supported")
-        return format(number.normalize(), "f")
+        if number.is_zero():
+            return "0"
+        text = format(number, "f")
+        return text.rstrip("0").rstrip(".") if "." in text else text
 
     @field_validator("open_time", "close_time")
     @classmethod
@@ -239,6 +242,7 @@ class Workspace(Model):
     current_state: Literal["fresh", "delayed", "stale", "unavailable", "simulated"]
     snapshot: Analysis | None
     latest_job: Job | None
+    refresh_job: Job | None
     schedule: Schedule | None
 
 

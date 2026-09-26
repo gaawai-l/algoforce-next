@@ -102,6 +102,59 @@ def test_database_upgrades_from_first_migration_and_preserves_data(tmp_path):
             (STREAM.key, START.isoformat(), batch().model_dump_json()),
         )
     upgraded = Repository(path)
-    assert upgraded.stats().schema_version == 2
+    assert upgraded.stats().schema_version == 3
     assert upgraded.batch("legacy").bars[0].close == "100"
     assert Repository(path).stats().batches == 1
+
+
+def test_full_decimal_precision_and_last_digit_corrections_are_preserved(tmp_path):
+    repo = Repository(tmp_path / "precise.sqlite")
+    original = Bar(
+        open_time=START,
+        close_time=START + timedelta(hours=1),
+        open="123456789012345678.123456789012345678",
+        high="123456789012345679",
+        low="123456789012345677",
+        close="123456789012345678.123456789012345678",
+        is_closed=True,
+    )
+    assert original.close == "123456789012345678.123456789012345678"
+    repo.ingest(
+        Batch(stream=STREAM, fetched_at=START + timedelta(hours=2), bars=[original], raw_payload={})
+    )
+    changed = Bar.model_validate(
+        {**original.model_dump(), "close": "123456789012345678.123456789012345679"}
+    )
+    repo.ingest(
+        Batch(stream=STREAM, fetched_at=START + timedelta(hours=3), bars=[changed], raw_payload={})
+    )
+    assert repo.stats().revisions == 2
+
+
+def test_out_of_order_correction_cannot_override_a_later_identical_observation(tmp_path):
+    import pytest
+
+    repo = Repository(tmp_path / "history.sqlite")
+    repo.ingest(batch((100,), START + timedelta(hours=2)))
+    repo.ingest(batch((100,), START + timedelta(hours=4)))
+    with pytest.raises(ValueError, match="observation"):
+        repo.ingest(batch((200,), START + timedelta(hours=3)))
+    view = repo.read(
+        STREAM, market_at=START + timedelta(hours=4), knowledge_at=START + timedelta(hours=4)
+    )
+    assert view.bars[0].bar.close == "100"
+    assert repo.stats().batches == 2
+
+
+def test_same_timestamp_conflict_after_repeated_observation_is_rejected(tmp_path):
+    import pytest
+
+    repo = Repository(tmp_path / "same-time.sqlite")
+    at = START + timedelta(hours=4)
+    repo.ingest(batch((100,), START + timedelta(hours=2)))
+    repeated = batch((100,), at)
+    repo.ingest(repeated)
+    assert repo.ingest(repeated)
+    with pytest.raises(ValueError, match="same acquisition"):
+        repo.ingest(batch((200,), at))
+    assert repo.stats().revisions == 1

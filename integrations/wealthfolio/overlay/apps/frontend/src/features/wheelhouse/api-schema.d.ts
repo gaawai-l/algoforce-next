@@ -663,6 +663,7 @@ export interface components {
             current_state: "fresh" | "delayed" | "stale" | "unavailable" | "simulated";
             snapshot: components["schemas"]["Analysis"] | null;
             latest_job: components["schemas"]["Job"] | null;
+            refresh_job: components["schemas"]["Job"] | null;
             schedule: components["schemas"]["Schedule"] | null;
         };
     };

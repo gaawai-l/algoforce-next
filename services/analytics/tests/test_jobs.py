@@ -88,3 +88,50 @@ def test_expired_owner_cannot_complete_or_overwrite_new_owner(tmp_path):
     with pytest.raises(LeaseLost):
         repo.fail(first, now=at + timedelta(seconds=2), code="old_owner", retryable=False)
     assert repo.job(first.job.job_id).state == "running"
+
+
+def test_older_checkpoint_finishing_last_cannot_replace_newer_current_data(tmp_path):
+    from wheelhouse_service.calculation import calculate
+    from wheelhouse_service.market import Rules
+
+    repo = Repository(tmp_path / "ordered.sqlite")
+    at = START + timedelta(hours=4)
+    old_job = repo.enqueue(JobRequest(stream=STREAM), "old", now=at)
+    old = repo.claim(now=at, lease_seconds=100)
+    old_batch = repo.ingest(batch((100,), at))
+    repo.checkpoint(old, old_batch, now=at)
+    newer = at + timedelta(seconds=10)
+    new_job = repo.enqueue(JobRequest(stream=STREAM), "new", now=newer)
+    new = repo.claim(now=newer, lease_seconds=100)
+    new_batch = repo.ingest(batch((110,), newer))
+    repo.checkpoint(new, new_batch, now=newer)
+    new_result = calculate(repo.read(STREAM, market_at=newer, knowledge_at=newer), Rules())
+    repo.complete(new, new_result, now=newer)
+    old_result = calculate(repo.read(STREAM, market_at=at, knowledge_at=at), Rules())
+    repo.complete(old, old_result, now=newer + timedelta(seconds=1))
+    assert repo.job(old_job.job_id).state == repo.job(new_job.job_id).state == "succeeded"
+    assert repo.live_snapshot(STREAM).bars[-1].bar.close == "110"
+
+
+def test_historical_query_does_not_hide_the_latest_provider_failure(tmp_path):
+    from wheelhouse_service.sources import FetchError
+
+    repo = Repository(tmp_path / "provider-state.sqlite")
+    at = START + timedelta(hours=4)
+
+    def outage(stream, now):
+        raise FetchError("provider_unavailable", retryable=False)
+
+    failed = repo.enqueue(JobRequest(stream=STREAM), "refresh-failed", now=at)
+    worker = Runtime(repo, fetch=outage)
+    worker.run_once(now=at)
+    replay = repo.enqueue(
+        JobRequest(kind="analyze", stream=STREAM, market_at=at, knowledge_at=at),
+        "historical",
+        now=at + timedelta(seconds=1),
+    )
+    worker.run_once(now=at + timedelta(seconds=1))
+    assert repo.latest_job(STREAM).job_id == replay.job_id
+    provider = repo.latest_job(STREAM, refresh_only=True)
+    assert provider.job_id == failed.job_id
+    assert provider.error_code == "provider_unavailable"

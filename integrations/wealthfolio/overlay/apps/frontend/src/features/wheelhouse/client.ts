@@ -109,6 +109,7 @@ const workspaceSchema: z.ZodType<Workspace> = z.object({
   current_state: state,
   snapshot: analysisSchema.nullable(),
   latest_job: jobSchema.nullable(),
+  refresh_job: jobSchema.nullable(),
   schedule: scheduleSchema.nullable(),
 });
 const summarySchema: z.ZodType<SnapshotSummary> = z.object({

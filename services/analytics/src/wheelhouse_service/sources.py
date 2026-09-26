@@ -64,7 +64,9 @@ class BinanceSource:
         self.client = client
 
     @staticmethod
-    def normalize(stream: Stream, rows: list[Any], fetched_at: datetime) -> Batch:
+    def normalize(
+        stream: Stream, rows: list[Any], fetched_at: datetime, *, closed_before: datetime
+    ) -> Batch:
         bars = []
         for row in rows:
             opened = datetime.fromtimestamp(int(row[0]) / 1000, UTC)
@@ -78,18 +80,23 @@ class BinanceSource:
                     low=str(row[3]),
                     close=str(row[4]),
                     volume=None if row[5] is None else str(row[5]),
-                    is_closed=closed <= fetched_at,
+                    is_closed=closed <= closed_before,
                 )
             )
         return Batch(
             stream=stream,
             fetched_at=fetched_at,
             bars=bars,
-            raw_payload={"endpoint": "/api/v3/klines", "rows": rows},
+            raw_payload={
+                "endpoint": "/api/v3/klines",
+                "rows": rows,
+                "closed_before": closed_before.isoformat(),
+            },
         )
 
     def fetch(self, stream: Stream, now: datetime) -> Batch:
         try:
+            requested_at = datetime.now(UTC)
             if self.client:
                 response = self.client.get(
                     "https://data-api.binance.vision/api/v3/klines",
@@ -110,7 +117,9 @@ class BinanceSource:
             if not isinstance(rows, list):
                 raise ValueError("Invalid OHLCV envelope")
             # Acquisition time follows response receipt, not request dispatch.
-            return self.normalize(stream, rows, datetime.now(UTC))
+            return self.normalize(
+                stream, rows, datetime.now(UTC), closed_before=requested_at - timedelta(seconds=2)
+            )
         except httpx.HTTPError as exc:
             raise FetchError("provider_unavailable") from exc
         except (ValueError, ValidationError, IndexError, KeyError, TypeError) as exc:
