@@ -36,6 +36,7 @@ from .market import (
     Timeframe,
     Workspace,
 )
+from .portfolio.api import create_router as portfolio_router
 from .repository import Repository
 from .runtime import Runtime
 from .settings import Settings
@@ -128,7 +129,11 @@ def create_app(database: Path | None = None, *, start_worker: bool = True) -> Fa
             status_code=exc.status_code,
             content=ErrorBody(
                 code=f"http_{exc.status_code}",
-                message="Endpoint or HTTP method unavailable",
+                message=(
+                    str(exc.detail)
+                    if request.url.path.startswith("/api/wheelhouse/v1/portfolio/")
+                    else "Endpoint or HTTP method unavailable"
+                ),
                 request_id=request.state.request_id,
             ).model_dump(),
             headers=exc.headers,
@@ -261,4 +266,9 @@ def create_app(database: Path | None = None, *, start_worker: bool = True) -> Fa
     def storage() -> StorageStats:
         return repo().stats()
 
+    app.include_router(
+        portfolio_router(
+            (database.parent if database else Settings.from_env().data_dir) / "portfolio.sqlite"
+        )
+    )
     return app

@@ -11,3 +11,7 @@ contract:
 .PHONY: verify-a5
 verify-a5:
 	.venv-foundation/bin/python scripts/verify_a5.py
+
+.PHONY: setup-broker
+setup-broker:
+	python3 scripts/foundation.py setup-broker

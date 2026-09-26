@@ -6,7 +6,7 @@ This repository currently contains research, interface prototypes, synthetic dat
 
 ## Wealthfolio + Python foundation
 
-The active architecture uses the official Wealthfolio **v3.8.0** host with a small source extension and an independent Python service. The A0–A5 local architecture now includes versioned OHLCV storage, public spot/fixture adapters, durable jobs, schedules, snapshots and a shared live/replay calculation pipeline. Brokerage access and full strategy engines remain separate work.
+The active architecture uses the official Wealthfolio **v3.8.0** host with a small source extension and an independent Python service. The A0–A5 local architecture now includes versioned OHLCV storage, public spot/fixture adapters, durable jobs, schedules, snapshots and a shared live/replay calculation pipeline. The read-only moomoo adapter, explicit Wheel FIFO ledger and portfolio risk pages are now available; real account access still requires official OpenD login and reconciliation. Full market strategy engines remain separate work.
 
 Prerequisites: Git, Python 3.12+, Node.js 24, npm, and a running Docker engine with Compose.
 
@@ -64,3 +64,7 @@ Prototype portfolio figures, candles, TD states, and S/R clusters are simulated.
 Fonts are served locally, with their SIL Open Font License notices under [`prototypes/wheel-dashboard/fonts/`](prototypes/wheel-dashboard/fonts/). Third-party fonts and reference material retain their respective licenses and ownership; the repository MIT license does not relicense them.
 
 Local browser logs, credentials, runtime databases, and private data directories are excluded by [`.gitignore`](.gitignore). No actual account statements or holdings are included in this initial project snapshot.
+
+## Brokerage, Wheel and risk
+
+Open <http://127.0.0.1:1420/brokerage> to inspect OpenD readiness, explicitly choose a Singapore REAL account, or load the isolated fictional demo. Wheel cycles and Risk exposure use the same Wealthfolio sidebar. Install the isolated official SDK with `make setup-broker`. See [connection and accounting guide](docs/features/portfolio/README.md) and [implementation plan](docs/features/portfolio/PLAN.md). No order execution or trading unlock is provided.

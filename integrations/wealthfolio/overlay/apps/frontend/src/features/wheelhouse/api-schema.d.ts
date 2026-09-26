@@ -174,6 +174,193 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/portfolio/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Connection */
+        get: operations["connection_api_wheelhouse_v1_portfolio_connection_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Accounts */
+        get: operations["accounts_api_wheelhouse_v1_portfolio_accounts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discover */
+        post: operations["discover_api_wheelhouse_v1_portfolio_discover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync */
+        post: operations["sync_api_wheelhouse_v1_portfolio_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/demo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Demo */
+        post: operations["demo_api_wheelhouse_v1_portfolio_demo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workspace */
+        get: operations["workspace_api_wheelhouse_v1_portfolio_workspace_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/cycles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cycle */
+        post: operations["cycle_api_wheelhouse_v1_portfolio_cycles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Event */
+        post: operations["event_api_wheelhouse_v1_portfolio_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Annotation */
+        post: operations["annotation_api_wheelhouse_v1_portfolio_annotations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/fee-corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fee Correction */
+        post: operations["fee_correction_api_wheelhouse_v1_portfolio_fee_corrections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/reconcile-fill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile */
+        post: operations["reconcile_api_wheelhouse_v1_portfolio_reconcile_fill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -666,6 +853,477 @@ export interface components {
             refresh_job: components["schemas"]["Job"] | null;
             schedule: components["schemas"]["Schedule"] | null;
         };
+        /** SyncRequest */
+        SyncRequest: {
+            /** Account Id */
+            account_id: string;
+            /**
+             * Start
+             * Format: date
+             */
+            start: string;
+            /**
+             * End
+             * Format: date
+             */
+            end: string;
+        };
+        /** PortfolioCapture */
+        PortfolioCapture: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "demo" | "moomoo";
+            /** Account Id */
+            account_id: string;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /**
+             * Base Currency
+             * @default USD
+             */
+            base_currency: string;
+            /** Positions */
+            positions: components["schemas"]["Position"][];
+            /** Instruments */
+            instruments: components["schemas"]["Instrument-Output"][];
+            /** Quotes */
+            quotes: components["schemas"]["Quote-Output"][];
+            /** Fx */
+            fx: components["schemas"]["FxRate"][];
+            /** Raw */
+            raw: {
+                [key: string]: unknown;
+            };
+            /** Errors */
+            errors: {
+                [key: string]: string;
+            };
+            /** History Start */
+            history_start: string | null;
+            /** History End */
+            history_end: string | null;
+        };
+        /** Position */
+        Position: {
+            /** Code */
+            code: string;
+            /** Quantity */
+            quantity: string;
+            /** Mark */
+            mark: string | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+        };
+        /** Instrument */
+        "Instrument-Output": {
+            /** Code */
+            code: string;
+            /** Underlying */
+            underlying: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "stock" | "call" | "put";
+            /** Currency */
+            currency: string;
+            /** Multiplier */
+            multiplier: string;
+            /** Strike */
+            strike: string | null;
+            /** Expiry */
+            expiry: string | null;
+            /** Source */
+            source: string;
+        };
+        /** Quote */
+        "Quote-Output": {
+            /** Code */
+            code: string;
+            /** Spot */
+            spot: string;
+            /** Delta */
+            delta: string | null;
+            /** Gamma */
+            gamma: string | null;
+            /** Theta */
+            theta: string | null;
+            /** Vega */
+            vega: string | null;
+            /**
+             * Units
+             * @enum {string}
+             */
+            units: "per_share" | "per_contract";
+            /**
+             * Theta Basis
+             * @enum {string}
+             */
+            theta_basis: "day" | "year";
+            /**
+             * Vega Basis
+             * @enum {string}
+             */
+            vega_basis: "percentage_point" | "unit_volatility";
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Source */
+            source: string;
+        };
+        /** FxRate */
+        FxRate: {
+            /** Currency */
+            currency: string;
+            /** To Base */
+            to_base: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Source */
+            source: string;
+        };
+        /** PortfolioWorkspace */
+        PortfolioWorkspace: {
+            capture: components["schemas"]["PortfolioCapture"] | null;
+            /** Cycles */
+            cycles: components["schemas"]["CycleResult"][];
+            risk: components["schemas"]["RiskResult"] | null;
+            /** Records */
+            records: {
+                [key: string]: unknown;
+            }[];
+            /** Audit */
+            audit: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "stale" | "unavailable" | "simulated";
+            /** Issues */
+            issues: string[];
+        };
+        /** CycleResult */
+        CycleResult: {
+            cycle: components["schemas"]["Cycle"];
+            /**
+             * Method
+             * @default FIFO; option premiums realized separately; assignment shares at strike
+             */
+            method: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "empty" | "open" | "closed" | "incomplete";
+            /** Premium Received */
+            premium_received: string | null;
+            /** Premium Paid */
+            premium_paid: string | null;
+            /** Gross Cash Movement */
+            gross_cash_movement: string | null;
+            /** Known Fees */
+            known_fees: string;
+            /** Net Cash Movement */
+            net_cash_movement: string | null;
+            /** Realized Gross */
+            realized_gross: string | null;
+            /** Realized Net */
+            realized_net: string | null;
+            /** Unrealized */
+            unrealized: string | null;
+            /** Lots */
+            lots: components["schemas"]["Lot"][];
+            /** Events */
+            events: components["schemas"]["LedgerEvent-Output"][];
+            /** Issues */
+            issues: string[];
+        };
+        /** Cycle */
+        Cycle: {
+            /** Cycle Id */
+            cycle_id: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "demo" | "moomoo";
+            /** Account Id */
+            account_id: string;
+            /** Underlying */
+            underlying: string;
+            /** Currency */
+            currency: string;
+            /** Name */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** Lot */
+        Lot: {
+            /** Code */
+            code: string;
+            /** Quantity */
+            quantity: string;
+            /** Entry Price */
+            entry_price: string;
+            /** Opening Event Id */
+            opening_event_id: string;
+        };
+        /** LedgerEvent */
+        "LedgerEvent-Output": {
+            /** Event Id */
+            event_id: string;
+            /** Cycle Id */
+            cycle_id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "buy_open" | "sell_open" | "buy_close" | "sell_close" | "expire" | "assign" | "exercise" | "cash_settle";
+            instrument: components["schemas"]["Instrument-Output"];
+            /** Quantity */
+            quantity: string;
+            /** Price */
+            price: string;
+            /** Fee */
+            fee: string | null;
+            /** Source Record Id */
+            source_record_id: string | null;
+            /** Settlement Record Id */
+            settlement_record_id: string | null;
+            /** Roll Group */
+            roll_group: string | null;
+            /** Evidence Issues */
+            evidence_issues: string[];
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+        };
+        /** RiskResult */
+        RiskResult: {
+            /** Base Currency */
+            base_currency: string;
+            /**
+             * Evaluated At
+             * Format: date-time
+             */
+            evaluated_at: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "complete" | "partial" | "unavailable";
+            /** Exposures */
+            exposures: components["schemas"]["Exposure"][];
+            /** Dollar Delta */
+            dollar_delta: string | null;
+            /** Theta Daily */
+            theta_daily: string | null;
+            /** Vega Point */
+            vega_point: string | null;
+            /** Issues */
+            issues: string[];
+        };
+        /** Exposure */
+        Exposure: {
+            /** Underlying */
+            underlying: string;
+            /** Currency */
+            currency: string;
+            /** Share Delta */
+            share_delta: string | null;
+            /** Share Gamma */
+            share_gamma: string | null;
+            /** Theta Daily */
+            theta_daily: string | null;
+            /** Vega Point */
+            vega_point: string | null;
+            /** Dollar Delta Base */
+            dollar_delta_base: string | null;
+            /** Issues */
+            issues: string[];
+        };
+        /** NewCycle */
+        NewCycle: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "demo" | "moomoo";
+            /** Account Id */
+            account_id: string;
+            /** Underlying */
+            underlying: string;
+            /** Currency */
+            currency: string;
+            /** Name */
+            name: string;
+        };
+        /** LedgerEvent */
+        "LedgerEvent-Input": {
+            /** Event Id */
+            event_id: string;
+            /** Cycle Id */
+            cycle_id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "buy_open" | "sell_open" | "buy_close" | "sell_close" | "expire" | "assign" | "exercise" | "cash_settle";
+            instrument: components["schemas"]["Instrument-Input"];
+            /** Quantity */
+            quantity: string;
+            /** Price */
+            price: string;
+            /** Fee */
+            fee?: string | null;
+            /** Source Record Id */
+            source_record_id?: string | null;
+            /** Settlement Record Id */
+            settlement_record_id?: string | null;
+            /** Roll Group */
+            roll_group?: string | null;
+            /** Evidence Issues */
+            evidence_issues?: string[];
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+        };
+        /** Instrument */
+        "Instrument-Input": {
+            /** Code */
+            code: string;
+            /** Underlying */
+            underlying: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "stock" | "call" | "put";
+            /** Currency */
+            currency: string;
+            /** Multiplier */
+            multiplier: string;
+            /** Strike */
+            strike?: string | null;
+            /** Expiry */
+            expiry?: string | null;
+            /** Source */
+            source: string;
+        };
+        /** Annotation */
+        Annotation: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "demo" | "moomoo";
+            /** Account Id */
+            account_id: string;
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+            instrument?: components["schemas"]["Instrument-Input"] | null;
+            quote?: components["schemas"]["Quote-Input"] | null;
+            fx?: components["schemas"]["FxRate"] | null;
+        };
+        /** Quote */
+        "Quote-Input": {
+            /** Code */
+            code: string;
+            /** Spot */
+            spot: string;
+            /** Delta */
+            delta?: string | null;
+            /** Gamma */
+            gamma?: string | null;
+            /** Theta */
+            theta?: string | null;
+            /** Vega */
+            vega?: string | null;
+            /**
+             * Units
+             * @enum {string}
+             */
+            units: "per_share" | "per_contract";
+            /**
+             * Theta Basis
+             * @enum {string}
+             */
+            theta_basis: "day" | "year";
+            /**
+             * Vega Basis
+             * @enum {string}
+             */
+            vega_basis: "percentage_point" | "unit_volatility";
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Source */
+            source: string;
+        };
+        /** FeeCorrection */
+        FeeCorrection: {
+            /** Event Id */
+            event_id: string;
+            /** Fee */
+            fee: string;
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+        };
+        /** FillReconciliation */
+        FillReconciliation: {
+            /** Event Id */
+            event_id: string;
+            /** Record Id */
+            record_id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Fee */
+            fee?: string | null;
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -970,6 +1628,330 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StorageStats"];
+                };
+            };
+        };
+    };
+    connection_api_wheelhouse_v1_portfolio_connection_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    accounts_api_wheelhouse_v1_portfolio_accounts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    discover_api_wheelhouse_v1_portfolio_discover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    sync_api_wheelhouse_v1_portfolio_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioCapture"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    demo_api_wheelhouse_v1_portfolio_demo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+    };
+    workspace_api_wheelhouse_v1_portfolio_workspace_get: {
+        parameters: {
+            query: {
+                source: "demo" | "moomoo";
+                account_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioWorkspace"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cycle_api_wheelhouse_v1_portfolio_cycles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewCycle"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Cycle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    event_api_wheelhouse_v1_portfolio_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LedgerEvent-Input"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CycleResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    annotation_api_wheelhouse_v1_portfolio_annotations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Annotation"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fee_correction_api_wheelhouse_v1_portfolio_fee_corrections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeeCorrection"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcile_api_wheelhouse_v1_portfolio_reconcile_fill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FillReconciliation"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

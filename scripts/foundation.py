@@ -108,6 +108,14 @@ def setup() -> None:
     print("Setup complete. Run make dev. Local data and secrets are ignored by Git.")
 
 
+def setup_broker() -> None:
+    interpreter = ROOT / ".venv-moomoo/bin/python"
+    if not interpreter.exists():
+        run([sys.executable, "-m", "venv", str(interpreter.parent.parent)])
+    run([str(interpreter), "-m", "pip", "install", "-r", "scripts/broker/requirements.lock"])
+    print("Official SDK ready. Start official moomoo OpenD and sign in locally; no trading unlock.")
+
+
 def check_port(port: int) -> None:
     with socket.socket() as sock:
         if sock.connect_ex(("127.0.0.1", port)) == 0:
@@ -219,13 +227,16 @@ def doctor() -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=["setup", "sync", "dev", "check", "build", "doctor", "stop"]
+        "command",
+        choices=["setup", "sync", "dev", "check", "build", "doctor", "stop", "setup-broker"],
     )
     command = parser.parse_args().command
     if command == "build":
         sync_host()
         run([*PNPM, "build:types"])
         run([*PNPM, "build"])
+    elif command == "setup-broker":
+        setup_broker()
     elif command == "stop":
         run([*COMPOSE, "stop", "wealthfolio"])
     else:

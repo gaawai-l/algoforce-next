@@ -1,0 +1,4 @@
+CREATE TABLE event_reconciliations (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, at TEXT NOT NULL,
+ author TEXT NOT NULL, reason TEXT NOT NULL, payload TEXT NOT NULL
+);
