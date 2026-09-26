@@ -37,7 +37,11 @@ class OpenSecTradeContext:
     def read(self,**kwargs):
         assert kwargs["acc_id"]==17 and kwargs["trd_env"]=="REAL"
         return 0,Table([])
-    position_list_query=accinfo_query=history_order_list_query=history_deal_list_query=get_acc_cash_flow=read
+    position_list_query=accinfo_query=history_order_list_query=history_deal_list_query=read
+    def get_acc_cash_flow(self,**kwargs):
+        assert kwargs==dict(acc_id=17,trd_env="REAL",start="2026-09-01",end="2026-09-20")
+        return 0,Table([dict(cashflow_id="range-flow",create_time="2026-09-02 09:00:00",
+                            clearing_date="2026-09-03",currency="USD",cashflow_amount=100)])
     def close(self): pass
 """)
     env = {**os.environ, "PYTHONPATH": str(tmp_path)}
@@ -62,7 +66,15 @@ class OpenSecTradeContext:
         env=env,
         check=True,
     )
-    assert json.loads(response.stdout)["ok"] is True
+    captured = json.loads(response.stdout)
+    assert captured["ok"] is True
+    assert captured["captures"]["cash_flows"][0]["cashflow_id"] == "range-flow"
+    assert captured["captures"]["_coverage"]["cash_flows"] == {
+        "start": "2026-09-01",
+        "end": "2026-09-20",
+        "basis": "creation_date",
+        "query_succeeded": True,
+    }
     wrong = subprocess.run(
         [sys.executable, str(SCRIPT)],
         input=json.dumps(

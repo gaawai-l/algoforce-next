@@ -110,7 +110,9 @@ class MoomooReader:
         errors["history_coverage"] = (
             "Requested interval only; earliest available history is not verified"
         )
-        errors["cash_flow_coverage"] = "Cash flows queried for end clearing date only"
+        coverage = payload.get("captures", {}).get("_coverage", {}).get("cash_flows", {})
+        if not coverage.get("query_succeeded"):
+            errors["cash_flow_coverage"] = "Cash flow range query failed or coverage is unavailable"
         errors["metadata"] = "Contract multiplier and Greeks units require verified metadata"
         return PortfolioCapture(
             source="moomoo",

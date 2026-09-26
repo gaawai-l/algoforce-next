@@ -356,7 +356,8 @@ export default function PortfolioPage() {
                     <p className="wh-muted wh-wide">
                       Up to 90 days per request. Earlier availability must be
                       checked separately, including disabled accounts. Cash
-                      flows cover the end clearing date only.
+                      flows use the requested creation-date range; clearing
+                      dates are retained separately.
                     </p>
                   </form>
                 )}

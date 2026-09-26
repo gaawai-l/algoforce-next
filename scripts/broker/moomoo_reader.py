@@ -94,8 +94,18 @@ try:
                         errors["fees"] = "query_unavailable"
                 else:
                     errors["fees"] = "not_requested_or_requires_batches"
-                # Query a single clearing date; do not mislabel it as full range coverage.
-                code, flows = ctx.get_acc_cash_flow(**args, clearing_date=request["end"])
+                # The official range parameters filter creation dates, not clearing dates.
+                code, flows = ctx.get_acc_cash_flow(
+                    **args, start=request["start"], end=request["end"]
+                )
+                captures["_coverage"] = {
+                    "cash_flows": {
+                        "start": request["start"],
+                        "end": request["end"],
+                        "basis": "creation_date",
+                        "query_succeeded": code == m.RET_OK,
+                    }
+                }
                 if code == m.RET_OK:
                     captures["cash_flows"] = json.loads(
                         flows.to_json(orient="records", double_precision=15)
@@ -106,7 +116,6 @@ try:
                     "ok": True,
                     "captures": captures,
                     "errors": errors,
-                    "cash_flow_date": request["end"],
                     "sdk_version": "10.11.7108",
                 }
         finally:
