@@ -1,5 +1,7 @@
 # Market intelligence — throwaway UI prototype
 
+Implementation logic for the next dashboard is defined in [MARKET-STRATEGY-SPEC.md](MARKET-STRATEGY-SPEC.md). That specification separates the reproduced AlphaBTC/TradingSignal behavior from Wheelhouse-defined scoring and breakout rules. This prototype remains a simulated UI reference and does not yet implement that engine.
+
 Question: should market assessment start with a full chart plus inspector (A), parallel method evidence (B), or an evidence-based market brief (C)?
 
 Open `http://127.0.0.1:8765/market-prototype.html?variant=A` using the existing prototype server. Same command as README; no new dependencies or production app.
