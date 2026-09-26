@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Wheelhouse Python foundation",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "paths": {
     "/api/wheelhouse/v1/status": {
@@ -22,10 +22,694 @@
           }
         }
       }
+    },
+    "/api/wheelhouse/v1/jobs": {
+      "post": {
+        "summary": "Submit",
+        "operationId": "submit_api_wheelhouse_v1_jobs_post",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest-Input"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/jobs/{job_id}": {
+      "get": {
+        "summary": "Job",
+        "operationId": "job_api_wheelhouse_v1_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/jobs/{job_id}/events": {
+      "get": {
+        "summary": "Events",
+        "operationId": "events_api_wheelhouse_v1_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobEvent"
+                  },
+                  "title": "Response Events Api Wheelhouse V1 Jobs  Job Id  Events Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/workspace": {
+      "get": {
+        "summary": "Workspace",
+        "operationId": "workspace_api_wheelhouse_v1_workspace_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "fixture",
+                "binance"
+              ],
+              "type": "string",
+              "default": "fixture",
+              "title": "Source"
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BTCUSDT",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "timeframe",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "5m",
+                "15m",
+                "1h",
+                "4h",
+                "1d"
+              ],
+              "type": "string",
+              "default": "1h",
+              "title": "Timeframe"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/snapshots": {
+      "get": {
+        "summary": "Snapshots",
+        "operationId": "snapshots_api_wheelhouse_v1_snapshots_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "fixture",
+                "binance"
+              ],
+              "type": "string",
+              "default": "fixture",
+              "title": "Source"
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BTCUSDT",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "timeframe",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "5m",
+                "15m",
+                "1h",
+                "4h",
+                "1d"
+              ],
+              "type": "string",
+              "default": "1h",
+              "title": "Timeframe"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SnapshotSummary"
+                  },
+                  "title": "Response Snapshots Api Wheelhouse V1 Snapshots Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/snapshots/{snapshot_id}": {
+      "get": {
+        "summary": "Snapshot",
+        "operationId": "snapshot_api_wheelhouse_v1_snapshots__snapshot_id__get",
+        "parameters": [
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Snapshot Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Analysis"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/batches/{batch_id}": {
+      "get": {
+        "summary": "Batch",
+        "operationId": "batch_api_wheelhouse_v1_batches__batch_id__get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Batch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/schedule": {
+      "post": {
+        "summary": "Schedule",
+        "operationId": "schedule_api_wheelhouse_v1_schedule_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleRequest-Input"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/storage": {
+      "get": {
+        "summary": "Storage",
+        "operationId": "storage_api_wheelhouse_v1_storage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageStats"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "Analysis": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "input_hash": {
+            "type": "string",
+            "title": "Input Hash"
+          },
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Output"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/Rules-Output"
+          },
+          "market_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Market At"
+          },
+          "knowledge_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Knowledge At"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "closed_bar_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Bar Time"
+          },
+          "forming_bar_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forming Bar Time"
+          },
+          "expected_next_close": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Next Close"
+          },
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale",
+              "unavailable",
+              "simulated"
+            ],
+            "title": "Data State"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "as_known",
+              "retrospective"
+            ],
+            "title": "Mode"
+          },
+          "warmup_required": {
+            "type": "integer",
+            "title": "Warmup Required"
+          },
+          "warmup_complete": {
+            "type": "boolean",
+            "title": "Warmup Complete"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "bars": {
+            "items": {
+              "$ref": "#/components/schemas/StoredBar"
+            },
+            "type": "array",
+            "title": "Bars"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "signal_status": {
+            "type": "string",
+            "const": "not_implemented",
+            "title": "Signal Status",
+            "default": "not_implemented"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "input_hash",
+          "stream",
+          "rules",
+          "market_at",
+          "knowledge_at",
+          "fetched_at",
+          "closed_bar_time",
+          "forming_bar_time",
+          "expected_next_close",
+          "data_state",
+          "mode",
+          "warmup_required",
+          "warmup_complete",
+          "issues",
+          "bars",
+          "points",
+          "signal_status"
+        ],
+        "title": "Analysis"
+      },
+      "Bar": {
+        "properties": {
+          "open_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Open Time"
+          },
+          "close_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Close Time"
+          },
+          "open": {
+            "type": "string",
+            "title": "Open"
+          },
+          "high": {
+            "type": "string",
+            "title": "High"
+          },
+          "low": {
+            "type": "string",
+            "title": "Low"
+          },
+          "close": {
+            "type": "string",
+            "title": "Close"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          },
+          "is_closed": {
+            "type": "boolean",
+            "title": "Is Closed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "open_time",
+          "close_time",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume",
+          "is_closed"
+        ],
+        "title": "Bar"
+      },
+      "Batch": {
+        "properties": {
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Output"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "bars": {
+            "items": {
+              "$ref": "#/components/schemas/Bar"
+            },
+            "type": "array",
+            "maxItems": 10000,
+            "minItems": 1,
+            "title": "Bars"
+          },
+          "raw_payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Raw Payload"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "fetched_at",
+          "bars",
+          "raw_payload"
+        ],
+        "title": "Batch"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
       "Integrations": {
         "properties": {
           "broker": {
@@ -35,12 +719,15 @@
           },
           "market_data": {
             "type": "string",
-            "const": "not_connected",
+            "enum": [
+              "not_connected",
+              "available"
+            ],
             "title": "Market Data"
           },
           "analytics": {
             "type": "string",
-            "const": "not_implemented",
+            "const": "baseline_ready",
             "title": "Analytics"
           }
         },
@@ -52,6 +739,402 @@
           "analytics"
         ],
         "title": "Integrations"
+      },
+      "Job": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "request": {
+            "$ref": "#/components/schemas/JobRequest-Output"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "retry_wait",
+              "succeeded",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "next_attempt_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next Attempt At"
+          },
+          "lease_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Until"
+          },
+          "checkpoint_batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Batch Id"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "request",
+          "state",
+          "attempts",
+          "created_at",
+          "updated_at",
+          "next_attempt_at",
+          "lease_until",
+          "checkpoint_batch_id",
+          "snapshot_id",
+          "error_code"
+        ],
+        "title": "Job"
+      },
+      "JobEvent": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "at",
+          "state",
+          "reason"
+        ],
+        "title": "JobEvent"
+      },
+      "JobRequest-Input": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "refresh",
+              "analyze"
+            ],
+            "title": "Kind",
+            "default": "refresh"
+          },
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Input"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/Rules-Input"
+          },
+          "market_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market At"
+          },
+          "knowledge_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream"
+        ],
+        "title": "JobRequest"
+      },
+      "JobRequest-Output": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "refresh",
+              "analyze"
+            ],
+            "title": "Kind",
+            "default": "refresh"
+          },
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Output"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/Rules-Output"
+          },
+          "market_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market At"
+          },
+          "knowledge_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "stream",
+          "rules",
+          "market_at",
+          "knowledge_at"
+        ],
+        "title": "JobRequest"
+      },
+      "Point": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "revision_id": {
+            "type": "string",
+            "title": "Revision Id"
+          },
+          "sma": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sma"
+          },
+          "prior_high": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prior High"
+          },
+          "prior_low": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prior Low"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "at",
+          "revision_id",
+          "sma",
+          "prior_high",
+          "prior_low"
+        ],
+        "title": "Point"
+      },
+      "Rules-Input": {
+        "properties": {
+          "engine_version": {
+            "type": "string",
+            "const": "baseline-v1",
+            "title": "Engine Version",
+            "default": "baseline-v1"
+          },
+          "window": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 2.0,
+            "title": "Window",
+            "default": 20
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Rules"
+      },
+      "Rules-Output": {
+        "properties": {
+          "engine_version": {
+            "type": "string",
+            "const": "baseline-v1",
+            "title": "Engine Version",
+            "default": "baseline-v1"
+          },
+          "window": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 2.0,
+            "title": "Window",
+            "default": 20
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "engine_version",
+          "window"
+        ],
+        "title": "Rules"
+      },
+      "Schedule": {
+        "properties": {
+          "schedule_id": {
+            "type": "string",
+            "title": "Schedule Id"
+          },
+          "request": {
+            "$ref": "#/components/schemas/ScheduleRequest-Output"
+          },
+          "next_due": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next Due"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schedule_id",
+          "request",
+          "next_due"
+        ],
+        "title": "Schedule"
+      },
+      "ScheduleRequest-Input": {
+        "properties": {
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Input"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/Rules-Input"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "enabled"
+        ],
+        "title": "ScheduleRequest"
+      },
+      "ScheduleRequest-Output": {
+        "properties": {
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Output"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/Rules-Output"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "rules",
+          "enabled"
+        ],
+        "title": "ScheduleRequest"
       },
       "ServiceStatus": {
         "properties": {
@@ -93,8 +1176,7 @@
           },
           "capabilities": {
             "items": {
-              "type": "string",
-              "const": "service_status"
+              "type": "string"
             },
             "type": "array",
             "title": "Capabilities"
@@ -114,6 +1196,381 @@
           "capabilities"
         ],
         "title": "ServiceStatus"
+      },
+      "SnapshotSummary": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "market_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Market At"
+          },
+          "knowledge_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Knowledge At"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/Rules-Output"
+          },
+          "data_state": {
+            "type": "string",
+            "title": "Data State"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "bar_count": {
+            "type": "integer",
+            "title": "Bar Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "created_at",
+          "market_at",
+          "knowledge_at",
+          "rules",
+          "data_state",
+          "mode",
+          "bar_count"
+        ],
+        "title": "SnapshotSummary"
+      },
+      "StorageStats": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "batches": {
+            "type": "integer",
+            "title": "Batches"
+          },
+          "revisions": {
+            "type": "integer",
+            "title": "Revisions"
+          },
+          "snapshots": {
+            "type": "integer",
+            "title": "Snapshots"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schema_version",
+          "batches",
+          "revisions",
+          "snapshots"
+        ],
+        "title": "StorageStats"
+      },
+      "StoredBar": {
+        "properties": {
+          "revision_id": {
+            "type": "string",
+            "title": "Revision Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "bar": {
+            "$ref": "#/components/schemas/Bar"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision_id",
+          "revision",
+          "fetched_at",
+          "bar"
+        ],
+        "title": "StoredBar"
+      },
+      "Stream-Input": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "binance"
+            ],
+            "title": "Source"
+          },
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "BTCUSDT",
+              "ETHUSDT"
+            ],
+            "title": "Symbol"
+          },
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe"
+          },
+          "venue": {
+            "type": "string",
+            "const": "binance-spot",
+            "title": "Venue",
+            "default": "binance-spot"
+          },
+          "market_session": {
+            "type": "string",
+            "const": "24/7",
+            "title": "Market Session",
+            "default": "24/7"
+          },
+          "timezone": {
+            "type": "string",
+            "const": "UTC",
+            "title": "Timezone",
+            "default": "UTC"
+          },
+          "quote_currency": {
+            "type": "string",
+            "const": "USDT",
+            "title": "Quote Currency",
+            "default": "USDT"
+          },
+          "base_currency": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH"
+            ],
+            "title": "Base Currency",
+            "default": "BTC"
+          },
+          "price_encoding": {
+            "type": "string",
+            "const": "decimal_string_18_places",
+            "title": "Price Encoding",
+            "default": "decimal_string_18_places"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "symbol",
+          "timeframe"
+        ],
+        "title": "Stream"
+      },
+      "Stream-Output": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "binance"
+            ],
+            "title": "Source"
+          },
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "BTCUSDT",
+              "ETHUSDT"
+            ],
+            "title": "Symbol"
+          },
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe"
+          },
+          "venue": {
+            "type": "string",
+            "const": "binance-spot",
+            "title": "Venue",
+            "default": "binance-spot"
+          },
+          "market_session": {
+            "type": "string",
+            "const": "24/7",
+            "title": "Market Session",
+            "default": "24/7"
+          },
+          "timezone": {
+            "type": "string",
+            "const": "UTC",
+            "title": "Timezone",
+            "default": "UTC"
+          },
+          "quote_currency": {
+            "type": "string",
+            "const": "USDT",
+            "title": "Quote Currency",
+            "default": "USDT"
+          },
+          "base_currency": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH"
+            ],
+            "title": "Base Currency",
+            "default": "BTC"
+          },
+          "price_encoding": {
+            "type": "string",
+            "const": "decimal_string_18_places",
+            "title": "Price Encoding",
+            "default": "decimal_string_18_places"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "symbol",
+          "timeframe",
+          "venue",
+          "market_session",
+          "timezone",
+          "quote_currency",
+          "base_currency",
+          "price_encoding"
+        ],
+        "title": "Stream"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Workspace": {
+        "properties": {
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Output"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "current_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale",
+              "unavailable",
+              "simulated"
+            ],
+            "title": "Current State"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Analysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest_job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Job"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "checked_at",
+          "current_state",
+          "snapshot",
+          "latest_job",
+          "schedule"
+        ],
+        "title": "Workspace"
       }
     }
   }

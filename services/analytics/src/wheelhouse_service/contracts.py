@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict
 class Integrations(BaseModel):
     model_config = ConfigDict(extra="forbid")
     broker: Literal["not_connected"]
-    market_data: Literal["not_connected"]
-    analytics: Literal["not_implemented"]
+    market_data: Literal["not_connected", "available"]
+    analytics: Literal["baseline_ready"]
 
 
 class ServiceStatus(BaseModel):
@@ -23,7 +23,7 @@ class ServiceStatus(BaseModel):
     checked_at: datetime
     read_only: Literal[True]
     integrations: Integrations
-    capabilities: list[Literal["service_status"]]
+    capabilities: list[str]
 
 
 class ErrorBody(BaseModel):

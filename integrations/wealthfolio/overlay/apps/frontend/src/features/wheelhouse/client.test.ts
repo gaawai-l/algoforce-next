@@ -12,7 +12,7 @@ const validResponse = {
   integrations: {
     broker: "not_connected",
     market_data: "not_connected",
-    analytics: "not_implemented",
+    analytics: "baseline_ready",
   },
   capabilities: ["service_status"],
 };

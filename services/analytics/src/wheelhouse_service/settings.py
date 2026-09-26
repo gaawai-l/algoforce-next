@@ -2,12 +2,14 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
 class Settings:
     port: int = 8787
     log_level: str = "info"
+    data_dir: Path = Path(__file__).resolve().parents[4] / ".local" / "analytics"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -17,4 +19,8 @@ class Settings:
         level = os.environ.get("WHEELHOUSE_LOG_LEVEL", "info").lower()
         if level not in {"debug", "info", "warning", "error"}:
             raise ValueError("Unsupported WHEELHOUSE_LOG_LEVEL")
-        return cls(port=port, log_level=level)
+        return cls(
+            port=port,
+            log_level=level,
+            data_dir=Path(os.environ.get("WHEELHOUSE_DATA_DIR", str(cls.data_dir))),
+        )

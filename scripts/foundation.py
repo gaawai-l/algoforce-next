@@ -147,9 +147,23 @@ def dev() -> None:
             )
         )
         print("Workspace: http://127.0.0.1:1420/market-intelligence", flush=True)
-        while all(child.poll() is None for child in children):
+        restarts: list[float] = []
+        while children[1].poll() is None:
+            if children[0].poll() is not None:
+                now = time.monotonic()
+                restarts = [at for at in restarts if now - at < 60]
+                if len(restarts) >= 3:
+                    raise SystemExit("Python repeatedly failed; inspect its output above")
+                restarts.append(now)
+                print("Python exited; restarting with persisted task recovery", flush=True)
+                children[0] = subprocess.Popen(
+                    [str(PYTHON), "-m", "wheelhouse_service"],
+                    cwd=ROOT,
+                    env=env,
+                    start_new_session=True,
+                )
             time.sleep(0.5)
-        raise SystemExit("A workspace process exited; inspect its output above")
+        raise SystemExit("The Wealthfolio frontend exited; inspect its output above")
     except KeyboardInterrupt:
         print("Stopping workspace processes; all data is preserved.", flush=True)
     finally:

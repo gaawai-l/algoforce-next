@@ -21,6 +21,8 @@ jobs:
         run: make check
       - name: Build modified Wealthfolio web host
         run: make build
+      - name: Verify running data and task chain
+        run: .venv-foundation/bin/python scripts/ci_a5.py
       - name: Verify generated contract is current
         run: |
           make contract

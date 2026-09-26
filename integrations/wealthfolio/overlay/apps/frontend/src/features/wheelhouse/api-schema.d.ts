@@ -21,10 +21,261 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit */
+        post: operations["submit_api_wheelhouse_v1_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job */
+        get: operations["job_api_wheelhouse_v1_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/jobs/{job_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Events */
+        get: operations["events_api_wheelhouse_v1_jobs__job_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workspace */
+        get: operations["workspace_api_wheelhouse_v1_workspace_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Snapshots */
+        get: operations["snapshots_api_wheelhouse_v1_snapshots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/snapshots/{snapshot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Snapshot */
+        get: operations["snapshot_api_wheelhouse_v1_snapshots__snapshot_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/batches/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Batch */
+        get: operations["batch_api_wheelhouse_v1_batches__batch_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Schedule */
+        post: operations["schedule_api_wheelhouse_v1_schedule_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Storage */
+        get: operations["storage_api_wheelhouse_v1_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Analysis */
+        Analysis: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Input Hash */
+            input_hash: string;
+            stream: components["schemas"]["Stream-Output"];
+            rules: components["schemas"]["Rules-Output"];
+            /**
+             * Market At
+             * Format: date-time
+             */
+            market_at: string;
+            /**
+             * Knowledge At
+             * Format: date-time
+             */
+            knowledge_at: string;
+            /** Fetched At */
+            fetched_at: string | null;
+            /** Closed Bar Time */
+            closed_bar_time: string | null;
+            /** Forming Bar Time */
+            forming_bar_time: string | null;
+            /** Expected Next Close */
+            expected_next_close: string | null;
+            /**
+             * Data State
+             * @enum {string}
+             */
+            data_state: "fresh" | "delayed" | "stale" | "unavailable" | "simulated";
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "as_known" | "retrospective";
+            /** Warmup Required */
+            warmup_required: number;
+            /** Warmup Complete */
+            warmup_complete: boolean;
+            /** Issues */
+            issues: string[];
+            /** Bars */
+            bars: components["schemas"]["StoredBar"][];
+            /** Points */
+            points: components["schemas"]["Point"][];
+            /**
+             * Signal Status
+             * @default not_implemented
+             * @constant
+             */
+            signal_status: "not_implemented";
+        };
+        /** Bar */
+        Bar: {
+            /**
+             * Open Time
+             * Format: date-time
+             */
+            open_time: string;
+            /**
+             * Close Time
+             * Format: date-time
+             */
+            close_time: string;
+            /** Open */
+            open: string;
+            /** High */
+            high: string;
+            /** Low */
+            low: string;
+            /** Close */
+            close: string;
+            /** Volume */
+            volume: string | null;
+            /** Is Closed */
+            is_closed: boolean;
+        };
+        /** Batch */
+        Batch: {
+            stream: components["schemas"]["Stream-Output"];
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Bars */
+            bars: components["schemas"]["Bar"][];
+            /** Raw Payload */
+            raw_payload: {
+                [key: string]: unknown;
+            };
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
         /** Integrations */
         Integrations: {
             /**
@@ -34,14 +285,161 @@ export interface components {
             broker: "not_connected";
             /**
              * Market Data
-             * @constant
+             * @enum {string}
              */
-            market_data: "not_connected";
+            market_data: "not_connected" | "available";
             /**
              * Analytics
              * @constant
              */
-            analytics: "not_implemented";
+            analytics: "baseline_ready";
+        };
+        /** Job */
+        Job: {
+            /** Job Id */
+            job_id: string;
+            request: components["schemas"]["JobRequest-Output"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "retry_wait" | "succeeded" | "failed";
+            /** Attempts */
+            attempts: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Next Attempt At
+             * Format: date-time
+             */
+            next_attempt_at: string;
+            /** Lease Until */
+            lease_until: string | null;
+            /** Checkpoint Batch Id */
+            checkpoint_batch_id: string | null;
+            /** Snapshot Id */
+            snapshot_id: string | null;
+            /** Error Code */
+            error_code: string | null;
+        };
+        /** JobEvent */
+        JobEvent: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** State */
+            state: string;
+            /** Reason */
+            reason: string;
+        };
+        /** JobRequest */
+        "JobRequest-Input": {
+            /**
+             * Kind
+             * @default refresh
+             * @enum {string}
+             */
+            kind: "refresh" | "analyze";
+            stream: components["schemas"]["Stream-Input"];
+            rules?: components["schemas"]["Rules-Input"];
+            /** Market At */
+            market_at?: string | null;
+            /** Knowledge At */
+            knowledge_at?: string | null;
+        };
+        /** JobRequest */
+        "JobRequest-Output": {
+            /**
+             * Kind
+             * @default refresh
+             * @enum {string}
+             */
+            kind: "refresh" | "analyze";
+            stream: components["schemas"]["Stream-Output"];
+            rules: components["schemas"]["Rules-Output"];
+            /** Market At */
+            market_at: string | null;
+            /** Knowledge At */
+            knowledge_at: string | null;
+        };
+        /** Point */
+        Point: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Revision Id */
+            revision_id: string;
+            /** Sma */
+            sma: string | null;
+            /** Prior High */
+            prior_high: string | null;
+            /** Prior Low */
+            prior_low: string | null;
+        };
+        /** Rules */
+        "Rules-Input": {
+            /**
+             * Engine Version
+             * @default baseline-v1
+             * @constant
+             */
+            engine_version: "baseline-v1";
+            /**
+             * Window
+             * @default 20
+             */
+            window: number;
+        };
+        /** Rules */
+        "Rules-Output": {
+            /**
+             * Engine Version
+             * @default baseline-v1
+             * @constant
+             */
+            engine_version: "baseline-v1";
+            /**
+             * Window
+             * @default 20
+             */
+            window: number;
+        };
+        /** Schedule */
+        Schedule: {
+            /** Schedule Id */
+            schedule_id: string;
+            request: components["schemas"]["ScheduleRequest-Output"];
+            /**
+             * Next Due
+             * Format: date-time
+             */
+            next_due: string;
+        };
+        /** ScheduleRequest */
+        "ScheduleRequest-Input": {
+            stream: components["schemas"]["Stream-Input"];
+            rules?: components["schemas"]["Rules-Input"];
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** ScheduleRequest */
+        "ScheduleRequest-Output": {
+            stream: components["schemas"]["Stream-Output"];
+            rules: components["schemas"]["Rules-Output"];
+            /** Enabled */
+            enabled: boolean;
         };
         /** ServiceStatus */
         ServiceStatus: {
@@ -76,7 +474,196 @@ export interface components {
             read_only: true;
             integrations: components["schemas"]["Integrations"];
             /** Capabilities */
-            capabilities: "service_status"[];
+            capabilities: string[];
+        };
+        /** SnapshotSummary */
+        SnapshotSummary: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Market At
+             * Format: date-time
+             */
+            market_at: string;
+            /**
+             * Knowledge At
+             * Format: date-time
+             */
+            knowledge_at: string;
+            rules: components["schemas"]["Rules-Output"];
+            /** Data State */
+            data_state: string;
+            /** Mode */
+            mode: string;
+            /** Bar Count */
+            bar_count: number;
+        };
+        /** StorageStats */
+        StorageStats: {
+            /** Schema Version */
+            schema_version: number;
+            /** Batches */
+            batches: number;
+            /** Revisions */
+            revisions: number;
+            /** Snapshots */
+            snapshots: number;
+        };
+        /** StoredBar */
+        StoredBar: {
+            /** Revision Id */
+            revision_id: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            bar: components["schemas"]["Bar"];
+        };
+        /** Stream */
+        "Stream-Input": {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "fixture" | "binance";
+            /**
+             * Symbol
+             * @enum {string}
+             */
+            symbol: "BTCUSDT" | "ETHUSDT";
+            /**
+             * Timeframe
+             * @enum {string}
+             */
+            timeframe: "5m" | "15m" | "1h" | "4h" | "1d";
+            /**
+             * Venue
+             * @default binance-spot
+             * @constant
+             */
+            venue: "binance-spot";
+            /**
+             * Market Session
+             * @default 24/7
+             * @constant
+             */
+            market_session: "24/7";
+            /**
+             * Timezone
+             * @default UTC
+             * @constant
+             */
+            timezone: "UTC";
+            /**
+             * Quote Currency
+             * @default USDT
+             * @constant
+             */
+            quote_currency: "USDT";
+            /**
+             * Base Currency
+             * @default BTC
+             * @enum {string}
+             */
+            base_currency: "BTC" | "ETH";
+            /**
+             * Price Encoding
+             * @default decimal_string_18_places
+             * @constant
+             */
+            price_encoding: "decimal_string_18_places";
+        };
+        /** Stream */
+        "Stream-Output": {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "fixture" | "binance";
+            /**
+             * Symbol
+             * @enum {string}
+             */
+            symbol: "BTCUSDT" | "ETHUSDT";
+            /**
+             * Timeframe
+             * @enum {string}
+             */
+            timeframe: "5m" | "15m" | "1h" | "4h" | "1d";
+            /**
+             * Venue
+             * @default binance-spot
+             * @constant
+             */
+            venue: "binance-spot";
+            /**
+             * Market Session
+             * @default 24/7
+             * @constant
+             */
+            market_session: "24/7";
+            /**
+             * Timezone
+             * @default UTC
+             * @constant
+             */
+            timezone: "UTC";
+            /**
+             * Quote Currency
+             * @default USDT
+             * @constant
+             */
+            quote_currency: "USDT";
+            /**
+             * Base Currency
+             * @default BTC
+             * @enum {string}
+             */
+            base_currency: "BTC" | "ETH";
+            /**
+             * Price Encoding
+             * @default decimal_string_18_places
+             * @constant
+             */
+            price_encoding: "decimal_string_18_places";
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
+        /** Workspace */
+        Workspace: {
+            stream: components["schemas"]["Stream-Output"];
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /**
+             * Current State
+             * @enum {string}
+             */
+            current_state: "fresh" | "delayed" | "stale" | "unavailable" | "simulated";
+            snapshot: components["schemas"]["Analysis"] | null;
+            latest_job: components["schemas"]["Job"] | null;
+            schedule: components["schemas"]["Schedule"] | null;
         };
     };
     responses: never;
@@ -103,6 +690,285 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServiceStatus"];
+                };
+            };
+        };
+    };
+    submit_api_wheelhouse_v1_jobs_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "idempotency-key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobRequest-Input"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_api_wheelhouse_v1_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    events_api_wheelhouse_v1_jobs__job_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobEvent"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workspace_api_wheelhouse_v1_workspace_get: {
+        parameters: {
+            query?: {
+                source?: "fixture" | "binance";
+                symbol?: string;
+                timeframe?: "5m" | "15m" | "1h" | "4h" | "1d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snapshots_api_wheelhouse_v1_snapshots_get: {
+        parameters: {
+            query?: {
+                source?: "fixture" | "binance";
+                symbol?: string;
+                timeframe?: "5m" | "15m" | "1h" | "4h" | "1d";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snapshot_api_wheelhouse_v1_snapshots__snapshot_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Analysis"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_api_wheelhouse_v1_batches__batch_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Batch"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    schedule_api_wheelhouse_v1_schedule_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleRequest-Input"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storage_api_wheelhouse_v1_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageStats"];
                 };
             };
         };

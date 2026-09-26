@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wheelhouse-service"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local Python analysis foundation for the Wealthfolio host"
 requires-python = ">=3.12"
-dependencies = ["fastapi==0.141.1", "uvicorn==0.54.0"]
+dependencies = ["fastapi==0.141.1", "uvicorn==0.54.0", "httpx==0.28.1"]
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1", "httpx==0.28.1", "mypy==1.20.2", "ruff==0.16.9"]
@@ -32,3 +32,6 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.setuptools.package-data]
+wheelhouse_service = ["migrations/*.sql"]
