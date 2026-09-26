@@ -1,0 +1,27 @@
+name: Wealthfolio Python foundation
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned host and Python environment
+        run: make setup
+      - name: Check foundation and host extension
+        run: make check
+      - name: Build modified Wealthfolio web host
+        run: make build
+      - name: Verify generated contract is current
+        run: |
+          make contract
+          git diff --exit-code -- integrations/wealthfolio/openapi.json integrations/wealthfolio/overlay/apps/frontend/src/features/wheelhouse/api-schema.d.ts

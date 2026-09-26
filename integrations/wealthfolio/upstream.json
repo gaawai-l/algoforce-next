@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/wealthfolio/wealthfolio.git",
+  "tag": "v3.8.0",
+  "commit": "8f6f9898d30e84d7215e01d3d06cd65e02c9ab1b",
+  "image": "wealthfolio/wealthfolio:3.8.0@sha256:3c6f117828949204029c2b4a391f039e62987b4e091139e11b04e6764b5f6866",
+  "package_manager": "pnpm@10.33.4",
+  "verified_at": "2026-09-26"
+}

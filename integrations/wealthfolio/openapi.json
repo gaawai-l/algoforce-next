@@ -1,0 +1,120 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Wheelhouse Python foundation",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/wheelhouse/v1/status": {
+      "get": {
+        "summary": "Status",
+        "operationId": "status_api_wheelhouse_v1_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Integrations": {
+        "properties": {
+          "broker": {
+            "type": "string",
+            "const": "not_connected",
+            "title": "Broker"
+          },
+          "market_data": {
+            "type": "string",
+            "const": "not_connected",
+            "title": "Market Data"
+          },
+          "analytics": {
+            "type": "string",
+            "const": "not_implemented",
+            "title": "Analytics"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "broker",
+          "market_data",
+          "analytics"
+        ],
+        "title": "Integrations"
+      },
+      "ServiceStatus": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "const": "wheelhouse-python",
+            "title": "Service"
+          },
+          "status": {
+            "type": "string",
+            "const": "ready",
+            "title": "Status"
+          },
+          "contract_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Contract Version"
+          },
+          "service_version": {
+            "type": "string",
+            "title": "Service Version"
+          },
+          "python_version": {
+            "type": "string",
+            "title": "Python Version"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true,
+            "title": "Read Only"
+          },
+          "integrations": {
+            "$ref": "#/components/schemas/Integrations"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string",
+              "const": "service_status"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "service",
+          "status",
+          "contract_version",
+          "service_version",
+          "python_version",
+          "checked_at",
+          "read_only",
+          "integrations",
+          "capabilities"
+        ],
+        "title": "ServiceStatus"
+      }
+    }
+  }
+}

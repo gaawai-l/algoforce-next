@@ -22,3 +22,14 @@ node_modules/
 /data/
 /private/
 /broker-data/
+
+# Pinned upstream checkout, private local runtime and generated output
+.local/
+.venv-*/
+**/dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+*.tsbuildinfo

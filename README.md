@@ -2,7 +2,29 @@
 
 A personal, read-only investment workspace for stocks, options, Wheel strategy tracking, portfolio Greeks, and market analysis. The current prototype brand is **Wheelhouse**.
 
-This repository currently contains research, interface prototypes, synthetic data embedded in those prototypes, and design/reference screenshots. No live brokerage connection, production backend, or trade execution is implemented. Wealthfolio is the preferred reuse candidate; the integration architecture remains open.
+This repository currently contains research, interface prototypes, synthetic data embedded in those prototypes, and design/reference screenshots. No live brokerage connection or trade execution is implemented. The active engineering foundation now extends the Wealthfolio host and starts an independent local Python service.
+
+## Wealthfolio + Python foundation
+
+The active architecture uses the official Wealthfolio **v3.8.0** host with a small source extension and an independent Python service. This is a local development foundation; market data, brokerage access and strategy engines are not enabled in it.
+
+Prerequisites: Git, Python 3.12+, Node.js 24, npm, and a running Docker engine with Compose.
+
+```sh
+make setup   # Pinned source, dependencies, extension and private local configuration
+make dev     # Wealthfolio server + Python service + modified Wealthfolio frontend
+make doctor  # Verify host, Python and the same-origin connection
+make check   # Python checks, host typechecking and extension contract tests
+make build   # Build the modified Wealthfolio web frontend
+```
+
+Open <http://127.0.0.1:1420/market-intelligence>. Complete Wealthfolio's local onboarding on first launch; no brokerage credentials are needed. Ctrl+C stops this workspace's processes and container while preserving data. `make stop` stops only its Wealthfolio container.
+
+The source pin, minimal patches and new host files are tracked in [`integrations/wealthfolio`](integrations/wealthfolio/README.md); the upstream checkout, runtime data and generated encryption key live under ignored `.local/`. Edit overlay files and run `make sync`. Architecture and milestones: [Wealthfolio + Python](docs/architecture/wealthfolio-python.md).
+
+Wealthfolio's AGPL-3.0 license applies to the modified host; the repository MIT license does not relicense upstream code. Native Tauri packaging and authenticated remote deployment are not implemented.
+
+The earlier root `backend/` and `frontend/` directories are experimental companion-app work, preserved for reference. They are not used by `make dev`.
 
 ## Preview locally
 
