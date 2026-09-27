@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wheelhouse-service"
+version = "0.2.0"
+description = "Local Python analysis foundation for the Wealthfolio host"
+requires-python = ">=3.12"
+dependencies = ["fastapi==0.141.1", "uvicorn==0.54.0", "httpx==0.28.1"]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "httpx==0.28.1", "mypy==1.20.2", "ruff==0.16.9"]
+
+[project.scripts]
+wheelhouse-service = "wheelhouse_service.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+strict = true
+files = ["src/wheelhouse_service"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.setuptools.package-data]
+wheelhouse_service = ["migrations/*.sql", "portfolio/migrations/*.sql"]

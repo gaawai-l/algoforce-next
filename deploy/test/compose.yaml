@@ -1,0 +1,54 @@
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/test/Dockerfile
+      target: web
+    environment:
+      TEST_AUTH_USER: ${TEST_AUTH_USER:?Set a test login username}
+      TEST_AUTH_HASH: ${TEST_AUTH_HASH:?Set a test password hash}
+    expose:
+      - "80"
+    depends_on:
+      - analytics
+      - wealthfolio
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  analytics:
+    build:
+      context: ../..
+      dockerfile: deploy/test/Dockerfile
+      target: analytics
+    environment:
+      WHEELHOUSE_DATA_DIR: /data
+      WHEELHOUSE_DEPLOYMENT: test
+    volumes:
+      - analytics-test:/data
+    expose:
+      - "8787"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/wheelhouse/v1/status', timeout=5)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+  wealthfolio:
+    image: wealthfolio/wealthfolio:3.8.0@sha256:3c6f117828949204029c2b4a391f039e62987b4e091139e11b04e6764b5f6866
+    environment:
+      WF_SECRET_KEY: ${WF_SECRET_KEY:?Set independent test encryption key}
+      WF_LISTEN_ADDR: 0.0.0.0:8088
+      WF_DB_PATH: /data/wealthfolio.db
+      WF_AUTH_REQUIRED: "false"
+      WF_MCP_ENABLED: "false"
+    volumes:
+      - wealthfolio-test:/data
+    expose:
+      - "8088"
+    restart: unless-stopped
+volumes:
+  analytics-test:
+  wealthfolio-test:

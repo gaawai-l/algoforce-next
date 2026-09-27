@@ -1,0 +1,131 @@
+.wh-portfolio .wh-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: end;
+  margin: 22px 0;
+}
+.wh-portfolio .wh-form button {
+  justify-self: start;
+}
+.wh-wide {
+  grid-column: 1/-1;
+}
+.wh-broker-connect {
+  padding: 26px 0;
+  border-bottom: 1px solid var(--wh-edge);
+  margin-bottom: 26px;
+}
+.wh-portfolio .wh-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-block: 1px solid var(--wh-edge);
+  margin: 24px 0;
+  gap: 0;
+}
+.wh-metrics > div {
+  padding: 20px 12px;
+  border-bottom: 1px solid var(--wh-edge);
+  min-width: 0;
+}
+.wh-metrics span {
+  font-size: 10px;
+  color: var(--wh-muted);
+  display: block;
+  margin-bottom: 9px;
+}
+.wh-metrics strong {
+  font:
+    500 21px/1.7 "JetBrains Mono",
+    monospace;
+  color: var(--wh-cyan);
+  overflow-wrap: anywhere;
+}
+.wh-metrics small {
+  font-size: 9px;
+  color: var(--wh-muted);
+}
+.wh-portfolio .wh-json {
+  font:
+    11px/1.8 "JetBrains Mono",
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 15px;
+  border: 1px solid var(--wh-edge);
+  max-height: 340px;
+  overflow: auto;
+}
+.wh-feedback {
+  color: var(--wh-cyan);
+  padding: 12px 0;
+}
+.wh-warning {
+  color: #efc18d;
+  font-size: 11px;
+}
+.wh-fill {
+  font-size: 10px !important;
+  margin: 5px;
+}
+.wh-portfolio .wh-table-scroll td:last-child {
+  white-space: normal;
+  min-width: 130px;
+}
+.wh-portfolio .wh-disclosure {
+  margin-top: 12px;
+}
+.wh-portfolio input {
+  width: 100%;
+}
+.wh-portfolio h2 {
+  margin-top: 20px;
+}
+.wh-portfolio .wh-form label {
+  font-size: 11px;
+}
+.wh-portfolio .wh-toolbar > label {
+  max-width: 420px;
+}
+@media (max-width: 900px) {
+  .wh-portfolio .wh-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wh-portfolio .wh-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wh-metrics strong {
+    font-size: 18px;
+  }
+}
+@media (max-width: 550px) {
+  .wh-portfolio .wh-form {
+    grid-template-columns: 1fr;
+  }
+  .wh-portfolio .wh-form button {
+    width: 100%;
+  }
+  .wh-portfolio .wh-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+  .wh-metrics > div {
+    padding: 15px 7px;
+  }
+  .wh-metrics strong {
+    font-size: 15px;
+  }
+  .wh-portfolio .wh-section-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .wh-portfolio .wh-toolbar > label {
+    min-width: 100%;
+  }
+  .wh-portfolio .wh-table-scroll {
+    max-height: 350px;
+  }
+  .wh-portfolio .wh-form input,
+  .wh-portfolio .wh-form select {
+    font-size: 13px;
+  }
+}

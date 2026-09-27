@@ -1,0 +1,66 @@
+diff --git a/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx b/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx
+index cbebb89..ea49962 100644
+--- a/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx
++++ b/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx
+@@ -29,2 +29,12 @@ function buildStaticNavigation(t: TFunction): NavigationProps {
+     primary: [
++      {icon: <Icons.Holdings className="size-6" />, title: "Brokerage", href: "/brokerage", keywords: ["moomoo", "read-only"]},
++      {icon: <Icons.Activity className="size-6" />, title: "Wheel cycles", href: "/wheel-cycles", keywords: ["options", "wheel"]},
++      {icon: <Icons.Insight className="size-6" />, title: "Risk exposure", href: "/risk-exposure", keywords: ["greeks", "risk"]},
++      {
++        icon: <Icons.Insight className="size-6" />,
++        title: "Market intelligence",
++        href: "/market-intelligence",
++        keywords: ["wheelhouse", "market", "analysis"],
++        label: "Local Python analysis",
++      },
+       {
+diff --git a/apps/frontend/src/routes.tsx b/apps/frontend/src/routes.tsx
+index 75993bc..a9f95c0 100644
+--- a/apps/frontend/src/routes.tsx
++++ b/apps/frontend/src/routes.tsx
+@@ -1,2 +1,4 @@
+ import { useEffect, useState } from "react";
++import MarketPage from "@/features/wheelhouse/market-page";
++import PortfolioWorkspacePage from "@/features/wheelhouse/portfolio-page";
+ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+@@ -111,2 +113,6 @@ export function AppRoutes() {
+           <Route path="health" element={<HealthPage />} />
++          <Route path="market-intelligence" element={<MarketPage />} />
++          <Route path="brokerage" element={<PortfolioWorkspacePage />} />
++          <Route path="wheel-cycles" element={<PortfolioWorkspacePage />} />
++          <Route path="risk-exposure" element={<PortfolioWorkspacePage />} />
+           <Route path="assistant" element={<AiAssistantPage />} />
+diff --git a/apps/frontend/vite.addon-sandbox.config.ts b/apps/frontend/vite.addon-sandbox.config.ts
+index 45726fd..1c91a29 100644
+--- a/apps/frontend/vite.addon-sandbox.config.ts
++++ b/apps/frontend/vite.addon-sandbox.config.ts
+@@ -36,3 +36,3 @@ export default defineConfig({
+     cssCodeSplit: false,
+-    emptyOutDir: !process.argv.includes("--watch"),
++    emptyOutDir: false,
+     minify: "esbuild",
+diff --git a/apps/frontend/vite.config.ts b/apps/frontend/vite.config.ts
+index bbbc18b..bbe4a39 100644
+--- a/apps/frontend/vite.config.ts
++++ b/apps/frontend/vite.config.ts
+@@ -12,2 +12,6 @@ const serverProxy = enableProxy
+   ? {
++      "/api/wheelhouse": {
++        target: process.env.WHEELHOUSE_API_TARGET || "http://127.0.0.1:8787",
++        changeOrigin: true,
++      },
+       "/api": {
+@@ -65,5 +69,5 @@ export default defineConfig({
+     strictPort: true,
+-    host: host ? "0.0.0.0" : false,
++    host: "127.0.0.1",
+     headers: {
+-      "Access-Control-Allow-Origin": "*",
++      "Access-Control-Allow-Origin": "http://127.0.0.1:1420",
+     },
+@@ -92,3 +96,3 @@ export default defineConfig({
+     // tree into release builds (tauri.conf.json frontendDist).
+-    emptyOutDir: true,
++    emptyOutDir: false,
+     rollupOptions: {
