@@ -22,7 +22,9 @@ FROM python:3.14-slim AS analytics
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 WHEELHOUSE_DATA_DIR=/data WHEELHOUSE_DEPLOYMENT=test
 WORKDIR /app
 COPY services/analytics/ /app/services/analytics/
-RUN pip install --no-cache-dir /app/services/analytics && \
+RUN pip install --no-cache-dir setuptools==80.9.0 wheel==0.45.1 && \
+    pip install --no-cache-dir -r /app/services/analytics/requirements.lock && \
+    pip install --no-cache-dir --no-build-isolation --no-deps /app/services/analytics && \
     groupadd -g 1000 analytics && useradd -u 1000 -g analytics -M analytics && \
     mkdir -p /data && chown analytics:analytics /data
 COPY deploy/test/application.py /app/application.py

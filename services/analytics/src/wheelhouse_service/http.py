@@ -45,7 +45,12 @@ PREFIX = "/api/wheelhouse/v1"
 logger = logging.getLogger("wheelhouse.requests")
 
 
-def create_app(database: Path | None = None, *, start_worker: bool = True) -> FastAPI:
+def create_app(
+    database: Path | None = None,
+    *,
+    start_worker: bool = True,
+    start_broker_worker: bool | None = None,
+) -> FastAPI:
     repository: Repository | None = None
 
     def repo() -> Repository:
@@ -270,7 +275,7 @@ def create_app(database: Path | None = None, *, start_worker: bool = True) -> Fa
     app.include_router(
         portfolio_router(
             (database.parent if database else Settings.from_env().data_dir) / "portfolio.sqlite",
-            start_worker=start_worker,
+            start_worker=start_worker if start_broker_worker is None else start_broker_worker,
         )
     )
     return app
