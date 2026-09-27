@@ -35,5 +35,9 @@ with httpx.Client(timeout=30,follow_redirects=False) as client:
     assert job['state']=='succeeded',job.get('error_code')
     result=client.get(base+'/api/wheelhouse/v1/snapshots/'+job['snapshot_id']).json()
     assert result.get('demark') and result['data_state']=='simulated'
+    context=client.get(base+'/api/wheelhouse/v1/market-context',params={'source':'fixture','symbol':'BTCUSDT'})
+    assert context.status_code==200,context.status_code
+    hour=next(t for t in context.json()['timeframes'] if t['timeframe']=='1h')
+    assert hour['status']=='simulated' and context.json()['intraday']['value']!='unavailable'
     print(json.dumps({'ingress_auth':'passed','cross_origin':'blocked','broker_sync':'blocked',
-                      'demark':'passed','closed_bars':len(result['bars'])}))
+                      'demark':'passed','closed_bars':len(result['bars']),'market_context':'passed'}))

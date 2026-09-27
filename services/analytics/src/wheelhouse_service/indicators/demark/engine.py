@@ -222,6 +222,16 @@ class SequentialSession:
                 if old_range > 0 and old_range <= new_range <= old_range * 2:
                     older.countdown_status = "recycled"
                     self._event(older, "recycled", i, "same_side_setup_range_100_to_200_percent")
+        if self.config.same_side_policy == "retain_active" and any(
+            older is not seq
+            and older.side == seq.side
+            and older.continuity == "observed"
+            and older.countdown_status in ACTIVE
+            for older in self._sequences
+        ):
+            # Keep the completed Setup, but let the existing Countdown finish.
+            seq.countdown_status = "inactive"
+            self._perfect(seq, i)
 
     def _advance(self, i: int) -> None:
         if i - self._segment_start < 4:
@@ -263,6 +273,9 @@ class SequentialSession:
                     ):
                         older.countdown_status = "recycled"
                         self._event(older, "recycled", i, "subsequent_setup_extended_to_22")
+                        if seq.countdown_status == "inactive":
+                            # Begin prospectively at the handover; never backdate a 13.
+                            seq.countdown_status = "active"
         for seq in self._sequences:
             if seq.continuity == "lost" or seq.setup_status != "completed":
                 continue
@@ -343,6 +356,8 @@ class SequentialSession:
 
     def _perfect(self, seq: Sequence, i: int) -> None:
         if seq.perfected_at is not None:
+            return
+        if self.config.perfection_policy == "strict_at_nine" and i != seq.setup[-1]:
             return
         six, seven = (self.bars[seq.setup[k]].bar for k in (5, 6))
         candidates = [self.bars[j].bar for j in (*seq.setup[7:9], i)]

@@ -125,3 +125,24 @@ describe("Sequential chart evidence", () => {
     expect(screen.getByText("buy setup count 1")).toBeTruthy();
   });
 });
+
+it("changes cached time ranges locally and exposes keyboard-adjustable boundaries", () => {
+  render(
+    <MarketChart analysis={baseline} visibleBars={50} showLevels={false} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "All cached" }));
+  expect(screen.getByText("100 / 100 cached bars")).toBeTruthy();
+  fireEvent.change(screen.getByRole("slider", { name: "Range start" }), {
+    target: { value: "20" },
+  });
+  expect(screen.getByText("80 / 100 cached bars")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+  expect(screen.getByText("50 / 100 cached bars")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Last 7d" }));
+  expect(screen.getByText("100 / 100 cached bars")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Requested dates exceed cached history; showing available bars.",
+    ),
+  ).toBeTruthy();
+});

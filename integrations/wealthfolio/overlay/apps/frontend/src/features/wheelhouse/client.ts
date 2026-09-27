@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { demarkConfigSchema, demarkResultSchema } from "./demark-contract";
+import { marketContextSchema } from "./regime-contract";
 import type { components } from "./api-schema";
 
 export type ServiceStatus = components["schemas"]["ServiceStatus"];
@@ -18,7 +19,7 @@ const time = z.string().datetime({ offset: true });
 const decimal = z.string().regex(/^\d+(?:\.\d+)?$/);
 const source = z.enum(["fixture", "binance"]);
 const state = z.enum(["fresh", "delayed", "stale", "unavailable", "simulated"]);
-const streamSchema: z.ZodType<Stream> = z.object({
+const streamSchema: z.ZodType<Stream, z.ZodTypeDef, unknown> = z.object({
   source,
   symbol: z.enum(["BTCUSDT", "ETHUSDT"]),
   timeframe: z.enum(["5m", "15m", "1h", "4h", "1d"]),
@@ -29,7 +30,7 @@ const streamSchema: z.ZodType<Stream> = z.object({
   base_currency: z.enum(["BTC", "ETH"]),
   price_encoding: z.literal("decimal_string_18_places"),
 });
-const rulesSchema: z.ZodType<Rules> = z.object({
+const rulesSchema: z.ZodType<Rules, z.ZodTypeDef, unknown> = z.object({
   engine_version: z.literal("baseline-v1"),
   window: z.number().int().min(2).max(200),
   demark: demarkConfigSchema.nullable(),
@@ -57,28 +58,29 @@ const pointSchema = z.object({
   prior_high: decimal.nullable(),
   prior_low: decimal.nullable(),
 });
-export const analysisSchema: z.ZodType<Analysis> = z.object({
-  snapshot_id: z.string(),
-  input_hash: z.string(),
-  stream: streamSchema,
-  rules: rulesSchema,
-  market_at: time,
-  knowledge_at: time,
-  fetched_at: time.nullable(),
-  closed_bar_time: time.nullable(),
-  forming_bar_time: time.nullable(),
-  expected_next_close: time.nullable(),
-  data_state: state,
-  mode: z.enum(["as_known", "retrospective"]),
-  warmup_required: z.number().int(),
-  warmup_complete: z.boolean(),
-  issues: z.array(z.string()),
-  bars: z.array(storedSchema),
-  points: z.array(pointSchema),
-  signal_status: z.literal("not_implemented"),
-  demark: demarkResultSchema.nullable(),
-});
-const jobSchema: z.ZodType<Job> = z.object({
+export const analysisSchema: z.ZodType<Analysis, z.ZodTypeDef, unknown> =
+  z.object({
+    snapshot_id: z.string(),
+    input_hash: z.string(),
+    stream: streamSchema,
+    rules: rulesSchema,
+    market_at: time,
+    knowledge_at: time,
+    fetched_at: time.nullable(),
+    closed_bar_time: time.nullable(),
+    forming_bar_time: time.nullable(),
+    expected_next_close: time.nullable(),
+    data_state: state,
+    mode: z.enum(["as_known", "retrospective"]),
+    warmup_required: z.number().int(),
+    warmup_complete: z.boolean(),
+    issues: z.array(z.string()),
+    bars: z.array(storedSchema),
+    points: z.array(pointSchema),
+    signal_status: z.literal("not_implemented"),
+    demark: demarkResultSchema.nullable(),
+  });
+const jobSchema: z.ZodType<Job, z.ZodTypeDef, unknown> = z.object({
   job_id: z.string(),
   request: z.object({
     kind: z.enum(["refresh", "analyze"]),
@@ -97,7 +99,7 @@ const jobSchema: z.ZodType<Job> = z.object({
   snapshot_id: z.string().nullable(),
   error_code: z.string().nullable(),
 });
-const scheduleSchema: z.ZodType<Schedule> = z.object({
+const scheduleSchema: z.ZodType<Schedule, z.ZodTypeDef, unknown> = z.object({
   schedule_id: z.string(),
   request: z.object({
     stream: streamSchema,
@@ -106,7 +108,7 @@ const scheduleSchema: z.ZodType<Schedule> = z.object({
   }),
   next_due: time,
 });
-const workspaceSchema: z.ZodType<Workspace> = z.object({
+const workspaceSchema: z.ZodType<Workspace, z.ZodTypeDef, unknown> = z.object({
   stream: streamSchema,
   checked_at: time,
   current_state: state,
@@ -115,17 +117,18 @@ const workspaceSchema: z.ZodType<Workspace> = z.object({
   refresh_job: jobSchema.nullable(),
   schedule: scheduleSchema.nullable(),
 });
-const summarySchema: z.ZodType<SnapshotSummary> = z.object({
-  snapshot_id: z.string(),
-  created_at: time,
-  market_at: time,
-  knowledge_at: time,
-  rules: rulesSchema,
-  data_state: z.string(),
-  mode: z.string(),
-  bar_count: z.number().int(),
-});
-const statusSchema: z.ZodType<ServiceStatus> = z.object({
+const summarySchema: z.ZodType<SnapshotSummary, z.ZodTypeDef, unknown> =
+  z.object({
+    snapshot_id: z.string(),
+    created_at: time,
+    market_at: time,
+    knowledge_at: time,
+    rules: rulesSchema,
+    data_state: z.string(),
+    mode: z.string(),
+    bar_count: z.number().int(),
+  });
+const statusSchema: z.ZodType<ServiceStatus, z.ZodTypeDef, unknown> = z.object({
   service: z.literal("wheelhouse-python"),
   status: z.literal("ready"),
   contract_version: z.literal("1"),
@@ -143,7 +146,7 @@ const statusSchema: z.ZodType<ServiceStatus> = z.object({
 
 async function query<T>(
   path: string,
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   init?: RequestInit,
 ): Promise<T> {
   let response: Response;
@@ -184,6 +187,16 @@ export const getSnapshots = (stream: Stream, signal?: AbortSignal) =>
   query(`/snapshots?${params(stream)}`, z.array(summarySchema), { signal });
 export const getSnapshot = (id: string, signal?: AbortSignal) =>
   query(`/snapshots/${encodeURIComponent(id)}`, analysisSchema, { signal });
+export const getMarketContext = (
+  source: Stream["source"],
+  symbol: Stream["symbol"],
+  signal?: AbortSignal,
+) =>
+  query(
+    `/market-context?${new URLSearchParams({ source, symbol })}`,
+    marketContextSchema,
+    { signal },
+  );
 export const getJob = (id: string, signal?: AbortSignal) =>
   query(`/jobs/${encodeURIComponent(id)}`, jobSchema, { signal });
 export const getJobEvents = (id: string, signal?: AbortSignal) =>
@@ -208,14 +221,14 @@ export const updateSchedule = (
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ stream, rules, enabled }),
   });
-export const money = (value: string | null | undefined) =>
+export const money = (value: string | null | undefined, missing = "Unavailable") =>
   value == null
-    ? "Unavailable"
+    ? missing
     : Number(value).toLocaleString("en-US", {
         maximumFractionDigits: 2,
         minimumFractionDigits: 2,
       });
-export const stamp = (value: string | null | undefined) =>
+export const stamp = (value: string | null | undefined, missing = "Unavailable") =>
   value
     ? new Date(value).toISOString().replace("T", " ").slice(0, 19) + " UTC"
-    : "Unavailable";
+    : missing;

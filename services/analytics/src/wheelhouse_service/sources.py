@@ -100,7 +100,7 @@ class BinanceSource:
             if self.client:
                 response = self.client.get(
                     "https://data-api.binance.vision/api/v3/klines",
-                    params={"symbol": stream.symbol, "interval": stream.timeframe, "limit": 320},
+                    params={"symbol": stream.symbol, "interval": stream.timeframe, "limit": 500},
                 )
             else:
                 with httpx.Client(timeout=5, follow_redirects=False) as client:
@@ -109,7 +109,7 @@ class BinanceSource:
                         params={
                             "symbol": stream.symbol,
                             "interval": stream.timeframe,
-                            "limit": 320,
+                            "limit": 500,
                         },
                     )
             response.raise_for_status()

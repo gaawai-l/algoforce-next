@@ -156,6 +156,94 @@
         }
       }
     },
+    "/api/wheelhouse/v1/market-context": {
+      "get": {
+        "summary": "Market Context",
+        "operationId": "market_context_api_wheelhouse_v1_market_context_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "fixture",
+                "binance"
+              ],
+              "type": "string",
+              "default": "fixture",
+              "title": "Source"
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BTCUSDT",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "market_at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market At"
+            }
+          },
+          {
+            "name": "knowledge_at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Knowledge At"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketContext"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/workspace": {
       "get": {
         "summary": "Workspace",
@@ -1536,7 +1624,10 @@
           },
           "ruleset_version": {
             "type": "string",
-            "const": "wheelhouse-sequential-1",
+            "enum": [
+              "wheelhouse-sequential-1",
+              "wheelhouse-sequential-2"
+            ],
             "title": "Ruleset Version",
             "default": "wheelhouse-sequential-1"
           },
@@ -1547,9 +1638,21 @@
           },
           "perfection_policy": {
             "type": "string",
-            "const": "strict",
+            "enum": [
+              "strict",
+              "strict_at_nine"
+            ],
             "title": "Perfection Policy",
             "default": "strict"
+          },
+          "same_side_policy": {
+            "type": "string",
+            "enum": [
+              "parallel",
+              "retain_active"
+            ],
+            "title": "Same Side Policy",
+            "default": "parallel"
           },
           "qualifier_8_vs_5": {
             "type": "boolean",
@@ -1618,7 +1721,10 @@
           },
           "ruleset_version": {
             "type": "string",
-            "const": "wheelhouse-sequential-1",
+            "enum": [
+              "wheelhouse-sequential-1",
+              "wheelhouse-sequential-2"
+            ],
             "title": "Ruleset Version",
             "default": "wheelhouse-sequential-1"
           },
@@ -1629,9 +1735,21 @@
           },
           "perfection_policy": {
             "type": "string",
-            "const": "strict",
+            "enum": [
+              "strict",
+              "strict_at_nine"
+            ],
             "title": "Perfection Policy",
             "default": "strict"
+          },
+          "same_side_policy": {
+            "type": "string",
+            "enum": [
+              "parallel",
+              "retain_active"
+            ],
+            "title": "Same Side Policy",
+            "default": "parallel"
           },
           "qualifier_8_vs_5": {
             "type": "boolean",
@@ -1693,6 +1811,7 @@
           "ruleset_version",
           "price_flip_required",
           "perfection_policy",
+          "same_side_policy",
           "qualifier_8_vs_5",
           "risk_formula",
           "tdst_breach",
@@ -2161,6 +2280,138 @@
           "next_conditions"
         ],
         "title": "DemarkSequence"
+      },
+      "DemarkSummary": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "trend": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Trend"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "setup",
+              "countdown"
+            ],
+            "title": "Phase"
+          },
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "target": {
+            "type": "integer",
+            "enum": [
+              9,
+              13
+            ],
+            "title": "Target"
+          },
+          "setup_step": {
+            "type": "integer",
+            "title": "Setup Step"
+          },
+          "countdown_step": {
+            "type": "integer",
+            "title": "Countdown Step"
+          },
+          "rounds": {
+            "items": {
+              "$ref": "#/components/schemas/Round"
+            },
+            "type": "array",
+            "title": "Rounds"
+          },
+          "last_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SignalRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prev": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrevCountdown"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "second": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecondSetup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bars_since_qualified13": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bars Since Qualified13"
+          },
+          "setup_run": {
+            "$ref": "#/components/schemas/SetupRun"
+          },
+          "risk": {
+            "$ref": "#/components/schemas/SummaryRisk"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "close": {
+            "type": "string",
+            "title": "Close"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "side",
+          "trend",
+          "phase",
+          "step",
+          "target",
+          "setup_step",
+          "countdown_step",
+          "rounds",
+          "last_signal",
+          "prev",
+          "second",
+          "bars_since_qualified13",
+          "setup_run",
+          "risk",
+          "as_of",
+          "close"
+        ],
+        "title": "DemarkSummary"
       },
       "Exposure": {
         "properties": {
@@ -3061,6 +3312,85 @@
         ],
         "title": "Lot"
       },
+      "MarketContext": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "binance"
+            ],
+            "title": "Source"
+          },
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "BTCUSDT",
+              "ETHUSDT"
+            ],
+            "title": "Symbol"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "market_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Market At"
+          },
+          "knowledge_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Knowledge At"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "as_known",
+              "retrospective"
+            ],
+            "title": "Mode"
+          },
+          "config": {
+            "$ref": "#/components/schemas/DemarkConfig-Output"
+          },
+          "window": {
+            "type": "integer",
+            "title": "Window"
+          },
+          "timeframes": {
+            "items": {
+              "$ref": "#/components/schemas/TimeframeContext"
+            },
+            "type": "array",
+            "title": "Timeframes"
+          },
+          "intraday": {
+            "$ref": "#/components/schemas/RegimeState"
+          },
+          "swing": {
+            "$ref": "#/components/schemas/RegimeState"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "symbol",
+          "checked_at",
+          "market_at",
+          "knowledge_at",
+          "mode",
+          "config",
+          "window",
+          "timeframes",
+          "intraday",
+          "swing"
+        ],
+        "title": "MarketContext"
+      },
       "NewCycle": {
         "properties": {
           "source": {
@@ -3105,6 +3435,74 @@
           "name"
         ],
         "title": "NewCycle"
+      },
+      "NewTrend": {
+        "properties": {
+          "present": {
+            "type": "boolean",
+            "title": "Present"
+          },
+          "trend": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Trend"
+          },
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "title": "Confirmed"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "present",
+          "trend",
+          "step",
+          "confirmed",
+          "seconds"
+        ],
+        "title": "NewTrend"
+      },
+      "NextBarNeeds": {
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "above",
+              "below"
+            ],
+            "title": "Direction"
+          },
+          "price": {
+            "type": "string",
+            "title": "Price"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "direction",
+          "price"
+        ],
+        "title": "NextBarNeeds"
       },
       "NextCondition": {
         "properties": {
@@ -3447,6 +3845,39 @@
         ],
         "title": "Position"
       },
+      "PrevCountdown": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "countdown": {
+            "type": "integer",
+            "title": "Countdown"
+          },
+          "qualified": {
+            "type": "boolean",
+            "title": "Qualified"
+          },
+          "bars_ago": {
+            "type": "integer",
+            "title": "Bars Ago"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "side",
+          "countdown",
+          "qualified",
+          "bars_ago"
+        ],
+        "title": "PrevCountdown"
+      },
       "Quote-Input": {
         "properties": {
           "code": {
@@ -3657,6 +4088,39 @@
         ],
         "title": "Quote"
       },
+      "RegimeState": {
+        "properties": {
+          "anchor": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Anchor"
+          },
+          "value": {
+            "type": "string",
+            "enum": [
+              "decay",
+              "rev",
+              "pump",
+              "none",
+              "unavailable"
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "anchor",
+          "value"
+        ],
+        "title": "RegimeState"
+      },
       "RiskResult": {
         "properties": {
           "base_currency": {
@@ -3738,6 +4202,69 @@
           "issues"
         ],
         "title": "RiskResult"
+      },
+      "Round": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "trend": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Trend"
+          },
+          "setup": {
+            "type": "integer",
+            "title": "Setup"
+          },
+          "countdown": {
+            "type": "integer",
+            "title": "Countdown"
+          },
+          "setup9_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup9 At"
+          },
+          "qualified13_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualified13 At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "side",
+          "trend",
+          "setup",
+          "countdown",
+          "setup9_at",
+          "qualified13_at"
+        ],
+        "title": "Round"
       },
       "Rules-Input": {
         "properties": {
@@ -3871,6 +4398,51 @@
         ],
         "title": "ScheduleRequest"
       },
+      "SecondSetup": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "trend": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Trend"
+          },
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "setup9_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup9 At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "side",
+          "trend",
+          "step",
+          "setup9_at"
+        ],
+        "title": "SecondSetup"
+      },
       "ServiceStatus": {
         "properties": {
           "service": {
@@ -3931,6 +4503,158 @@
           "capabilities"
         ],
         "title": "ServiceStatus"
+      },
+      "SetupRun": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "completed": {
+            "type": "boolean",
+            "title": "Completed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "start",
+          "side",
+          "count",
+          "active",
+          "completed"
+        ],
+        "title": "SetupRun"
+      },
+      "Signal": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "N"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "base_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Level"
+          },
+          "intraday_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intraday Level"
+          },
+          "swing_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Swing Level"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "n",
+          "side",
+          "active",
+          "price",
+          "base_level",
+          "intraday_level",
+          "swing_level"
+        ],
+        "title": "Signal"
+      },
+      "SignalRef": {
+        "properties": {
+          "kind": {
+            "type": "integer",
+            "enum": [
+              9,
+              13
+            ],
+            "title": "Kind"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "at",
+          "side"
+        ],
+        "title": "SignalRef"
       },
       "SnapshotSummary": {
         "properties": {
@@ -4203,6 +4927,117 @@
         ],
         "title": "Stream"
       },
+      "SummaryRisk": {
+        "properties": {
+          "risk9": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk9"
+          },
+          "risk9_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk9 At"
+          },
+          "setup_close": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup Close"
+          },
+          "risk_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Level"
+          },
+          "risk13_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk13 At"
+          },
+          "provisional": {
+            "type": "boolean",
+            "title": "Provisional"
+          },
+          "close13": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close13"
+          },
+          "tdst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tdst"
+          },
+          "next_bar_needs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NextBarNeeds"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "risk9",
+          "risk9_at",
+          "setup_close",
+          "risk_level",
+          "risk13_at",
+          "provisional",
+          "close13",
+          "tdst",
+          "next_bar_needs"
+        ],
+        "title": "SummaryRisk"
+      },
       "SyncJob": {
         "properties": {
           "job_id": {
@@ -4314,6 +5149,204 @@
           "end"
         ],
         "title": "SyncRequest"
+      },
+      "TimeframeContext": {
+        "properties": {
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale",
+              "unavailable",
+              "simulated"
+            ],
+            "title": "Status"
+          },
+          "bars_used": {
+            "type": "integer",
+            "title": "Bars Used"
+          },
+          "history_complete": {
+            "type": "boolean",
+            "title": "History Complete"
+          },
+          "history_gapped": {
+            "type": "boolean",
+            "title": "History Gapped"
+          },
+          "last_closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Closed At"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemarkSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeframeState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/Signal"
+            },
+            "type": "array",
+            "title": "Signals"
+          },
+          "new_trend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NewTrend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "timeframe",
+          "status",
+          "bars_used",
+          "history_complete",
+          "history_gapped",
+          "last_closed_at",
+          "summary",
+          "state",
+          "signals",
+          "new_trend"
+        ],
+        "title": "TimeframeContext"
+      },
+      "TimeframeState": {
+        "properties": {
+          "s9": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "none"
+            ],
+            "title": "S9"
+          },
+          "s13": {
+            "type": "boolean",
+            "title": "S13"
+          },
+          "carry13": {
+            "type": "boolean",
+            "title": "Carry13"
+          },
+          "countdown": {
+            "type": "integer",
+            "title": "Countdown"
+          },
+          "setup9_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup9 At"
+          },
+          "qualified13_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualified13 At"
+          },
+          "setup9_seconds_ago": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup9 Seconds Ago"
+          },
+          "qualified13_seconds_ago": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualified13 Seconds Ago"
+          },
+          "beyond_risk9": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beyond Risk9"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "s9",
+          "s13",
+          "carry13",
+          "countdown",
+          "setup9_at",
+          "qualified13_at",
+          "setup9_seconds_ago",
+          "qualified13_seconds_ago",
+          "beyond_risk9"
+        ],
+        "title": "TimeframeState"
       },
       "ValidationError": {
         "properties": {

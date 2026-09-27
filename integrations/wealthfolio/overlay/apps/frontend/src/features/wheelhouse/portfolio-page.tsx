@@ -1,7 +1,10 @@
+import { Dropdown, DropdownOption } from "./dropdown";
 import { useEffect, useState, type FormEvent } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Page, PageContent, PageHeader } from "@wealthfolio/ui";
+import { LanguageToggle } from "./language-toggle";
+import { useWheelhouseText } from "./i18n";
 import {
   portfolioRequest,
   currentSync,
@@ -28,6 +31,7 @@ function utc(value: string): string {
 }
 
 export default function PortfolioPage() {
+  const { text } = useWheelhouseText();
   const location = useLocation();
   const mode = location.pathname.endsWith("wheel-cycles")
     ? "cycles"
@@ -35,9 +39,9 @@ export default function PortfolioPage() {
       ? "risk"
       : "broker";
   const titles = {
-    broker: "Brokerage",
-    cycles: "Wheel cycles",
-    risk: "Risk exposure",
+    broker: text("nav.brokerage"),
+    cycles: text("nav.cycles"),
+    risk: text("nav.risk"),
   };
   const [query, setQuery] = useSearchParams();
   const cache = useQueryClient();
@@ -268,31 +272,32 @@ export default function PortfolioPage() {
     <Page>
       <PageHeader
         heading={titles[mode]}
-        text="Wheelhouse · Read-only account analytics"
+        text={text("portfolio.subtitle")}
+        actions={<LanguageToggle />}
       />
       <PageContent>
         <div className="wh-market wh-portfolio">
           <div className="wh-toolbar">
             <label>
               Stored account
-              <select
+              <Dropdown
                 aria-label="Stored account"
                 value={account ? `${source}:${account}` : ""}
-                onChange={(e) => choose(e.target.value)}
+                onValueChange={(value) => choose(value)}
               >
-                <option value="" disabled>
+                <DropdownOption value="" disabled>
                   Select an account…
-                </option>
+                </DropdownOption>
                 {accounts.data?.map((item) => (
-                  <option
+                  <DropdownOption
                     key={`${item.source}:${item.account}`}
                     value={`${item.source}:${item.account}`}
                   >
                     {item.source === "demo" ? "DEMO · " : "moomoo SG · "}
                     {item.account}
-                  </option>
+                  </DropdownOption>
                 ))}
-              </select>
+              </Dropdown>
             </label>
             <button disabled={busy} onClick={() => void demo()}>
               Load fictional demo
@@ -369,15 +374,22 @@ export default function PortfolioPage() {
                   <form onSubmit={sync} className="wh-form">
                     <label>
                       Actual account
-                      <select name="account" required>
-                        <option value="">Choose acc_id…</option>
+                      <Dropdown
+                        aria-label="Broker account"
+                        name="account"
+                        required
+                      >
+                        <DropdownOption value="">Choose acc_id…</DropdownOption>
                         {discovered.map((item) => (
-                          <option key={item.account_id} value={item.account_id}>
+                          <DropdownOption
+                            key={item.account_id}
+                            value={item.account_id}
+                          >
                             {item.account_id} · {item.status} ·{" "}
                             {item.markets.join(", ")}
-                          </option>
+                          </DropdownOption>
                         ))}
-                      </select>
+                      </Dropdown>
                     </label>
                     <label>
                       History start
@@ -518,23 +530,23 @@ export default function PortfolioPage() {
               {data?.cycles.length ? (
                 <label>
                   Cycle
-                  <select
+                  <Dropdown
                     aria-label="Cycle"
                     value={selected?.cycle.cycle_id ?? ""}
-                    onChange={(e) => {
-                      setCycleId(e.target.value);
+                    onValueChange={(value) => {
+                      setCycleId(value);
                       setFill(null);
                     }}
                   >
                     {data.cycles.map((item) => (
-                      <option
+                      <DropdownOption
                         key={item.cycle.cycle_id}
                         value={item.cycle.cycle_id}
                       >
                         {item.cycle.name} · {item.state}
-                      </option>
+                      </DropdownOption>
                     ))}
-                  </select>
+                  </Dropdown>
                 </label>
               ) : (
                 <p className="wh-empty">
@@ -655,28 +667,43 @@ export default function PortfolioPage() {
                     >
                       <label>
                         Original event
-                        <select name="event" required>
-                          <option value="">Choose linked event…</option>
+                        <Dropdown
+                          aria-label="Linked event"
+                          name="event"
+                          required
+                        >
+                          <DropdownOption value="">
+                            Choose linked event…
+                          </DropdownOption>
                           {selected.events
                             .filter(
                               (e) =>
                                 e.source_record_id || e.settlement_record_id,
                             )
                             .map((e) => (
-                              <option key={e.event_id} value={e.event_id}>
+                              <DropdownOption
+                                key={e.event_id}
+                                value={e.event_id}
+                              >
                                 {e.kind} · {e.instrument.code} · {e.event_id}
-                              </option>
+                              </DropdownOption>
                             ))}
-                        </select>
+                        </Dropdown>
                       </label>
                       <label>
                         Latest broker execution
-                        <select name="record" required>
-                          <option value="">Choose latest record…</option>
+                        <Dropdown
+                          aria-label="Latest record"
+                          name="record"
+                          required
+                        >
+                          <DropdownOption value="">
+                            Choose latest record…
+                          </DropdownOption>
                           {data?.records
                             .filter((r) => r.kind === "deals")
                             .map((r) => (
-                              <option
+                              <DropdownOption
                                 key={String(r.record_id)}
                                 value={String(r.record_id)}
                               >
@@ -684,9 +711,9 @@ export default function PortfolioPage() {
                                 {String(
                                   (r.payload as Record<string, unknown>).code,
                                 )}
-                              </option>
+                              </DropdownOption>
                             ))}
-                        </select>
+                        </Dropdown>
                       </label>
                       <label>
                         Confirmed UTC event time
@@ -743,13 +770,17 @@ export default function PortfolioPage() {
                     >
                       <label>
                         Event
-                        <select name="event" required>
+                        <Dropdown
+                          aria-label="Event to remove"
+                          name="event"
+                          required
+                        >
                           {selected.events.map((e) => (
-                            <option key={e.event_id} value={e.event_id}>
+                            <DropdownOption key={e.event_id} value={e.event_id}>
                               {e.kind} · {e.instrument.code} · {stamp(e.at)}
-                            </option>
+                            </DropdownOption>
                           ))}
-                        </select>
+                        </Dropdown>
                       </label>
                       <label>
                         Confirmed fee
@@ -825,27 +856,30 @@ export default function PortfolioPage() {
                     >
                       <label>
                         Instrument
-                        <select
+                        <Dropdown
+                          aria-label="Instrument"
                           name="instrument"
                           required
                           value={instrumentCode}
-                          onChange={(e) => setInstrumentCode(e.target.value)}
+                          onValueChange={(value) => setInstrumentCode(value)}
                         >
-                          <option value="">Choose verified metadata…</option>
+                          <DropdownOption value="">
+                            Choose verified metadata…
+                          </DropdownOption>
                           {options
                             .filter(
                               (i) => i.underlying === selected.cycle.underlying,
                             )
                             .map((i) => (
-                              <option key={i.code} value={i.code}>
+                              <DropdownOption key={i.code} value={i.code}>
                                 {i.code} · ×{i.multiplier}
-                              </option>
+                              </DropdownOption>
                             ))}
-                        </select>
+                        </Dropdown>
                       </label>
                       <label>
                         Event
-                        <select name="kind" required>
+                        <Dropdown aria-label="Event kind" name="kind" required>
                           {[
                             "buy_open",
                             "sell_open",
@@ -856,9 +890,9 @@ export default function PortfolioPage() {
                             "exercise",
                             "cash_settle",
                           ].map((kind) => (
-                            <option key={kind}>{kind}</option>
+                            <DropdownOption key={kind}>{kind}</DropdownOption>
                           ))}
-                        </select>
+                        </Dropdown>
                       </label>
                       <label>
                         Quantity
@@ -1021,11 +1055,11 @@ export default function PortfolioPage() {
                   </label>
                   <label>
                     Asset type
-                    <select name="kind">
-                      <option>stock</option>
-                      <option>put</option>
-                      <option>call</option>
-                    </select>
+                    <Dropdown aria-label="Instrument kind" name="kind">
+                      <DropdownOption>stock</DropdownOption>
+                      <DropdownOption>put</DropdownOption>
+                      <DropdownOption>call</DropdownOption>
+                    </Dropdown>
                   </label>
                   <label>
                     Currency
@@ -1084,11 +1118,17 @@ export default function PortfolioPage() {
                     >
                       <label>
                         Instrument
-                        <select name="code" required>
+                        <Dropdown
+                          aria-label="Greeks instrument"
+                          name="code"
+                          required
+                        >
                           {options.map((i) => (
-                            <option key={i.code}>{i.code}</option>
+                            <DropdownOption key={i.code}>
+                              {i.code}
+                            </DropdownOption>
                           ))}
-                        </select>
+                        </Dropdown>
                       </label>
                       <label>
                         Underlying spot
@@ -1108,30 +1148,36 @@ export default function PortfolioPage() {
                       ))}
                       <label>
                         Greek units
-                        <select name="units">
-                          <option value="per_share">
+                        <Dropdown aria-label="Greeks units" name="units">
+                          <DropdownOption value="per_share">
                             Per underlying share
-                          </option>
-                          <option value="per_contract">Per contract</option>
-                        </select>
+                          </DropdownOption>
+                          <DropdownOption value="per_contract">
+                            Per contract
+                          </DropdownOption>
+                        </Dropdown>
                       </label>
                       <label>
                         Theta time basis
-                        <select name="theta_basis">
-                          <option value="day">Per calendar day</option>
-                          <option value="year">Per year (÷365)</option>
-                        </select>
+                        <Dropdown aria-label="Theta basis" name="theta_basis">
+                          <DropdownOption value="day">
+                            Per calendar day
+                          </DropdownOption>
+                          <DropdownOption value="year">
+                            Per year (÷365)
+                          </DropdownOption>
+                        </Dropdown>
                       </label>
                       <label>
                         Vega basis
-                        <select name="vega_basis">
-                          <option value="percentage_point">
+                        <Dropdown aria-label="Vega basis" name="vega_basis">
+                          <DropdownOption value="percentage_point">
                             Per 1 volatility point
-                          </option>
-                          <option value="unit_volatility">
+                          </DropdownOption>
+                          <DropdownOption value="unit_volatility">
                             Per 1.0 volatility (÷100)
-                          </option>
-                        </select>
+                          </DropdownOption>
+                        </Dropdown>
                       </label>
                       <label>
                         Observed at · UTC

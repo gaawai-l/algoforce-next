@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/market-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Market Context */
+        get: operations["market_context_api_wheelhouse_v1_market_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/workspace": {
         parameters: {
             query?: never;
@@ -597,9 +614,9 @@ export interface components {
             /**
              * Ruleset Version
              * @default wheelhouse-sequential-1
-             * @constant
+             * @enum {string}
              */
-            ruleset_version: "wheelhouse-sequential-1";
+            ruleset_version: "wheelhouse-sequential-1" | "wheelhouse-sequential-2";
             /**
              * Price Flip Required
              * @default true
@@ -608,9 +625,15 @@ export interface components {
             /**
              * Perfection Policy
              * @default strict
-             * @constant
+             * @enum {string}
              */
-            perfection_policy: "strict";
+            perfection_policy: "strict" | "strict_at_nine";
+            /**
+             * Same Side Policy
+             * @default parallel
+             * @enum {string}
+             */
+            same_side_policy: "parallel" | "retain_active";
             /**
              * Qualifier 8 Vs 5
              * @default false
@@ -655,9 +678,9 @@ export interface components {
             /**
              * Ruleset Version
              * @default wheelhouse-sequential-1
-             * @constant
+             * @enum {string}
              */
-            ruleset_version: "wheelhouse-sequential-1";
+            ruleset_version: "wheelhouse-sequential-1" | "wheelhouse-sequential-2";
             /**
              * Price Flip Required
              * @default true
@@ -666,9 +689,15 @@ export interface components {
             /**
              * Perfection Policy
              * @default strict
-             * @constant
+             * @enum {string}
              */
-            perfection_policy: "strict";
+            perfection_policy: "strict" | "strict_at_nine";
+            /**
+             * Same Side Policy
+             * @default parallel
+             * @enum {string}
+             */
+            same_side_policy: "parallel" | "retain_active";
             /**
              * Qualifier 8 Vs 5
              * @default false
@@ -829,6 +858,51 @@ export interface components {
             elapsed_since_qualified13_seconds: number | null;
             /** Next Conditions */
             next_conditions: components["schemas"]["NextCondition"][];
+        };
+        /** DemarkSummary */
+        DemarkSummary: {
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "up" | "down";
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "setup" | "countdown";
+            /** Step */
+            step: number;
+            /**
+             * Target
+             * @enum {integer}
+             */
+            target: 9 | 13;
+            /** Setup Step */
+            setup_step: number;
+            /** Countdown Step */
+            countdown_step: number;
+            /** Rounds */
+            rounds: components["schemas"]["Round"][];
+            last_signal: components["schemas"]["SignalRef"] | null;
+            prev: components["schemas"]["PrevCountdown"] | null;
+            second: components["schemas"]["SecondSetup"] | null;
+            /** Bars Since Qualified13 */
+            bars_since_qualified13: number | null;
+            setup_run: components["schemas"]["SetupRun"];
+            risk: components["schemas"]["SummaryRisk"];
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Close */
+            close: string;
         };
         /** Exposure */
         Exposure: {
@@ -1120,6 +1194,46 @@ export interface components {
             /** Opening Event Id */
             opening_event_id: string;
         };
+        /** MarketContext */
+        MarketContext: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "fixture" | "binance";
+            /**
+             * Symbol
+             * @enum {string}
+             */
+            symbol: "BTCUSDT" | "ETHUSDT";
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /**
+             * Market At
+             * Format: date-time
+             */
+            market_at: string;
+            /**
+             * Knowledge At
+             * Format: date-time
+             */
+            knowledge_at: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "as_known" | "retrospective";
+            config: components["schemas"]["DemarkConfig-Output"];
+            /** Window */
+            window: number;
+            /** Timeframes */
+            timeframes: components["schemas"]["TimeframeContext"][];
+            intraday: components["schemas"]["RegimeState"];
+            swing: components["schemas"]["RegimeState"];
+        };
         /** NewCycle */
         NewCycle: {
             /**
@@ -1135,6 +1249,32 @@ export interface components {
             currency: string;
             /** Name */
             name: string;
+        };
+        /** NewTrend */
+        NewTrend: {
+            /** Present */
+            present: boolean;
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "up" | "down";
+            /** Step */
+            step: number;
+            /** Confirmed */
+            confirmed: boolean;
+            /** Seconds */
+            seconds: number | null;
+        };
+        /** NextBarNeeds */
+        NextBarNeeds: {
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "above" | "below";
+            /** Price */
+            price: string;
         };
         /** NextCondition */
         NextCondition: {
@@ -1251,6 +1391,20 @@ export interface components {
              */
             observed_at: string;
         };
+        /** PrevCountdown */
+        PrevCountdown: {
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Countdown */
+            countdown: number;
+            /** Qualified */
+            qualified: boolean;
+            /** Bars Ago */
+            bars_ago: number;
+        };
         /** Quote */
         "Quote-Input": {
             /** Code */
@@ -1325,6 +1479,19 @@ export interface components {
             /** Source */
             source: string;
         };
+        /** RegimeState */
+        RegimeState: {
+            /**
+             * Anchor
+             * @enum {string}
+             */
+            anchor: "5m" | "15m" | "1h" | "4h" | "1d";
+            /**
+             * Value
+             * @enum {string}
+             */
+            value: "decay" | "rev" | "pump" | "none" | "unavailable";
+        };
         /** RiskResult */
         RiskResult: {
             /** Base Currency */
@@ -1349,6 +1516,27 @@ export interface components {
             vega_point: string | null;
             /** Issues */
             issues: string[];
+        };
+        /** Round */
+        Round: {
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "up" | "down";
+            /** Setup */
+            setup: number;
+            /** Countdown */
+            countdown: number;
+            /** Setup9 At */
+            setup9_at: string | null;
+            /** Qualified13 At */
+            qualified13_at: string | null;
         };
         /** Rules */
         "Rules-Input": {
@@ -1405,6 +1593,23 @@ export interface components {
             /** Enabled */
             enabled: boolean;
         };
+        /** SecondSetup */
+        SecondSetup: {
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "up" | "down";
+            /** Step */
+            step: number;
+            /** Setup9 At */
+            setup9_at: string | null;
+        };
         /** ServiceStatus */
         ServiceStatus: {
             /**
@@ -1439,6 +1644,66 @@ export interface components {
             integrations: components["schemas"]["Integrations"];
             /** Capabilities */
             capabilities: string[];
+        };
+        /** SetupRun */
+        SetupRun: {
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Count */
+            count: number;
+            /** Active */
+            active: boolean;
+            /** Completed */
+            completed: boolean;
+        };
+        /** Signal */
+        Signal: {
+            /**
+             * N
+             * @enum {integer}
+             */
+            n: 1 | 2;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Active */
+            active: boolean;
+            /** Price */
+            price: string | null;
+            /** Base Level */
+            base_level: number | null;
+            /** Intraday Level */
+            intraday_level: number | null;
+            /** Swing Level */
+            swing_level: number | null;
+        };
+        /** SignalRef */
+        SignalRef: {
+            /**
+             * Kind
+             * @enum {integer}
+             */
+            kind: 9 | 13;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
         };
         /** SnapshotSummary */
         SnapshotSummary: {
@@ -1599,6 +1864,26 @@ export interface components {
              */
             price_encoding: "decimal_string_18_places";
         };
+        /** SummaryRisk */
+        SummaryRisk: {
+            /** Risk9 */
+            risk9: string | null;
+            /** Risk9 At */
+            risk9_at: string | null;
+            /** Setup Close */
+            setup_close: string | null;
+            /** Risk Level */
+            risk_level: string | null;
+            /** Risk13 At */
+            risk13_at: string | null;
+            /** Provisional */
+            provisional: boolean;
+            /** Close13 */
+            close13: string | null;
+            /** Tdst */
+            tdst: string | null;
+            next_bar_needs: components["schemas"]["NextBarNeeds"] | null;
+        };
         /** SyncJob */
         SyncJob: {
             /** Job Id */
@@ -1650,6 +1935,56 @@ export interface components {
              * Format: date
              */
             end: string;
+        };
+        /** TimeframeContext */
+        TimeframeContext: {
+            /**
+             * Timeframe
+             * @enum {string}
+             */
+            timeframe: "5m" | "15m" | "1h" | "4h" | "1d";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "fresh" | "delayed" | "stale" | "unavailable" | "simulated";
+            /** Bars Used */
+            bars_used: number;
+            /** History Complete */
+            history_complete: boolean;
+            /** History Gapped */
+            history_gapped: boolean;
+            /** Last Closed At */
+            last_closed_at: string | null;
+            summary: components["schemas"]["DemarkSummary"] | null;
+            state: components["schemas"]["TimeframeState"] | null;
+            /** Signals */
+            signals: components["schemas"]["Signal"][];
+            new_trend: components["schemas"]["NewTrend"] | null;
+        };
+        /** TimeframeState */
+        TimeframeState: {
+            /**
+             * S9
+             * @enum {string}
+             */
+            s9: "up" | "down" | "none";
+            /** S13 */
+            s13: boolean;
+            /** Carry13 */
+            carry13: boolean;
+            /** Countdown */
+            countdown: number;
+            /** Setup9 At */
+            setup9_at: string | null;
+            /** Qualified13 At */
+            qualified13_at: string | null;
+            /** Setup9 Seconds Ago */
+            setup9_seconds_ago: number | null;
+            /** Qualified13 Seconds Ago */
+            qualified13_seconds_ago: number | null;
+            /** Beyond Risk9 */
+            beyond_risk9: boolean | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -1795,6 +2130,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobEvent"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    market_context_api_wheelhouse_v1_market_context_get: {
+        parameters: {
+            query?: {
+                source?: "fixture" | "binance";
+                symbol?: string;
+                market_at?: string | null;
+                knowledge_at?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketContext"];
                 };
             };
             /** @description Validation Error */

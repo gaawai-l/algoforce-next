@@ -1,3 +1,4 @@
+import { Dropdown, DropdownOption } from "./dropdown";
 import {
   useEffect,
   useMemo,
@@ -8,9 +9,15 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Page, PageContent, PageHeader } from "@wealthfolio/ui";
 import { useSearchParams } from "react-router-dom";
+import { LanguageToggle } from "./language-toggle";
+import { issueText, labeled, useWheelhouseText } from "./i18n";
 import { MarketChart } from "./market-chart";
-import { useInitialMarketRefresh } from "./use-initial-market-refresh";
+import {
+  useInitialMarketRefresh,
+  useCloseBoundaryRefresh,
+} from "./use-initial-market-refresh";
 import { DemarkDetails } from "./demark-details";
+import { RegimeCheck } from "./regime-check";
 import { defaultDemarkConfig } from "./demark-contract";
 import {
   PREFIX,
@@ -30,12 +37,7 @@ import {
 } from "./client";
 import "./market.css";
 
-const methods = [
-  { id: "td", name: "TD Sequential" },
-  { id: "levels", name: "Key levels" },
-  { id: "fib", name: "Fibonacci" },
-] as const;
-type Method = (typeof methods)[number]["id"];
+type Method = "td" | "levels" | "fib";
 const timeframes: Stream["timeframe"][] = ["5m", "15m", "1h", "4h", "1d"];
 const activeStates = new Set(["queued", "running", "retry_wait"]);
 
@@ -53,6 +55,13 @@ function Facts({ entries }: { entries: [string, string][] }) {
 }
 
 export default function MarketPage() {
+  const { text } = useWheelhouseText();
+  const missing = text("missing");
+  const methods = [
+    { id: "td" as const, name: text("method.td") },
+    { id: "levels" as const, name: text("method.levels") },
+    { id: "fib" as const, name: text("method.fib") },
+  ];
   const cache = useQueryClient();
   const [search, setSearch] = useSearchParams();
   const updateQuery = (name: string, value: string | null) => {
@@ -87,7 +96,7 @@ export default function MarketPage() {
       ? initialWindow
       : 20,
   );
-  const [visibleBars, setVisibleBars] = useState(100);
+  const [visibleBars, setVisibleBars] = useState(0);
   const [sequenceId, setSequenceId] = useState<string | null>(null);
   const selectedId = /^[a-f0-9]{64}$/.test(search.get("snapshot") ?? "")
     ? search.get("snapshot")
@@ -146,6 +155,7 @@ export default function MarketPage() {
   const saved = useQuery({
     queryKey: ["wh", "snapshot", selectedId],
     queryFn: ({ signal }) => getSnapshot(selectedId!, signal),
+    staleTime: Infinity,
     enabled: !!selectedId,
     retry: false,
   });
@@ -212,7 +222,9 @@ export default function MarketPage() {
       else setSelectedId(null);
     } else
       setActionError(
-        `Task failed: ${task.data.error_code ?? "unknown error"}. Existing snapshots were preserved.`,
+        text("error.taskFailed", {
+          code: task.data.error_code ?? text("error.unknown"),
+        }),
       );
     setPending(null);
     void cache.invalidateQueries({ queryKey: ["wh"] });
@@ -221,7 +233,7 @@ export default function MarketPage() {
   const start = async (kind: "refresh" | "analyze") => {
     setActionError("");
     if (!Number.isInteger(windowSize) || windowSize < 2 || windowSize > 200) {
-      setActionError("Window must be an integer from 2 to 200.");
+      setActionError(text("error.window"));
       return;
     }
     const token = selection.current;
@@ -236,9 +248,7 @@ export default function MarketPage() {
         !Number.isFinite(parsedCutoff.getTime()) ||
         parsedCutoff.toISOString().slice(0, 19) !== normalized
       ) {
-        setActionError(
-          "Enter a valid UTC cutoff, for example 2026-09-25T12:00:00.",
-        );
+        setActionError(text("error.cutoff"));
         return;
       }
       const cutoff = parsedCutoff.toISOString();
@@ -267,8 +277,28 @@ export default function MarketPage() {
       !workspace.data?.refresh_job?.error_code &&
       !activeStates.has(workspace.data?.latest_job?.state ?? "") &&
       (!analysis?.bars.length ||
+        (source === "binance" && analysis.bars.length < 499) ||
         !analysis.demark ||
-        workspace.data?.current_state === "stale"),
+        analysis.demark.config.ruleset_version !==
+          defaultDemarkConfig.ruleset_version),
+    () => start("refresh"),
+  );
+  useCloseBoundaryRefresh(
+    `${source}:${symbol}:${timeframe}`,
+    source === "binance" &&
+      !selectedId &&
+      workspace.isSuccess &&
+      !!status.data &&
+      !offline &&
+      !busy &&
+      !actionError &&
+      !workspace.data?.refresh_job?.error_code &&
+      !workspace.data?.schedule?.request.enabled &&
+      !activeStates.has(workspace.data?.latest_job?.state ?? "") &&
+      !!analysis?.bars.length &&
+      analysis?.demark?.config.ruleset_version ===
+        defaultDemarkConfig.ruleset_version,
+    analysis?.expected_next_close,
     () => start("refresh"),
   );
   const methodKey = (
@@ -301,8 +331,9 @@ export default function MarketPage() {
   return (
     <Page>
       <PageHeader
-        heading="Market intelligence"
-        text="Wheelhouse · Traceable market analysis"
+        heading={text("page.title")}
+        text={text("page.subtitle")}
+        actions={<LanguageToggle />}
       />
       <PageContent>
         <div className="wh-market">
@@ -310,41 +341,52 @@ export default function MarketPage() {
             <span className={`wh-dot ${offline ? "wh-down" : ""}`} />
             <span>
               {offline
-                ? "Python service unavailable"
+                ? text("service.down")
                 : status.data
-                  ? "Python service connected"
-                  : "Connecting to Python…"}
+                  ? text("service.up")
+                  : text("service.connecting")}
             </span>
             <span className="wh-muted">
-              Local / read-only / {status.data?.service_version ?? "—"}
+              {text("service.local", {
+                version: status.data?.service_version ?? "—",
+              })}
             </span>
           </div>
           <div className="wh-toolbar">
             <label>
-              Market / symbol
-              <select
-                aria-label="Market / symbol"
+              {text("field.symbol")}
+              <Dropdown
+                aria-label={text("field.symbol")}
                 value={symbol}
-                onChange={(e) => setSymbol(e.target.value as Stream["symbol"])}
+                onValueChange={(value) => setSymbol(value as Stream["symbol"])}
               >
-                <option value="BTCUSDT">Crypto · BTC / USDT</option>
-                <option value="ETHUSDT">Crypto · ETH / USDT</option>
-              </select>
+                <DropdownOption value="BTCUSDT">
+                  {text("option.btc")}
+                </DropdownOption>
+                <DropdownOption value="ETHUSDT">
+                  {text("option.eth")}
+                </DropdownOption>
+              </Dropdown>
             </label>
             <label>
-              Data source
-              <select
+              {text("field.source")}
+              <Dropdown
+                aria-label={text("field.source")}
                 value={source}
-                onChange={(e) => setSource(e.target.value as Stream["source"])}
+                onValueChange={(value) => setSource(value as Stream["source"])}
               >
-                <option value="fixture">Synthetic fixture</option>
-                <option value="binance">Binance public spot</option>
-              </select>
+                <DropdownOption value="fixture">
+                  {text("option.fixture")}
+                </DropdownOption>
+                <DropdownOption value="binance">
+                  {text("option.binance")}
+                </DropdownOption>
+              </Dropdown>
             </label>
             <label className="wh-window">
-              Rule window
+              {text("field.window")}
               <input
-                aria-label="Rule window"
+                aria-label={text("field.window")}
                 type="number"
                 min="2"
                 max="200"
@@ -361,13 +403,14 @@ export default function MarketPage() {
               onClick={() => void start("refresh")}
             >
               {pending?.kind === "refresh"
-                ? "Refreshing…"
-                : "Refresh market data"}
+                ? text("action.refreshing")
+                : text("action.refresh")}
             </button>
             <div className="wh-price">
-              <span>LAST CLOSED PRICE</span>
+              <span>{text("price.label")}</span>
               <strong>
-                {money(analysis?.bars.at(-1)?.bar.close)} <small>USDT</small>
+                {money(analysis?.bars.at(-1)?.bar.close, missing)}{" "}
+                <small>USDT</small>
               </strong>
             </div>
           </div>
@@ -375,9 +418,17 @@ export default function MarketPage() {
             <span
               className={`wh-badge ${source === "fixture" ? "wh-amber" : ""}`}
             >
-              {source === "fixture" ? "SIMULATED" : "PUBLIC SPOT"}
+              {source === "fixture"
+                ? text("badge.simulated")
+                : text("badge.public")}
             </span>
-            <span className="wh-badge">{frameState.toUpperCase()}</span>
+            <span className="wh-badge">
+              {offline
+                ? text("frame.offline")
+                : selectedId
+                  ? text("frame.saved")
+                  : labeled(text, "state", frameState)}
+            </span>
             <label className="wh-inline">
               <input
                 type="checkbox"
@@ -385,10 +436,19 @@ export default function MarketPage() {
                 disabled={schedule.isPending || offline}
                 onChange={(e) => schedule.mutate(e.target.checked)}
               />{" "}
-              Refresh after each close
+              {text("meta.background")}
             </label>
+            {source === "binance" &&
+              !selectedId &&
+              !workspace.data?.schedule?.request.enabled && (
+                <small>{text("meta.whileOpen")}</small>
+              )}
             {workspace.data?.schedule?.request.enabled && (
-              <small>Next {stamp(workspace.data.schedule.next_due)}</small>
+              <small>
+                {text("meta.next", {
+                  time: stamp(workspace.data.schedule.next_due, missing),
+                })}
+              </small>
             )}
           </div>
           {(offline ||
@@ -397,34 +457,49 @@ export default function MarketPage() {
             workspace.data?.refresh_job?.error_code) && (
             <div className="wh-alert" role="alert">
               {offline
-                ? "Analysis service unavailable. Any displayed chart is a saved result, not a live update."
+                ? text("alert.offline", {
+                    message:
+                      workspace.error?.message ??
+                      status.error?.message ??
+                      text("alert.unavailable"),
+                  })
                 : actionError ||
                   (saved.isError ? saved.error.message : "") ||
-                  `Last refresh: ${workspace.data?.refresh_job?.error_code}. Saved results are preserved; no fallback source is used.`}
+                  text("alert.refresh", {
+                    code:
+                      workspace.data?.refresh_job?.error_code ??
+                      text("error.unknown"),
+                  })}
             </div>
           )}
-          {latestJob && (
+          {latestJob && latestJob.state !== "succeeded" && (
             <div className="wh-task" role="status">
               <span>
-                Task {latestJob.state.replaceAll("_", " ")} · attempt{" "}
-                {latestJob.attempts}/3
+                {text("task.line", {
+                  state: labeled(text, "job", latestJob.state),
+                  attempts: latestJob.attempts,
+                })}
               </span>
               <span>
                 {latestJob.request.kind === "analyze"
-                  ? "Using stored revisions"
+                  ? text("task.stored")
                   : latestJob.checkpoint_batch_id
-                    ? "Data checkpoint saved"
-                    : "Awaiting data checkpoint"}
+                    ? text("task.checkpoint")
+                    : text("task.awaiting")}
               </span>
               {latestJob.state === "retry_wait" && (
-                <span>Retry {stamp(latestJob.next_attempt_at)}</span>
+                <span>
+                  {text("task.retry", {
+                    time: stamp(latestJob.next_attempt_at, missing),
+                  })}
+                </span>
               )}
             </div>
           )}
           <div
             className="wh-methods"
             role="tablist"
-            aria-label="Market analysis method"
+            aria-label={text("method.group")}
           >
             {methods.map((item, i) => (
               <button
@@ -443,7 +518,7 @@ export default function MarketPage() {
             ))}
           </div>
           <div className="wh-framebar">
-            <div role="group" aria-label="Timeframe">
+            <div role="group" aria-label={text("timeframe.group")}>
               {timeframes.map((tf) => (
                 <button
                   key={tf}
@@ -455,18 +530,23 @@ export default function MarketPage() {
               ))}
             </div>
             <label className="wh-inline">
-              Visible bars
-              <select
+              {text("visibleBars")}
+              <Dropdown
+                aria-label={text("visibleBars")}
                 value={visibleBars}
-                onChange={(e) => setVisibleBars(Number(e.target.value))}
+                onValueChange={(value) => setVisibleBars(Number(value))}
               >
-                <option value="50">50</option>
-                <option value="100">100</option>
-                <option value="200">200</option>
-              </select>
+                <DropdownOption value="0">{text("range.auto")}</DropdownOption>
+                <DropdownOption value="50">50</DropdownOption>
+                <DropdownOption value="100">100</DropdownOption>
+                <DropdownOption value="200">200</DropdownOption>
+                <DropdownOption value="500">500</DropdownOption>
+                <DropdownOption value="-1">{text("range.all")}</DropdownOption>
+              </Dropdown>
             </label>
             <span className="wh-muted">
-              24/7 · UTC · {selectedId ? "REPLAY" : "LATEST CAPTURE"}
+              24/7 · UTC ·{" "}
+              {selectedId ? text("capture.replay") : text("capture.latest")}
             </span>
           </div>
           <section
@@ -479,12 +559,15 @@ export default function MarketPage() {
               <div className="wh-chart-title">
                 <h2>{symbol.replace("USDT", " / USDT")}</h2>
                 <span>
-                  {timeframe.toUpperCase()} · {analysis?.bars.length ?? 0}{" "}
-                  closed bars
+                  {text("chart.closedCount", {
+                    tf: timeframe.toUpperCase(),
+                    count: analysis?.bars.length ?? 0,
+                  })}
                 </span>
               </div>
               {analysis ? (
                 <MarketChart
+                  key={`${source}:${symbol}:${timeframe}:${selectedId ?? "live"}`}
                   analysis={analysis}
                   visibleBars={visibleBars}
                   showLevels={method === "levels"}
@@ -495,83 +578,106 @@ export default function MarketPage() {
                 <div className="wh-empty">
                   <p>
                     {workspace.isLoading || saved.isFetching
-                      ? "Loading saved market data…"
+                      ? text("chart.loadingSaved")
                       : pending?.kind === "refresh" ||
                           submitting ||
                           activeStates.has(latestJob?.state ?? "")
-                        ? `Fetching ${timeframe.toUpperCase()} bars and calculating Sequential…`
-                        : `No saved ${timeframe.toUpperCase()} dataset for this source.`}
+                        ? text("chart.fetching", {
+                            tf: timeframe.toUpperCase(),
+                          })
+                        : text("chart.none", { tf: timeframe.toUpperCase() })}
                   </p>
                   <button
                     disabled={busy || offline}
                     onClick={() => void start("refresh")}
                   >
-                    {busy ? "Loading market data…" : "Load this timeframe"}
+                    {busy ? text("chart.loading") : text("chart.load")}
                   </button>
                 </div>
               )}
               {analysis && (
-                <div className="wh-provenance">
-                  <div>
-                    <span>LAST CLOSED BAR</span>
-                    <strong>{stamp(analysis.closed_bar_time)}</strong>
+                <details className="wh-chart-data">
+                  <summary>{text("chart.timestamps")}</summary>
+                  <div className="wh-provenance">
+                    <div>
+                      <span>{text("stamp.closed")}</span>
+                      <strong>
+                        {stamp(analysis.closed_bar_time, missing)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>{text("stamp.forming")}</span>
+                      <strong>
+                        {stamp(analysis.forming_bar_time, missing)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>{text("stamp.acquired")}</span>
+                      <strong>{stamp(analysis.fetched_at, missing)}</strong>
+                    </div>
+                    <div>
+                      <span>{text("stamp.nextClose")}</span>
+                      <strong>
+                        {stamp(analysis.expected_next_close, missing)}
+                      </strong>
+                    </div>
                   </div>
-                  <div>
-                    <span>FORMING BAR · EXCLUDED</span>
-                    <strong>{stamp(analysis.forming_bar_time)}</strong>
-                  </div>
-                  <div>
-                    <span>DATA ACQUIRED</span>
-                    <strong>{stamp(analysis.fetched_at)}</strong>
-                  </div>
-                  <div>
-                    <span>NEXT EXPECTED CLOSE</span>
-                    <strong>{stamp(analysis.expected_next_close)}</strong>
-                  </div>
-                </div>
+                </details>
               )}
             </div>
-            <aside className="wh-inspector" aria-label="Method details">
-              <span className="wh-eyebrow">METHOD INSPECTOR</span>
+            <aside
+              className="wh-inspector"
+              aria-label={text("inspector.label")}
+            >
+              <span className="wh-eyebrow">{text("inspector.eyebrow")}</span>
               <h2>
                 {method === "levels"
-                  ? "Rolling structure"
+                  ? text("inspector.levels")
                   : method === "td"
-                    ? "DeMark engine"
-                    : "Fibonacci anchors"}
+                    ? text("inspector.td")
+                    : text("inspector.fib")}
               </h2>
               {method === "levels" ? (
                 <>
-                  <p>
-                    Server-calculated prior-window boundaries and a simple
-                    moving average validate the shared analysis pipeline.
-                  </p>
+                  <p>{text("inspector.levelsBody")}</p>
                   <Facts
                     entries={[
                       [
-                        `SMA ${analysis?.rules.window ?? windowSize}`,
-                        money(latestPoint?.sma),
+                        text("inspector.sma", {
+                          window: analysis?.rules.window ?? windowSize,
+                        }),
+                        money(latestPoint?.sma, missing),
                       ],
-                      ["Prior-window high", money(latestPoint?.prior_high)],
-                      ["Prior-window low", money(latestPoint?.prior_low)],
                       [
-                        "Warm-up",
+                        text("inspector.priorHigh"),
+                        money(latestPoint?.prior_high, missing),
+                      ],
+                      [
+                        text("inspector.priorLow"),
+                        money(latestPoint?.prior_low, missing),
+                      ],
+                      [
+                        text("inspector.warmup"),
                         analysis
-                          ? `${analysis.warmup_complete ? "Complete" : "Incomplete"} / ${analysis.warmup_required} bars`
-                          : "No dataset",
+                          ? text("inspector.warmupValue", {
+                              state: analysis.warmup_complete
+                                ? text("inspector.warmupComplete")
+                                : text("inspector.warmupIncomplete"),
+                              count: analysis.warmup_required,
+                            })
+                          : text("inspector.noDataset"),
                       ],
                       [
-                        "Calculation",
+                        text("inspector.calculation"),
                         analysis?.rules.engine_version ?? "baseline-v1",
                       ],
-                      ["Trading signal", "Not implemented"],
+                      [
+                        text("inspector.signal"),
+                        text("inspector.notImplemented"),
+                      ],
                     ]}
                   />
-                  <p className="wh-muted">
-                    Current bar excluded from high/low boundaries. These
-                    references are not validated S/R clusters or reversal
-                    signals.
-                  </p>
+                  <p className="wh-muted">{text("inspector.levelsNote")}</p>
                 </>
               ) : method === "td" ? (
                 <DemarkDetails
@@ -581,25 +687,23 @@ export default function MarketPage() {
                 />
               ) : (
                 <>
-                  <span className="wh-badge wh-amber">NOT YET INTEGRATED</span>
-                  <p>
-                    User-selected anchors will be integrated as a separate
-                    calculation module. No automatic anchors or implied
-                    confluence are shown.
-                  </p>
+                  <span className="wh-badge wh-amber">
+                    {text("inspector.fibBadge")}
+                  </span>
+                  <p>{text("inspector.fibBody")}</p>
                 </>
               )}
               {analysis && (
                 <>
-                  <h3>Data quality</h3>
+                  <h3>{text("quality.title")}</h3>
                   {analysis.issues.length ? (
                     <ul>
                       {analysis.issues.map((issue) => (
-                        <li key={issue}>{issue}</li>
+                        <li key={issue}>{issueText(text, issue)}</li>
                       ))}
                     </ul>
                   ) : (
-                    <p>No missing intervals in the selected dataset.</p>
+                    <p>{text("quality.none")}</p>
                   )}
                   <p className="wh-muted">
                     {analysis.stream.source} / {analysis.stream.venue}
@@ -612,11 +716,12 @@ export default function MarketPage() {
               )}
             </aside>
           </section>
+          {method === "td" && <RegimeCheck stream={stream} rules={rules} />}
           <section className="wh-replay">
             <div className="wh-section-title">
               <div>
-                <span className="wh-eyebrow">REPRODUCIBLE BY DESIGN</span>
-                <h2>Snapshots & replay</h2>
+                <span className="wh-eyebrow">{text("replay.eyebrow")}</span>
+                <h2>{text("replay.title")}</h2>
               </div>
               {analysis && (
                 <a
@@ -624,37 +729,45 @@ export default function MarketPage() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Snapshot JSON ↗
+                  {text("replay.json")}
                 </a>
               )}
             </div>
             <label>
-              Saved analysis
-              <select
-                aria-label="Saved analysis"
+              {text("replay.saved")}
+              <Dropdown
+                aria-label={text("replay.saved")}
                 value={selectedId ?? ""}
-                onChange={(e) => {
-                  setSelectedId(e.target.value || null);
+                onValueChange={(value) => {
+                  setSelectedId(value || null);
                   setMarketCutoff("");
                   setCutoffEdited(false);
                 }}
               >
-                <option value="">Latest captured analysis</option>
+                <DropdownOption value="">
+                  {text("replay.latest")}
+                </DropdownOption>
                 {history.data?.map((item) => (
-                  <option key={item.snapshot_id} value={item.snapshot_id}>
-                    {stamp(item.market_at)} · window {item.rules.window} ·{" "}
-                    {item.bar_count} bars ·{" "}
-                    {item.rules.demark ? "Sequential" : "Baseline"} ·{" "}
-                    {item.data_state}
-                  </option>
+                  <DropdownOption
+                    key={item.snapshot_id}
+                    value={item.snapshot_id}
+                  >
+                    {stamp(item.market_at, missing)} ·{" "}
+                    {text("replay.window", { window: item.rules.window })} ·{" "}
+                    {text("replay.bars", { count: item.bar_count })} ·{" "}
+                    {item.rules.demark
+                      ? text("engine.sequential")
+                      : text("engine.baseline")}{" "}
+                    · {labeled(text, "data", item.data_state)}
+                  </DropdownOption>
                 ))}
-              </select>
+              </Dropdown>
             </label>
             {analysis && (
               <>
                 <div className="wh-cutoffs">
                   <label>
-                    Market cutoff (UTC)
+                    {text("replay.cutoff")}
                     <input
                       type="text"
                       placeholder="YYYY-MM-DDTHH:mm:ss"
@@ -666,51 +779,54 @@ export default function MarketPage() {
                     />
                   </label>
                   <label>
-                    Data knowledge
-                    <select
+                    {text("replay.knowledge")}
+                    <Dropdown
+                      aria-label={text("replay.knowledge")}
                       value={knowledgeMode}
-                      onChange={(e) => setKnowledgeMode(e.target.value)}
+                      onValueChange={(value) => setKnowledgeMode(value)}
                     >
-                      <option value="pinned">
-                        Pinned dataset revision · retrospective
-                      </option>
-                      <option value="as_known">
-                        Only data known at market cutoff
-                      </option>
-                    </select>
+                      <DropdownOption value="pinned">
+                        {text("replay.pinned")}
+                      </DropdownOption>
+                      <DropdownOption value="as_known">
+                        {text("replay.asKnown")}
+                      </DropdownOption>
+                    </Dropdown>
                   </label>
                   <button
                     disabled={busy || offline || !marketCutoff}
                     onClick={() => void start("analyze")}
                   >
                     {pending?.kind === "analyze"
-                      ? "Replaying…"
-                      : "Run historical replay"}
+                      ? text("replay.replaying")
+                      : text("replay.run")}
                   </button>
                 </div>
                 <p className="wh-muted">
-                  Pinned knowledge cutoff: {stamp(analysis.knowledge_at)}.
-                  Historical bars downloaded later are not presented as data
-                  known in the past.
+                  {text("replay.pinnedNote", {
+                    time: stamp(analysis.knowledge_at, missing),
+                  })}
                 </p>
                 <p className="wh-hash">
-                  Input fingerprint {analysis.input_hash.slice(0, 24)} ·{" "}
-                  {analysis.mode.replaceAll("_", " ")} ·{" "}
-                  {analysis.rules.engine_version}
+                  {text("replay.fingerprint", {
+                    hash: analysis.input_hash.slice(0, 24),
+                    mode: labeled(text, "mode", analysis.mode),
+                    engine: analysis.rules.engine_version,
+                  })}
                 </p>
               </>
             )}
           </section>
           <details className="wh-disclosure">
-            <summary>Task audit & checkpoint</summary>
+            <summary>{text("audit.summary")}</summary>
             {events.data && (
               <div className="wh-table-scroll">
                 <table>
                   <thead>
                     <tr>
-                      <th>Time (UTC)</th>
-                      <th>State</th>
-                      <th>Reason</th>
+                      <th>{text("audit.time")}</th>
+                      <th>{text("audit.state")}</th>
+                      <th>{text("audit.reason")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -731,35 +847,35 @@ export default function MarketPage() {
                 target="_blank"
                 rel="noreferrer"
               >
-                Raw captured batch ↗
+                {text("audit.batch")}
               </a>
             )}
           </details>
           {analysis && (
             <details className="wh-disclosure">
-              <summary>Accessible OHLC data & revision IDs</summary>
+              <summary>{text("ohlc.summary")}</summary>
               <div className="wh-table-scroll">
                 <table>
                   <thead>
                     <tr>
-                      <th>Open time</th>
-                      <th>Open</th>
-                      <th>High</th>
-                      <th>Low</th>
-                      <th>Close</th>
-                      <th>Volume</th>
-                      <th>Revision</th>
+                      <th>{text("ohlc.openTime")}</th>
+                      <th>{text("ohlc.open")}</th>
+                      <th>{text("ohlc.high")}</th>
+                      <th>{text("ohlc.low")}</th>
+                      <th>{text("ohlc.close")}</th>
+                      <th>{text("ohlc.volume")}</th>
+                      <th>{text("ohlc.revision")}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {[...analysis.bars].reverse().map((row) => (
                       <tr key={row.revision_id}>
-                        <td>{stamp(row.bar.open_time)}</td>
-                        <td>{money(row.bar.open)}</td>
-                        <td>{money(row.bar.high)}</td>
-                        <td>{money(row.bar.low)}</td>
-                        <td>{money(row.bar.close)}</td>
-                        <td>{money(row.bar.volume)}</td>
+                        <td>{stamp(row.bar.open_time, missing)}</td>
+                        <td>{money(row.bar.open, missing)}</td>
+                        <td>{money(row.bar.high, missing)}</td>
+                        <td>{money(row.bar.low, missing)}</td>
+                        <td>{money(row.bar.close, missing)}</td>
+                        <td>{money(row.bar.volume, missing)}</td>
                         <td title={row.revision_id}>
                           v{row.revision} · {row.revision_id.slice(0, 8)}
                         </td>
@@ -770,10 +886,7 @@ export default function MarketPage() {
               </div>
             </details>
           )}
-          <footer className="wh-footer">
-            Wealthfolio + Python · Local analysis · No brokerage connected · No
-            order execution
-          </footer>
+          <footer className="wh-footer">{text("footer")}</footer>
         </div>
       </PageContent>
     </Page>

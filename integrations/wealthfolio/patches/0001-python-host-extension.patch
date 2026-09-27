@@ -1,20 +1,43 @@
 diff --git a/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx b/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx
-index cbebb89..ea49962 100644
+index cbebb89..3f1faf1 100644
 --- a/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx
 +++ b/apps/frontend/src/pages/layouts/navigation/app-navigation.tsx
-@@ -29,2 +29,12 @@ function buildStaticNavigation(t: TFunction): NavigationProps {
+@@ -2,6 +2,7 @@ import { getDynamicNavItems, subscribeToNavigationUpdates } from "@/addons/addon
+ import { Icons } from "@wealthfolio/ui/components/ui/icons";
+ import { useEffect, useMemo, useState, type ReactNode } from "react";
+ import { useTranslation } from "react-i18next";
++import { wheelhouseNavLabel } from "@/features/wheelhouse/i18n";
+ import { getAddonNavPinKey, useAddonNavigationPins } from "./addon-navigation-pins";
+ 
+ export interface NavLink {
+@@ -27,6 +28,16 @@ type TFunction = ReturnType<typeof useTranslation>["t"];
+ function buildStaticNavigation(t: TFunction): NavigationProps {
+   return {
      primary: [
-+      {icon: <Icons.Holdings className="size-6" />, title: "Brokerage", href: "/brokerage", keywords: ["moomoo", "read-only"]},
-+      {icon: <Icons.Activity className="size-6" />, title: "Wheel cycles", href: "/wheel-cycles", keywords: ["options", "wheel"]},
-+      {icon: <Icons.Insight className="size-6" />, title: "Risk exposure", href: "/risk-exposure", keywords: ["greeks", "risk"]},
++      {icon: <Icons.Holdings className="size-6" />, title: wheelhouseNavLabel("nav.brokerage"), href: "/brokerage", keywords: ["moomoo", "read-only", "券商"]},
++      {icon: <Icons.Activity className="size-6" />, title: wheelhouseNavLabel("nav.cycles"), href: "/wheel-cycles", keywords: ["options", "wheel", "周期"]},
++      {icon: <Icons.Insight className="size-6" />, title: wheelhouseNavLabel("nav.risk"), href: "/risk-exposure", keywords: ["greeks", "risk", "风险"]},
 +      {
 +        icon: <Icons.Insight className="size-6" />,
-+        title: "Market intelligence",
++        title: wheelhouseNavLabel("nav.market"),
 +        href: "/market-intelligence",
-+        keywords: ["wheelhouse", "market", "analysis"],
-+        label: "Local Python analysis",
++        keywords: ["wheelhouse", "market", "analysis", "市场"],
++        label: wheelhouseNavLabel("nav.marketHint"),
 +      },
        {
+         icon: <Icons.Dashboard className="size-6" />,
+         title: t("common:dashboard"),
+@@ -82,8 +93,8 @@ function buildStaticNavigation(t: TFunction): NavigationProps {
+ }
+ 
+ export function useNavigation() {
+-  const { t } = useTranslation();
+-  const staticNavigation = useMemo(() => buildStaticNavigation(t), [t]);
++  const { t, i18n } = useTranslation();
++  const staticNavigation = useMemo(() => buildStaticNavigation(t), [t, i18n.language]);
+   const [dynamicItems, setDynamicItems] = useState<NavigationProps["addons"]>([]);
+   const { hasConfiguredAddonPins, pinnedAddonIdSet, setAddonPinned, setPinnedAddonIds } =
+     useAddonNavigationPins();
 diff --git a/apps/frontend/src/routes.tsx b/apps/frontend/src/routes.tsx
 index 75993bc..a9f95c0 100644
 --- a/apps/frontend/src/routes.tsx

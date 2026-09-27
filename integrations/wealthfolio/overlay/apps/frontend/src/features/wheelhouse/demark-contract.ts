@@ -5,11 +5,15 @@ export type DemarkResult = components["schemas"]["DemarkResult"];
 export type DemarkSequence = components["schemas"]["DemarkSequence"];
 const time = z.string().datetime({ offset: true });
 const price = z.string().regex(/^-?\d+(?:\.\d+)?$/);
-export const demarkConfigSchema = z.object({
+const currentDemarkConfigSchema = z.object({
   variant: z.literal("sequential"),
-  ruleset_version: z.literal("wheelhouse-sequential-1"),
+  ruleset_version: z.enum([
+    "wheelhouse-sequential-1",
+    "wheelhouse-sequential-2",
+  ]),
   price_flip_required: z.boolean(),
-  perfection_policy: z.literal("strict"),
+  perfection_policy: z.enum(["strict", "strict_at_nine"]),
+  same_side_policy: z.enum(["parallel", "retain_active"]),
   qualifier_8_vs_5: z.literal(false),
   risk_formula: z.literal("countdown_span_true_extreme_earliest"),
   tdst_breach: z.enum(["true_extreme", "close"]),
@@ -17,11 +21,26 @@ export const demarkConfigSchema = z.object({
   recycling: z.enum(["range_and_22", "none"]),
   validity_bars: z.number().int().min(1).max(10000).nullable(),
 });
+/** v1 omitted this field; its documented behavior was parallel Countdowns. */
+export const demarkConfigSchema = z.preprocess((value) => {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "ruleset_version" in value &&
+    value.ruleset_version === "wheelhouse-sequential-1" &&
+    !("same_side_policy" in value)
+  ) {
+    return { ...value, same_side_policy: "parallel" };
+  }
+  return value;
+}, currentDemarkConfigSchema);
+
 export const defaultDemarkConfig: z.infer<typeof demarkConfigSchema> = {
   variant: "sequential",
-  ruleset_version: "wheelhouse-sequential-1",
+  ruleset_version: "wheelhouse-sequential-2",
   price_flip_required: true,
-  perfection_policy: "strict",
+  perfection_policy: "strict_at_nine",
+  same_side_policy: "retain_active",
   qualifier_8_vs_5: false,
   risk_formula: "countdown_span_true_extreme_earliest",
   tdst_breach: "true_extreme",
@@ -86,7 +105,11 @@ const sequence = z.object({
     }),
   ),
 });
-export const demarkResultSchema: z.ZodType<DemarkResult> = z.object({
+export const demarkResultSchema: z.ZodType<
+  DemarkResult,
+  z.ZodTypeDef,
+  unknown
+> = z.object({
   config: demarkConfigSchema,
   input_hash: z.string(),
   history_start: time.nullable(),

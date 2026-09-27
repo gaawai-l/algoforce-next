@@ -1,0 +1,133 @@
+/* Portaled menus carry the Wheelhouse palette independently of the page root. */
+.wh-market .wh-select-trigger {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  height: auto;
+  padding: 9px 12px;
+  border: 1px solid #334254;
+  border-radius: 6px;
+  background: #121e2d;
+  color: #e5edf6;
+  font:
+    400 12px/1.5 Inter,
+    sans-serif;
+  text-align: left;
+  box-shadow: none;
+}
+.wh-market .wh-select-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.wh-market .wh-select-trigger > svg {
+  flex-shrink: 0;
+  color: #9dabbc;
+}
+.wh-market .wh-select-trigger:hover {
+  background: #182838;
+  border-color: #5f827f;
+}
+.wh-market .wh-select-trigger[data-state="open"] {
+  border-color: #59e6cd;
+  background: #152c32;
+}
+.wh-market .wh-select-trigger:focus-visible {
+  outline: 2px solid #59e6cd;
+  outline-offset: 3px;
+}
+.wh-market .wh-select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.wh-select-content {
+  --popover: 218 32% 10%;
+  --popover-foreground: 214 47% 93%;
+  z-index: 100;
+  width: max(var(--radix-select-trigger-width), 110px);
+  max-width: min(560px, calc(100vw - 24px));
+  min-width: 0;
+  max-height: min(340px, var(--radix-select-content-available-height));
+  padding: 4px;
+  border: 1px solid #38515d;
+  border-radius: 8px;
+  background: #101a27;
+  color: #e5edf6;
+  box-shadow: 0 16px 44px #0009;
+  font:
+    400 12px/1.5 Inter,
+    sans-serif;
+}
+.wh-select-content > [data-radix-select-viewport] {
+  min-width: 0 !important;
+  width: 100%;
+  padding: 0;
+}
+.wh-select-content .wh-select-option {
+  position: relative;
+  min-height: 40px;
+  padding: 10px 12px 10px 32px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  color: #e5edf6;
+  background: transparent;
+}
+.wh-select-content .wh-select-option[data-state="checked"] {
+  color: #79f0db;
+  background: #173136;
+}
+.wh-select-content .wh-select-option[data-highlighted] {
+  background: #23424a;
+  color: #f0fffc;
+  outline: none;
+}
+.wh-select-content .wh-select-option[data-disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.wh-market .wh-framebar .wh-inline .wh-select-trigger {
+  width: 82px;
+  min-height: 36px;
+  padding: 6px 10px;
+}
+.wh-market .wh-td-picker .wh-select-trigger {
+  width: 100%;
+}
+@media (max-width: 600px) {
+  .wh-select-content .wh-select-option {
+    min-height: 44px;
+  }
+  .wh-market .wh-select-trigger {
+    min-height: 44px;
+    font-size: 13px;
+  }
+}
+
+/* Native form semantics only; this control cannot open a visible OS menu. */
+.wh-market .wh-select-form-control,
+.wh-select-form-control {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  opacity: 0;
+  pointer-events: none;
+}
+.wh-select-error {
+  color: #ffb9c9;
+  font-size: 12px;
+}

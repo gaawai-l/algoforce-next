@@ -1,11 +1,26 @@
+import { Dropdown, DropdownOption } from "./dropdown";
 import { useState } from "react";
 import type { DemarkResult, DemarkSequence } from "./demark-contract";
 import { stamp } from "./client";
+import { issueText, labeled, useWheelhouseText, type TextFn } from "./i18n";
 
-export const exactPrice = (value: string | null | undefined) =>
-  value ?? "Unavailable";
-export const sequenceLabel = (s: DemarkSequence) =>
-  `${s.side === "buy" ? "Buy · downward move" : "Sell · upward move"} · ${s.countdown_status === "inactive" ? `Setup ${s.setup_count}/9` : `Countdown ${s.countdown_count}/13`} · ${s.countdown_status === "inactive" ? s.setup_status : s.countdown_status === "qualified13" ? `qualified13 / risk ${s.risk_status}` : s.countdown_status.replaceAll("_", " ")}`;
+export const exactPrice = (value: string | null | undefined, missing = "Unavailable") =>
+  value ?? missing;
+
+function sequenceLabel(s: DemarkSequence, text: TextFn) {
+  const side = s.side === "buy" ? text("demark.buyMove") : text("demark.sellMove");
+  const stage =
+    s.countdown_status === "inactive"
+      ? text("demark.setupProgress", { count: s.setup_count })
+      : text("demark.countdownProgress", { count: s.countdown_count });
+  const status =
+    s.countdown_status === "inactive"
+      ? labeled(text, "status", s.setup_status)
+      : s.countdown_status === "qualified13"
+        ? text("demark.qualifiedRisk", { risk: labeled(text, "status", s.risk_status) })
+        : labeled(text, "status", s.countdown_status);
+  return `${side} · ${stage} · ${status}`;
+}
 
 export function DemarkDetails({
   result,
@@ -16,14 +31,12 @@ export function DemarkDetails({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const { text } = useWheelhouseText();
+  const missing = text("missing");
+  const when = (value: string | null | undefined) => stamp(value, missing);
+  const price = (value: string | null | undefined) => exactPrice(value, missing);
   const [showHistory, setShowHistory] = useState(false);
-  if (!result)
-    return (
-      <p>
-        DeMark was not calculated in this snapshot. Refresh market data or run
-        historical replay to calculate Sequential from the stored bars.
-      </p>
-    );
+  if (!result) return <p>{text("demark.missing")}</p>;
   const all = [...result.sequences].reverse();
   const current = all.filter(
     (s) =>
@@ -38,158 +51,172 @@ export function DemarkDetails({
   return (
     <>
       <span className="wh-badge">
-        SEQUENTIAL · {result.status.replaceAll("_", " ").toUpperCase()}
+        {text("demark.sequential")} · {labeled(text, "status", result.status).toUpperCase()}
       </span>
-      <p>
-        Buy counts a downward move; Sell counts an upward move. A qualified 13
-        is an exhaustion candidate, not a confirmed reversal.
-      </p>
+      <details className="wh-td-explainer">
+        <summary>{text("demark.how")}</summary>
+        <p>{text("demark.howBody")}</p>
+      </details>
       <label className="wh-inline">
         <input
           type="checkbox"
           checked={showHistory}
           onChange={(e) => setShowHistory(e.target.checked)}
         />{" "}
-        Include ended sequences
+        {text("demark.includeEnded")}
       </label>
       <label className="wh-td-picker">
-        Sequence
-        <select
-          aria-label="DeMark sequence"
+        {text("demark.sequence")}
+        <Dropdown
+          aria-label={text("demark.aria")}
           value={selected?.sequence_id ?? ""}
-          onChange={(e) => onSelect(e.target.value)}
+          onValueChange={(value) => onSelect(value)}
         >
-          {!selected && <option value="">No observed sequence</option>}
+          {!selected && <DropdownOption value="">{text("demark.none")}</DropdownOption>}
           {selected && !options.includes(selected) && (
-            <option value={selected.sequence_id}>
-              {sequenceLabel(selected)} · historical
-            </option>
+            <DropdownOption value={selected.sequence_id}>
+              {sequenceLabel(selected, text)} · {text("demark.historical")}
+            </DropdownOption>
           )}
           {options.map((s) => (
-            <option key={s.sequence_id} value={s.sequence_id}>
-              {sequenceLabel(s)} ·{" "}
-              {stamp(s.setup_bars[0].close_time).slice(0, 16)}
-            </option>
+            <DropdownOption key={s.sequence_id} value={s.sequence_id}>
+              {sequenceLabel(s, text)} · {when(s.setup_bars[0].close_time).slice(0, 16)}
+            </DropdownOption>
           ))}
-        </select>
+        </Dropdown>
       </label>
       {selected && (
         <>
-          <h3>{selected.side === "buy" ? "Buy sequence" : "Sell sequence"}</h3>
+          <h3>{selected.side === "buy" ? text("demark.buySeq") : text("demark.sellSeq")}</h3>
           <dl className="wh-facts">
             <div>
-              <dt>Setup</dt>
+              <dt>{text("demark.setup")}</dt>
               <dd>
-                {selected.setup_count}/9 · {selected.setup_status}
+                {selected.setup_count}/9 · {labeled(text, "status", selected.setup_status)}
               </dd>
             </div>
             <div>
-              <dt>Perfection</dt>
+              <dt>{text("demark.perfection")}</dt>
               <dd>
                 {selected.setup_perfected === null
-                  ? "Unknown / not completed"
+                  ? text("demark.unknownPerfection")
                   : selected.setup_perfected
-                    ? "Perfected"
-                    : "Awaiting perfection"}
+                    ? text("demark.perfected")
+                    : result.config.perfection_policy === "strict_at_nine"
+                      ? text("demark.notPerfected")
+                      : text("demark.awaitingPerfection")}
               </dd>
             </div>
             <div>
-              <dt>Countdown</dt>
+              <dt>{text("demark.countdown")}</dt>
               <dd>
                 {selected.countdown_count}/13 ·{" "}
                 {selected.countdown_status === "count13_unqualified"
-                  ? "13 deferred (+)"
-                  : selected.countdown_status.replaceAll("_", " ")}
+                  ? text("demark.deferred13")
+                  : labeled(text, "status", selected.countdown_status)}
               </dd>
             </div>
             <div>
-              <dt>Continuity</dt>
+              <dt>{text("demark.continuity")}</dt>
               <dd>
-                {selected.continuity === "lost"
-                  ? "Unknown after a gap"
-                  : "Observed within input window"}
+                {selected.continuity === "lost" ? text("demark.gap") : text("demark.observed")}
               </dd>
             </div>
             <div>
-              <dt>TDST {selected.side === "buy" ? "resistance" : "support"}</dt>
-              <dd>{exactPrice(selected.tdst)}</dd>
+              <dt>
+                {selected.side === "buy" ? text("demark.tdstResistance") : text("demark.tdstSupport")}
+              </dt>
+              <dd>{price(selected.tdst)}</dd>
             </div>
             <div>
-              <dt>Countdown 8 close</dt>
-              <dd>{exactPrice(selected.qualification_threshold)}</dd>
+              <dt>{text("demark.countdown8")}</dt>
+              <dd>{price(selected.qualification_threshold)}</dd>
             </div>
             <div>
-              <dt>Risk Level · {selected.risk_status.replaceAll("_", " ")}</dt>
+              <dt>
+                {text("demark.risk", { status: labeled(text, "status", selected.risk_status) })}
+              </dt>
               <dd>
                 {selected.risk_status === "valid"
-                  ? exactPrice(selected.risk_level)
-                  : "Inactive / unavailable"}
+                  ? price(selected.risk_level)
+                  : text("demark.inactiveRisk")}
               </dd>
             </div>
             <div>
-              <dt>Qualified 13 at</dt>
-              <dd>{stamp(selected.qualified_at)}</dd>
+              <dt>{text("demark.qualifiedAt")}</dt>
+              <dd>{when(selected.qualified_at)}</dd>
             </div>
             <div>
-              <dt>Confirmation close</dt>
-              <dd>{exactPrice(selected.confirmation_close)}</dd>
+              <dt>{text("demark.confirmation")}</dt>
+              <dd>{price(selected.confirmation_close)}</dd>
             </div>
             <div>
-              <dt>Since Setup 9</dt>
+              <dt>{text("demark.sinceSetup")}</dt>
               <dd>
                 {selected.bars_since_setup9 === null
                   ? "—"
-                  : `${selected.bars_since_setup9} bars · ${selected.elapsed_since_setup9_seconds}s`}
+                  : text("demark.bars", {
+                      count: selected.bars_since_setup9,
+                      seconds: selected.elapsed_since_setup9_seconds ?? "",
+                    })}
               </dd>
             </div>
             <div>
-              <dt>Since qualified 13</dt>
+              <dt>{text("demark.since13")}</dt>
               <dd>
                 {selected.bars_since_qualified13 === null
                   ? "—"
-                  : `${selected.bars_since_qualified13} bars · ${selected.elapsed_since_qualified13_seconds}s`}
+                  : text("demark.bars", {
+                      count: selected.bars_since_qualified13,
+                      seconds: selected.elapsed_since_qualified13_seconds ?? "",
+                    })}
               </dd>
             </div>
           </dl>
           {selected.next_conditions.length > 0 && (
             <>
-              <h3>Next closed bar · all conditions</h3>
+              <h3>{text("demark.next")}</h3>
               <ul>
                 {selected.next_conditions.map((c, i) => (
                   <li key={i}>
-                    {c.field} {c.operator} {c.threshold}{" "}
-                    <small>({c.purpose})</small>
+                    {labeled(text, "quote", c.field)} {c.operator} {c.threshold}{" "}
+                    <small>({labeled(text, "purpose", c.purpose)})</small>
                   </li>
                 ))}
               </ul>
             </>
           )}
           <details>
-            <summary>Sequence evidence & events</summary>
+            <summary>{text("demark.evidence")}</summary>
             <p>
-              Setup began {stamp(selected.setup_bars[0].close_time)}. Perfected{" "}
-              {stamp(selected.perfected_at)}.
+              {text("demark.setupBegan", {
+                time: when(selected.setup_bars[0].close_time),
+                perfected: when(selected.perfected_at),
+              })}
             </p>
             <p>
-              Historical Risk Level: {exactPrice(selected.risk_level)}; source{" "}
-              {stamp(selected.risk_source?.close_time)}. Ended{" "}
-              {stamp(selected.risk_ended_at)}.
+              {text("demark.historicalRisk", {
+                level: price(selected.risk_level),
+                source: when(selected.risk_source?.close_time),
+                ended: when(selected.risk_ended_at),
+              })}
             </p>
             <p>
-              TDST source {stamp(selected.tdst_source?.close_time)}. Breached{" "}
-              {stamp(selected.tdst_breached_at)}.
+              {text("demark.tdstMeta", {
+                source: when(selected.tdst_source?.close_time),
+                breached: when(selected.tdst_breached_at),
+              })}
             </p>
             <ol className="wh-td-events">
               {result.events
                 .filter((e) => e.sequence_id === selected.sequence_id)
                 .map((e, i) => (
                   <li key={i}>
-                    {stamp(e.bar.close_time)} · {e.kind.replaceAll("_", " ")}
+                    {when(e.bar.close_time)} · {labeled(text, "kind", e.kind)}
                     {e.count !== null ? ` ${e.count}` : ""}
                     <br />
                     <small>
-                      {e.reason.replaceAll("_", " ")} ·{" "}
-                      {e.bar.revision_id.slice(0, 10)}
+                      {e.reason.replaceAll("_", " ")} · {e.bar.revision_id.slice(0, 10)}
                     </small>
                   </li>
                 ))}
@@ -197,35 +224,34 @@ export function DemarkDetails({
           </details>
         </>
       )}
-      <h3>Calculation scope</h3>
-      <p>
-        {result.qualified13_count} qualified 13 events in this input window.
-        Prior history is unknown.
-      </p>
+      <h3>{text("demark.scope")}</h3>
+      <p>{text("demark.scopeCount", { count: result.qualified13_count })}</p>
       <p className="wh-muted">
-        {stamp(result.history_start)} → {stamp(result.history_end)}
+        {when(result.history_start)} → {when(result.history_end)}
       </p>
       <ul>
         {result.issues.map((issue) => (
-          <li key={issue}>{issue}</li>
+          <li key={issue}>{issueText(text, issue)}</li>
         ))}
       </ul>
       <details>
-        <summary>Rules & variant</summary>
+        <summary>{text("demark.rules")}</summary>
         <p>
-          {result.config.ruleset_version}. Strict perfection; 13-vs-8 required;
-          optional 8-vs-5 disabled.
+          {text("demark.rulesBody", {
+            version: result.config.ruleset_version,
+            perfection: result.config.perfection_policy,
+            sameSide: result.config.same_side_policy,
+          })}
         </p>
         <p>
-          TDST breach: {result.config.tdst_breach}. Risk breach:{" "}
-          {result.config.risk_breach}. Recycling: {result.config.recycling}.
-          Expiry: {result.config.validity_bars ?? "None"}.
+          {text("demark.rulesBreach", {
+            tdst: result.config.tdst_breach,
+            risk: result.config.risk_breach,
+            recycling: result.config.recycling,
+            expiry: result.config.validity_bars ?? text("demark.noneExpiry"),
+          })}
         </p>
-        <p>
-          Risk uses the true extreme in the Countdown span, with the earliest
-          tie. Risk and recycling details are declared Wheelhouse policies, not
-          a claim of proprietary platform equivalence.
-        </p>
+        <p>{text("demark.rulesRisk")}</p>
       </details>
     </>
   );

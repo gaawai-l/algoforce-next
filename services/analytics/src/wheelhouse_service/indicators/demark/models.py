@@ -16,9 +16,12 @@ class Model(BaseModel):
 
 class DemarkConfig(Model):
     variant: Literal["sequential"] = "sequential"
-    ruleset_version: Literal["wheelhouse-sequential-1"] = "wheelhouse-sequential-1"
+    ruleset_version: Literal["wheelhouse-sequential-1", "wheelhouse-sequential-2"] = (
+        "wheelhouse-sequential-1"
+    )
     price_flip_required: bool = True
-    perfection_policy: Literal["strict"] = "strict"
+    perfection_policy: Literal["strict", "strict_at_nine"] = "strict"
+    same_side_policy: Literal["parallel", "retain_active"] = "parallel"
     qualifier_8_vs_5: Literal[False] = False
     risk_formula: Literal["countdown_span_true_extreme_earliest"] = (
         "countdown_span_true_extreme_earliest"

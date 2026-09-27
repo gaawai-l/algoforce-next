@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Analysis } from "./client";
 import { money, stamp } from "./client";
 import type { DemarkSequence } from "./demark-contract";
+import { labeled, useWheelhouseText } from "./i18n";
+import { visibleWindow, type RangeChoice, type BarWindow } from "./chart-range";
+import { ChartRangeNavigator } from "./chart-range-navigator";
 
 interface ChartProps {
   analysis: Analysis;
@@ -18,34 +21,120 @@ export function MarketChart({
   showDemark = false,
   sequence,
 }: ChartProps) {
+  const { text } = useWheelhouseText();
+  const missing = text("missing");
   const [selected, setSelected] = useState<number | null>(null);
-  const bars = analysis.bars.slice(-visibleBars);
-  const points = analysis.points.slice(-visibleBars);
+  const [rangeChoice, setRangeChoice] = useState<RangeChoice | null>(null);
+  useEffect(() => {
+    setRangeChoice(null);
+    setSelected(null);
+  }, [visibleBars]);
   const chartRef = useRef<SVGSVGElement>(null);
   const [chartWidth, setChartWidth] = useState(980);
+  const [chartHeight, setChartHeight] = useState(540);
+  const window = visibleWindow(
+    analysis.bars,
+    analysis.stream.timeframe,
+    chartWidth - 128,
+    visibleBars,
+    rangeChoice,
+  );
+  const bars = analysis.bars.slice(window.start, window.end + 1);
+  const points = analysis.points.slice(window.start, window.end + 1);
+  const changeRange = (range: BarWindow) => {
+    setSelected(null);
+    setRangeChoice({
+      kind: "custom",
+      from: analysis.bars[range.start].bar.open_time,
+      to: analysis.bars[range.end].bar.close_time,
+    });
+  };
+  const rangeToolbar = (
+    <div
+      className="wh-range-toolbar"
+      role="group"
+      aria-label={text("range.navigator")}
+    >
+      <button
+        type="button"
+        aria-pressed={rangeChoice?.kind === "week"}
+        onClick={() => {
+          setRangeChoice({ kind: "week" });
+          setSelected(null);
+        }}
+      >
+        {text("range.week")}
+      </button>
+      <button
+        type="button"
+        aria-pressed={rangeChoice?.kind === "friday"}
+        title={text("range.fridayHint")}
+        onClick={() => {
+          setRangeChoice({ kind: "friday" });
+          setSelected(null);
+        }}
+      >
+        {text("range.friday")}
+      </button>
+      <button
+        type="button"
+        aria-pressed={
+          rangeChoice?.kind === "all" || (!rangeChoice && visibleBars === -1)
+        }
+        onClick={() => {
+          setRangeChoice({ kind: "all" });
+          setSelected(null);
+        }}
+      >
+        {text("range.all")}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setRangeChoice(null);
+          setSelected(null);
+        }}
+      >
+        {text("range.reset")}
+      </button>
+      <span>
+        {text("range.visible", {
+          visible: bars.length,
+          total: analysis.bars.length,
+        })}
+      </span>
+    </div>
+  );
   useEffect(() => {
     if (!chartRef.current || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width;
       if (width && width > 0) setChartWidth(Math.round(width));
+      const height = entries[0]?.contentRect.height;
+      if (height && height > 0) setChartHeight(Math.round(height));
     });
     observer.observe(chartRef.current);
     return () => observer.disconnect();
   }, [bars.length]);
   const plotWidth = Math.max(120, chartWidth - 128);
   const right = 16 + plotWidth;
+  const eventsByBar = useMemo(() => {
+    const index = new Map<string, NonNullable<Analysis["demark"]>["events"]>();
+    for (const event of analysis.demark?.events ?? []) {
+      const row = index.get(event.bar.revision_id) ?? [];
+      row.push(event);
+      index.set(event.bar.revision_id, row);
+    }
+    return index;
+  }, [analysis.demark]);
   if (!bars.length)
     return (
-      <div className="wh-empty">
-        No closed bars were available at both cutoffs.
-      </div>
+      <>
+        {rangeToolbar}
+        <div className="wh-empty">{text("range.empty")}</div>
+      </>
     );
   const latest = points.at(-1);
-  const markers = showDemark
-    ? (analysis.demark?.events ?? []).filter((e) =>
-        ["setup_completed", "qualified13", "deferred13"].includes(e.kind),
-      )
-    : [];
   const visibleStart = new Date(bars[0].bar.close_time).getTime();
   const visibleEnd = new Date(bars[bars.length - 1].bar.close_time).getTime();
   const ended = analysis.demark?.events.find(
@@ -100,15 +189,15 @@ export function MarketChart({
   const top = high + padding,
     bottom = low - padding;
   const x = (i: number) => 16 + ((i + 0.5) * plotWidth) / bars.length;
-  const y = (price: number) => 18 + ((top - price) / (top - bottom)) * 310;
+  const plotBottom = chartHeight - 47;
+  const y = (price: number) =>
+    18 + ((top - price) / (top - bottom)) * (plotBottom - 18);
   const barWidth = Math.max(1, (plotWidth / bars.length) * 0.65);
   const index =
     selected === null ? bars.length - 1 : Math.min(selected, bars.length - 1);
   const current = bars[index].bar;
   const selectedEvents = showDemark
-    ? (analysis.demark?.events ?? []).filter(
-        (e) => e.bar.revision_id === bars[index].revision_id,
-      )
+    ? (eventsByBar.get(bars[index].revision_id) ?? [])
     : [];
 
   const segments: string[] = [];
@@ -123,31 +212,46 @@ export function MarketChart({
   });
   return (
     <>
+      {rangeToolbar}
+      {window.clipped && (
+        <p className="wh-range-notice">{text("range.clipped")}</p>
+      )}
       <div className="wh-chart-readout">
-        {stamp(current.open_time)} · O {money(current.open)} · H{" "}
-        {money(current.high)} · L {money(current.low)} · C{" "}
-        {money(current.close)}
+        {stamp(current.open_time, missing)} · O {money(current.open, missing)} ·
+        H {money(current.high, missing)} · L {money(current.low, missing)} · C{" "}
+        {money(current.close, missing)}
       </div>
       {showDemark && (
         <div className="wh-chart-readout" aria-live="polite">
           {!analysis.demark
-            ? "DeMark not calculated in this snapshot"
+            ? text("chart.notCalculated")
             : selectedEvents.length
               ? selectedEvents
                   .map(
                     (e) =>
-                      `${e.side} ${e.kind.replaceAll("_", " ")}${e.count !== null ? ` ${e.count}` : ""}`,
+                      `${labeled(text, "side", e.side)} ${labeled(text, "kind", e.kind)}${e.count !== null ? ` ${e.count}` : ""}`,
                   )
                   .join(" · ")
-              : "No Sequential event on this bar"}
+              : text("chart.noEvent")}
         </div>
       )}
       <svg
         className="wh-chart"
         ref={chartRef}
-        viewBox={`0 0 ${chartWidth} 375`}
+        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
         role="img"
-        aria-label={`${analysis.stream.symbol} ${analysis.stream.timeframe} closed candlesticks and ${showDemark ? "server-calculated Sequential markers" : `SMA ${analysis.rules.window}`}. Use arrow keys to inspect bars; a data table is available below.`}
+        aria-label={
+          showDemark
+            ? text("chart.ariaDemark", {
+                symbol: analysis.stream.symbol,
+                timeframe: analysis.stream.timeframe,
+              })
+            : text("chart.ariaSma", {
+                symbol: analysis.stream.symbol,
+                timeframe: analysis.stream.timeframe,
+                window: analysis.rules.window,
+              })
+        }
         tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -183,9 +287,7 @@ export function MarketChart({
         onPointerLeave={() => setSelected(null)}
       >
         <title>
-          {showDemark
-            ? "Sequential: B/S 9 = completed Setup, 13 = qualified Countdown, + = deferred 13. Counts are exhaustion observations, not orders."
-            : "Closed OHLC bars and server-calculated SMA. No trading signal."}
+          {showDemark ? text("chart.titleDemark") : text("chart.titleSma")}
         </title>
         {Array.from({ length: 5 }, (_, i) => {
           const price = bottom + ((top - bottom) * i) / 4;
@@ -199,7 +301,7 @@ export function MarketChart({
                 stroke="var(--wh-edge)"
               />
               <text x={right + 11} y={y(price) + 4} className="wh-axis">
-                {money(String(price))}
+                {money(String(price), missing)}
               </text>
             </g>
           );
@@ -241,8 +343,11 @@ export function MarketChart({
         )}
         {showDemark &&
           bars.map((row, i) => {
-            const events = markers.filter(
-              (e) => e.bar.revision_id === row.revision_id,
+            const events = (eventsByBar.get(row.revision_id) ?? []).filter(
+              (e) =>
+                ["setup_completed", "qualified13", "deferred13"].includes(
+                  e.kind,
+                ),
             );
             return (["buy", "sell"] as const).map((side) => {
               const atSide = events.filter((e) => e.side === side);
@@ -264,15 +369,15 @@ export function MarketChart({
                   x={x(i)}
                   y={
                     side === "buy"
-                      ? Math.min(341, y(Number(row.bar.low)) + 16)
+                      ? Math.min(chartHeight - 34, y(Number(row.bar.low)) + 16)
                       : Math.max(13, y(Number(row.bar.high)) - 8)
                   }
                   textAnchor="middle"
-                  className="wh-td-marker"
-                  fill={side === "buy" ? "var(--wh-cyan)" : "var(--wh-rose)"}
+                  className={`wh-td-marker ${atSide.some((e) => e.kind === "qualified13") ? "wh-td-thirteen" : atSide.some((e) => e.kind === "setup_completed") ? "wh-td-nine" : "wh-td-deferred"}`}
                 >
                   <title>
-                    {side} {label} · {stamp(row.bar.close_time)}
+                    {labeled(text, "side", side)} {label} ·{" "}
+                    {stamp(row.bar.close_time, missing)}
                   </title>
                   {side === "buy" ? "B" : "S"}
                   {label}
@@ -342,37 +447,56 @@ export function MarketChart({
           x1={x(index)}
           x2={x(index)}
           y1="18"
-          y2="330"
+          y2={plotBottom}
           stroke="var(--wh-muted)"
           strokeDasharray="2 4"
           opacity=".5"
         />
-        <text x="16" y="357" className="wh-axis">
+        <text x="16" y={chartHeight - 18} className="wh-axis">
           {chartWidth < 500
-            ? stamp(bars[0].bar.open_time).slice(5, 10)
-            : stamp(bars[0].bar.open_time).slice(0, 16)}
+            ? stamp(bars[0].bar.open_time, missing).slice(5, 10)
+            : stamp(bars[0].bar.open_time, missing).slice(0, 16)}
         </text>
-        <text x={right} y="357" textAnchor="end" className="wh-axis">
+        <text
+          x={right}
+          y={chartHeight - 18}
+          textAnchor="end"
+          className="wh-axis"
+        >
           {chartWidth < 500
-            ? stamp(bars.at(-1)?.bar.open_time).slice(5, 10)
-            : stamp(bars.at(-1)?.bar.open_time).slice(0, 16)}{" "}
+            ? stamp(bars.at(-1)?.bar.open_time, missing).slice(5, 10)
+            : stamp(bars.at(-1)?.bar.open_time, missing).slice(0, 16)}{" "}
           UTC
         </text>
       </svg>
+      <ChartRangeNavigator
+        total={analysis.bars.length}
+        start={window.start}
+        end={window.end}
+        onChange={changeRange}
+      />
+      <div className="wh-range-dates" aria-live="polite">
+        <span>{stamp(bars[0].bar.open_time, missing)}</span>
+        <span>→ {stamp(bars.at(-1)?.bar.close_time, missing)}</span>
+      </div>
       <div className="wh-chart-legend">
         {showDemark ? (
           <>
-            <span>B = Buy / downward move · S = Sell / upward move</span>
-            <span>9 = Setup · 13 = qualified · + = deferred</span>
-            <span>Lines: selected sequence only</span>
+            <span>{text("legend.buySell")}</span>
+            <span className="wh-td-nine">{text("legend.setup")}</span>
+            <span className="wh-td-thirteen">{text("legend.qualified")}</span>
+            <span className="wh-td-deferred">{text("legend.deferred")}</span>
+            <span>{text("legend.lines")}</span>
           </>
         ) : (
           <>
-            <span className="wh-purple">— SMA {analysis.rules.window}</span>
-            <span>Dashed: prior-window high / low</span>
+            <span className="wh-purple">
+              {text("legend.sma", { window: analysis.rules.window })}
+            </span>
+            <span>{text("legend.dashed")}</span>
           </>
         )}
-        <span>Closed bars only</span>
+        <span>{text("legend.closedOnly")}</span>
       </div>
     </>
   );

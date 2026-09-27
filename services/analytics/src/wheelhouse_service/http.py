@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .calculation import data_state
+from .context import MarketContext, build_context
 from .contracts import ErrorBody, Integrations, ServiceStatus
 from .market import (
     DURATIONS,
@@ -167,6 +168,7 @@ def create_app(
                 "historical_replay",
                 "durable_jobs",
                 "scheduled_refresh",
+                "market_context",
             ],
         )
 
@@ -222,6 +224,31 @@ def create_app(
     @app.get(f"{PREFIX}/jobs/{{job_id}}/events", response_model=list[JobEvent])
     def events(job_id: str) -> list[JobEvent]:
         return repo().job_events(job_id)
+
+    @app.get(f"{PREFIX}/market-context", response_model=MarketContext)
+    def market_context(
+        source: Source = "fixture",
+        symbol: str = "BTCUSDT",
+        market_at: datetime | None = None,
+        knowledge_at: datetime | None = None,
+    ) -> MarketContext:
+        if symbol not in {"BTCUSDT", "ETHUSDT"}:
+            raise APIException(422)
+        if (market_at is None) != (knowledge_at is None):
+            raise APIException(422)
+        now = datetime.now(UTC)
+        market = market_at or now
+        knowledge = knowledge_at or now
+        if market.tzinfo is None or knowledge.tzinfo is None or market > now or knowledge > now:
+            raise APIException(422)
+        return build_context(
+            repo(),
+            source,
+            symbol,  # type: ignore[arg-type]
+            market_at=market,
+            knowledge_at=knowledge,
+            checked_at=now,
+        )
 
     @app.get(f"{PREFIX}/workspace", response_model=Workspace)
     def workspace(

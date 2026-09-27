@@ -125,7 +125,7 @@
     max-height: 350px;
   }
   .wh-portfolio .wh-form input,
-  .wh-portfolio .wh-form select {
+  .wh-portfolio .wh-form .wh-select-trigger {
     font-size: 13px;
   }
 }
