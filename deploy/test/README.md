@@ -4,10 +4,10 @@ Deploy the `codex/test-environment` branch with Coolify Docker Compose. Compose 
 
 Runtime variables:
 - `TEST_AUTH_USER`: test access username.
-- `TEST_AUTH_HASH`: Apache APR1 password hash (not the plaintext password).
+- `TEST_AUTH_HASH`: Base64-encoded Apache APR1 password hash (not the plaintext password).
 - `WF_SECRET_KEY`: independent 32-byte encryption key, encoded as base64 or a 32-character ASCII value.
 
-Store these in Coolify environment variables; never commit their values. Docker Compose interpolation must preserve dollar signs in the APR1 hash. Keep test credentials separate from brokerage credentials.
+Store these in Coolify environment variables; never commit their values. The hash is base64-encoded to prevent Compose or the platform from interpreting dollar signs. Keep test credentials separate from brokerage credentials.
 
 The web image compiles the pinned upstream Wealthfolio source with this repository's overlay. Python is installed from the local source tree. The image context is an allowlist, so local databases, `.env`, virtual environments and broker SDK/runtime files are excluded. There is no OpenD in this stack; public broker discovery/sync paths return 403.
 

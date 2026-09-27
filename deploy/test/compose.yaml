@@ -1,7 +1,7 @@
 services:
   web:
     build:
-      context: ../..
+      context: .
       dockerfile: deploy/test/Dockerfile
       target: web
     environment:
@@ -20,7 +20,7 @@ services:
       retries: 3
   analytics:
     build:
-      context: ../..
+      context: .
       dockerfile: deploy/test/Dockerfile
       target: analytics
     environment:
