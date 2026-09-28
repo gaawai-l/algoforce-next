@@ -89,6 +89,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/market-cycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Market Cycle */
+        get: operations["market_cycle_api_wheelhouse_v1_market_cycle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/workspace": {
         parameters: {
             query?: never;
@@ -567,6 +584,21 @@ export interface components {
              */
             created_at: string;
         };
+        /** CycleIndex */
+        CycleIndex: {
+            components: components["schemas"]["IndexComponents"];
+            /** Composite */
+            composite: number;
+            /**
+             * Zone
+             * @enum {string}
+             */
+            zone: "low" | "transition_low" | "mid" | "transition_high" | "top";
+            /** Change */
+            change: {
+                [key: string]: number | null;
+            };
+        };
         /** CycleResult */
         CycleResult: {
             cycle: components["schemas"]["Cycle"];
@@ -602,6 +634,31 @@ export interface components {
             events: components["schemas"]["LedgerEvent-Output"][];
             /** Issues */
             issues: string[];
+        };
+        /** CycleStates */
+        CycleStates: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "advance" | "breakout" | "pressure" | "repair" | "breakdown" | "capitulation";
+            /**
+             * Since
+             * Format: date
+             */
+            since: string;
+            /** Days */
+            days: number;
+            /** Changes */
+            changes: number;
+            /** Depth */
+            depth: number;
+            /** Spread */
+            spread: number;
+            /** Multiplier */
+            multiplier: number;
+            /** Stats */
+            stats: components["schemas"]["StateStats"][];
         };
         /** DemarkConfig */
         "DemarkConfig-Input": {
@@ -971,6 +1028,17 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** IndexComponents */
+        IndexComponents: {
+            /** Unrealized */
+            unrealized: number;
+            /** Realized */
+            realized: number;
+            /** Supply */
+            supply: number;
+            /** Young Vs Seasoned */
+            young_vs_seasoned: number;
+        };
         /** Instrument */
         "Instrument-Input": {
             /** Code */
@@ -1234,6 +1302,31 @@ export interface components {
             intraday: components["schemas"]["RegimeState"];
             swing: components["schemas"]["RegimeState"];
         };
+        /** MarketCycle */
+        MarketCycle: {
+            /**
+             * Source
+             * @constant
+             */
+            source: "bitview";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "fresh" | "stale" | "unavailable";
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** As Of */
+            as_of: string | null;
+            states: components["schemas"]["CycleStates"] | null;
+            index: components["schemas"]["CycleIndex"] | null;
+            pressure: components["schemas"]["ShortTermPressure"] | null;
+            /** Error */
+            error: string | null;
+        };
         /** NewCycle */
         NewCycle: {
             /**
@@ -1390,6 +1483,16 @@ export interface components {
              * Format: date-time
              */
             observed_at: string;
+        };
+        /** PressurePoint */
+        PressurePoint: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Value */
+            value: number;
         };
         /** PrevCountdown */
         PrevCountdown: {
@@ -1664,6 +1767,24 @@ export interface components {
             /** Completed */
             completed: boolean;
         };
+        /** ShortTermPressure */
+        ShortTermPressure: {
+            /** Value */
+            value: number;
+            /** History */
+            history: components["schemas"]["PressurePoint"][];
+            /** Warn */
+            warn: number;
+            /** Confirm */
+            confirm: number;
+            /** Thresholds Confirmed */
+            thresholds_confirmed: boolean;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "none" | "warning" | "confirmed";
+        };
         /** Signal */
         Signal: {
             /**
@@ -1731,6 +1852,24 @@ export interface components {
             mode: string;
             /** Bar Count */
             bar_count: number;
+        };
+        /** StateStats */
+        StateStats: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "advance" | "breakout" | "pressure" | "repair" | "breakdown" | "capitulation";
+            /** Runs */
+            runs: number;
+            /** Days */
+            days: number;
+            /** Mean Days */
+            mean_days: number | null;
+            /** Median Days */
+            median_days: number | null;
+            /** Max Days */
+            max_days: number | null;
         };
         /** StorageStats */
         StorageStats: {
@@ -2173,6 +2312,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    market_cycle_api_wheelhouse_v1_market_cycle_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketCycle"];
                 };
             };
         };

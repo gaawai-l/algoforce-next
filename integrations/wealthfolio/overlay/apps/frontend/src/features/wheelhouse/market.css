@@ -1063,3 +1063,7 @@
 .wh-regime-error {
   color: var(--wh-rose);
 }
+.wh-regime-table tr[aria-current] th[scope="row"],
+.wh-regime-table tr[aria-current] td {
+  color: var(--wh-cyan);
+}

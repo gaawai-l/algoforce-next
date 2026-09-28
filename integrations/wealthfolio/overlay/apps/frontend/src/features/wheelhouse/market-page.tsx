@@ -14,6 +14,7 @@ import { issueText, labeled, useWheelhouseText } from "./i18n";
 import { MarketChart } from "./market-chart";
 import { useLiveMarketRefresh } from "./use-initial-market-refresh";
 import { DemarkDetails } from "./demark-details";
+import { CycleCheck } from "./cycle-check";
 import { RegimeCheck } from "./regime-check";
 import { defaultDemarkConfig } from "./demark-contract";
 import {
@@ -641,6 +642,7 @@ export default function MarketPage() {
           {method === "td" && (
             <RegimeCheck stream={stream} rules={rules} live={!selectedId} />
           )}
+          {method === "td" && symbol === "BTCUSDT" && <CycleCheck />}
           <section className="wh-replay">
             <div className="wh-section-title">
               <div>

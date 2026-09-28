@@ -21,6 +21,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .calculation import data_state
 from .context import MarketContext, build_context
 from .contracts import ErrorBody, Integrations, ServiceStatus
+from .cycle import Fetch, MarketCycle, build_cycle
 from .market import (
     DURATIONS,
     Analysis,
@@ -38,12 +39,15 @@ from .market import (
     Workspace,
     default_source,
 )
+from .onchain import fetch_daily
 from .portfolio.api import create_router as portfolio_router
 from .repository import Repository
 from .runtime import Runtime
 from .settings import Settings
 
 PREFIX = "/api/wheelhouse/v1"
+# bitview publishes daily; a failed read is retried sooner than a good one is refreshed.
+CYCLE_TTL = {"fresh": 900.0, "stale": 900.0, "unavailable": 60.0}
 logger = logging.getLogger("wheelhouse.requests")
 
 
@@ -52,8 +56,10 @@ def create_app(
     *,
     start_worker: bool = True,
     start_broker_worker: bool | None = None,
+    cycle_fetch: Fetch = fetch_daily,
 ) -> FastAPI:
     repository: Repository | None = None
+    cycle_cache: tuple[float, MarketCycle] | None = None
 
     def repo() -> Repository:
         assert repository is not None, "Application lifespan has not started"
@@ -170,6 +176,7 @@ def create_app(
                 "durable_jobs",
                 "scheduled_refresh",
                 "market_context",
+                "market_cycle",
             ],
         )
 
@@ -250,6 +257,13 @@ def create_app(
             knowledge_at=knowledge,
             checked_at=now,
         )
+
+    @app.get(f"{PREFIX}/market-cycle", response_model=MarketCycle)
+    def market_cycle() -> MarketCycle:
+        nonlocal cycle_cache
+        if cycle_cache is None or monotonic() - cycle_cache[0] > CYCLE_TTL[cycle_cache[1].status]:
+            cycle_cache = (monotonic(), build_cycle(datetime.now(UTC), cycle_fetch))
+        return cycle_cache[1]
 
     @app.get(f"{PREFIX}/workspace", response_model=Workspace)
     def workspace(

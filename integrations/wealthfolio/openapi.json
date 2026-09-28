@@ -251,6 +251,24 @@
         }
       }
     },
+    "/api/wheelhouse/v1/market-cycle": {
+      "get": {
+        "summary": "Market Cycle",
+        "operationId": "market_cycle_api_wheelhouse_v1_market_cycle_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketCycle"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/workspace": {
       "get": {
         "summary": "Workspace",
@@ -1492,6 +1510,51 @@
         ],
         "title": "Cycle"
       },
+      "CycleIndex": {
+        "properties": {
+          "components": {
+            "$ref": "#/components/schemas/IndexComponents"
+          },
+          "composite": {
+            "type": "number",
+            "title": "Composite"
+          },
+          "zone": {
+            "type": "string",
+            "enum": [
+              "low",
+              "transition_low",
+              "mid",
+              "transition_high",
+              "top"
+            ],
+            "title": "Zone"
+          },
+          "change": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Change"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "components",
+          "composite",
+          "zone",
+          "change"
+        ],
+        "title": "CycleIndex"
+      },
       "CycleResult": {
         "properties": {
           "cycle": {
@@ -1634,6 +1697,67 @@
           "issues"
         ],
         "title": "CycleResult"
+      },
+      "CycleStates": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "advance",
+              "breakout",
+              "pressure",
+              "repair",
+              "breakdown",
+              "capitulation"
+            ],
+            "title": "State"
+          },
+          "since": {
+            "type": "string",
+            "format": "date",
+            "title": "Since"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "changes": {
+            "type": "integer",
+            "title": "Changes"
+          },
+          "depth": {
+            "type": "number",
+            "title": "Depth"
+          },
+          "spread": {
+            "type": "number",
+            "title": "Spread"
+          },
+          "multiplier": {
+            "type": "integer",
+            "title": "Multiplier"
+          },
+          "stats": {
+            "items": {
+              "$ref": "#/components/schemas/StateStats"
+            },
+            "type": "array",
+            "title": "Stats"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "since",
+          "days",
+          "changes",
+          "depth",
+          "spread",
+          "multiplier",
+          "stats"
+        ],
+        "title": "CycleStates"
       },
       "DemarkConfig-Input": {
         "properties": {
@@ -2648,6 +2772,35 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "IndexComponents": {
+        "properties": {
+          "unrealized": {
+            "type": "number",
+            "title": "Unrealized"
+          },
+          "realized": {
+            "type": "number",
+            "title": "Realized"
+          },
+          "supply": {
+            "type": "number",
+            "title": "Supply"
+          },
+          "young_vs_seasoned": {
+            "type": "number",
+            "title": "Young Vs Seasoned"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "unrealized",
+          "realized",
+          "supply",
+          "young_vs_seasoned"
+        ],
+        "title": "IndexComponents"
+      },
       "Instrument-Input": {
         "properties": {
           "code": {
@@ -3414,6 +3567,95 @@
         ],
         "title": "MarketContext"
       },
+      "MarketCycle": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "const": "bitview",
+            "title": "Source"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "states": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CycleStates"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "index": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CycleIndex"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pressure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShortTermPressure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "status",
+          "checked_at",
+          "as_of",
+          "states",
+          "index",
+          "pressure",
+          "error"
+        ],
+        "title": "MarketCycle"
+      },
       "NewCycle": {
         "properties": {
           "source": {
@@ -3867,6 +4109,26 @@
           "observed_at"
         ],
         "title": "Position"
+      },
+      "PressurePoint": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "value"
+        ],
+        "title": "PressurePoint"
       },
       "PrevCountdown": {
         "properties": {
@@ -4566,6 +4828,53 @@
         ],
         "title": "SetupRun"
       },
+      "ShortTermPressure": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/PressurePoint"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "warn": {
+            "type": "number",
+            "title": "Warn"
+          },
+          "confirm": {
+            "type": "number",
+            "title": "Confirm"
+          },
+          "thresholds_confirmed": {
+            "type": "boolean",
+            "title": "Thresholds Confirmed"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "none",
+              "warning",
+              "confirmed"
+            ],
+            "title": "Stage"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "value",
+          "history",
+          "warn",
+          "confirm",
+          "thresholds_confirmed",
+          "stage"
+        ],
+        "title": "ShortTermPressure"
+      },
       "Signal": {
         "properties": {
           "n": {
@@ -4729,6 +5038,74 @@
           "bar_count"
         ],
         "title": "SnapshotSummary"
+      },
+      "StateStats": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "advance",
+              "breakout",
+              "pressure",
+              "repair",
+              "breakdown",
+              "capitulation"
+            ],
+            "title": "State"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "mean_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Days"
+          },
+          "median_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Days"
+          },
+          "max_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Days"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "runs",
+          "days",
+          "mean_days",
+          "median_days",
+          "max_days"
+        ],
+        "title": "StateStats"
       },
       "StorageStats": {
         "properties": {
