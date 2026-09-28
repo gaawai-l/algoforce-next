@@ -153,11 +153,16 @@ def summarize(result: DemarkResult, bars: list[Bar], as_of: datetime) -> DemarkS
             # (TradingSignal 2026-09-27 4h lists a perfected one; 2026-09-28 5m omits one).
             continue
         chain.append(seq)
-    if not active and chain and chain[0].side != run.side and not any(
-        c.countdown_status == "qualified13" and c.risk_status == "valid" for c in chain
+    qualified = [c for c in chain if c.countdown_status == "qualified13"]
+    if (
+        not active
+        and chain
+        and not any(c.risk_status == "valid" for c in qualified)
+        and (qualified or chain[0].side != run.side)
     ):
-        # An opposite run drops the chain once its 13's risk level has broken (2026-09-27
-        # 15m); a 13 whose risk level holds stays listed (2026-09-28 5m).
+        # Outside countdown the chain drops once its 13's risk level has broken, whether the
+        # run is opposite (2026-09-27 15m) or same-side (2026-09-28 09:15 5m); a 13 whose risk
+        # level holds stays listed (2026-09-28 04:16 5m).
         chain = []
     if not any(c is run for c in chain):
         chain.append(run)
@@ -279,7 +284,10 @@ def summarize(result: DemarkResult, bars: list[Bar], as_of: datetime) -> DemarkS
             ),
             risk_level=risk13.risk_level if risk13 is not None else None,
             risk13_at=_t13(risk13) if risk13 is not None else None,
-            provisional=not (risk13 is not None and first is risk13),
+            # Firm until a same-side 9 completes after the 13 (2026-09-28 1h, 5m 09:15).
+            provisional=not (
+                risk13 is not None and setup9 is not None and _t9(setup9) < _t13(risk13)
+            ),
             close13=close13,
             tdst=tdst,
             next_bar_needs=(

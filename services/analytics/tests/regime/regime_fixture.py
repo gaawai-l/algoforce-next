@@ -20,6 +20,8 @@ FIXTURE_0407 = Path(__file__).parent / "fixtures" / "alphabtc-td9-2026-09-28T040
 FIXTURE_0416 = Path(__file__).parent / "fixtures" / "alphabtc-td9-2026-09-28T041636Z.json"
 # 15m counting 13 with a SELL setup beside it.
 FIXTURE_0431 = Path(__file__).parent / "fixtures" / "alphabtc-td9-2026-09-28T043154Z.json"
+# 5m back in a BUY setup after the 04:00 BUY 13's risk level broke.
+FIXTURE_0915 = Path(__file__).parent / "fixtures" / "alphabtc-td9-2026-09-28T091511Z.json"
 TIMEFRAMES = ("5m", "15m", "1h", "4h", "1d")
 V2 = DemarkConfig(
     ruleset_version="wheelhouse-sequential-2",

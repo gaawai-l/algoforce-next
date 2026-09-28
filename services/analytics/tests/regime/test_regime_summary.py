@@ -10,6 +10,7 @@ from regime_fixture import (
     FIXTURE_0407,
     FIXTURE_0416,
     FIXTURE_0431,
+    FIXTURE_0915,
     TIMEFRAMES,
     V2,
     load_fixture,
@@ -25,7 +26,11 @@ STRUCTURAL = (
     "barsSinceQualified13", "lastSignal", "prev", "second", "rounds",
 )
 PRICES = ("riskLevel", "risk9", "setupClose", "close13", "tdst")
-FIXTURES = (FIXTURE, FIXTURE_0350, FIXTURE_0400, FIXTURE_0407, FIXTURE_0416, FIXTURE_0431)
+# TradingSignal computed this risk block one 5m bar after its across block (setup 4 vs 3).
+RISK_ONE_BAR_LATER = {(FIXTURE_0915, "5m")}
+FIXTURES = (
+    FIXTURE, FIXTURE_0350, FIXTURE_0400, FIXTURE_0407, FIXTURE_0416, FIXTURE_0431, FIXTURE_0915
+)
 CASES = [(path, tf) for path in FIXTURES for tf in TIMEFRAMES]
 
 
@@ -50,9 +55,12 @@ def test_structure_matches_tradingsignal(path, tf):
     across, risk = _replay(tf, path)
     for key in STRUCTURAL:
         assert _strip(across.get(key)) == _strip(expected["across"].get(key)), key
-    for key in ("provisional", "risk13Ts", "risk9Ts", "side", "setupRun"):
+    for key in ("provisional", "risk13Ts", "risk9Ts", "side"):
         assert risk[key] == expected["risk"][key], key
     assert risk["nextBarNeeds"]["direction"] == expected["risk"]["nextBarNeeds"]["direction"]
+    if (path, tf) in RISK_ONE_BAR_LATER:
+        return
+    assert risk["setupRun"] == expected["risk"]["setupRun"]
     need = Decimal(str(expected["risk"]["nextBarNeeds"]["price"]))
     assert abs(Decimal(risk["nextBarNeeds"]["price"]) - need) < Decimal("1e-6")
 
