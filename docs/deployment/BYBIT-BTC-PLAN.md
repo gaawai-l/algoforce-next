@@ -5,7 +5,7 @@
 - [x] 测试并实现 Bybit V5 spot K线适配：时间周期映射、逆序转正序、已收盘边界、API错误与身份校验，不回退币安/fixture。
 - [x] 新增 source=bybit/venue=bybit-spot 隔离存储；默认BTC使用Bybit，ETH/MU仍Binance。旧源快照保留可读。
 - [x] 更新前端来源路由、标签、契约；相关测试与构建、同窗历史导出核对。
-- [ ] 发布test并重算BTC全部周期、验证MU/ETH未改变来源，保存验收记录。
+- [x] 发布test并重算BTC全部周期、验证MU/ETH未改变来源，保存验收记录。
 
 2026-09-28 部署服务器已成功访问官方 `/v5/market/kline?category=spot&symbol=BTCUSDT&interval=60`。来源切换不改算法，不将形成中观察冒充已收盘。
 
@@ -15,3 +15,5 @@
 - 159项Python测试、17项相关前端测试通过，TypeScript与Ruff通过。排除独立部署分支缺少broker脚本的SDK协议测试，原因同前次发布。
 - 独立审查无P1/P2；另补充Bybit429/10006/10016可重试测试。
 - 浏览器BTC显示Bybit现货、499根已收盘K线、TDST85005.10；MU/ETH保留币安永续配置。无数据源选择，无模拟回退。
+
+线上部署 `vs7owpv1hbyzeikpnoqnpj3b` 成功，版本 `1f4d9dc`；BTC五周期全部Bybit/fresh，MU/ETH Binance来源保持，外网保护与健康检查通过。
