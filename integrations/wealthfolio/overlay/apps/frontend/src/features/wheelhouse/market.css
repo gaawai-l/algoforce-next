@@ -1067,3 +1067,40 @@
 .wh-regime-table tr[aria-current] td {
   color: var(--wh-cyan);
 }
+.wh-regime-table td.is-muted {
+  color: var(--wh-muted);
+}
+.wh-flow-step {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  color: var(--wh-muted);
+}
+.wh-flow-item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+.wh-flow-item button {
+  background: transparent;
+  border: 1px solid var(--wh-edge);
+  border-radius: 6px;
+  color: inherit;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.wh-flow-item button.is-active {
+  border-color: var(--wh-cyan);
+  color: var(--wh-cyan);
+}
+.wh-flow-action.is-up {
+  color: var(--wh-cyan);
+}
+.wh-flow-action.is-down,
+.wh-flow-action.is-bb {
+  color: var(--wh-rose);
+}
+.wh-flow-action.is-buyback {
+  color: var(--wh-td-thirteen);
+}

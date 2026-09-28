@@ -58,6 +58,7 @@
     - 用的哪个数据源（TradingSignal 的 Bybit 现货，还是 Binance）？时间范围多长？
     - DeMark 用什么设置（是否要求 perfected 9、13 的延期规则）？
     - 能否把 Put 原表和 Call 的"4 条件 × 8 行"大表或回测脚本发我们？我们会用自己的引擎复算对照。
+    - 我们用 Binance 现货 2017-08 以来的数据只数出 11 次日线 Buy 13，你那边是 16 次。你的起止时间和 13 的判定规则是什么？复算对照见 [BACKTEST-PROBE](BACKTEST-PROBE.md)。
 
 ## ④ 周期观点（五档）
 
