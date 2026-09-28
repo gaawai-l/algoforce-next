@@ -10,7 +10,13 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 from .indicators.demark.models import DemarkConfig, DemarkResult
 
 Timeframe = Literal["5m", "15m", "1h", "4h", "1d"]
-Source = Literal["fixture", "binance"]
+Source = Literal["fixture", "binance", "bybit"]
+
+
+def default_source(symbol: str) -> Source:
+    return "bybit" if symbol == "BTCUSDT" else "binance"
+
+
 DURATIONS: dict[str, int] = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
 
 
@@ -37,7 +43,9 @@ class Stream(Model):
     source: Source
     symbol: Literal["BTCUSDT", "ETHUSDT", "MUUSDT"]
     timeframe: Timeframe
-    venue: Literal["binance-spot", "binance-usdm-perpetual"] = "binance-usdm-perpetual"
+    venue: Literal["binance-spot", "binance-usdm-perpetual", "bybit-spot"] = (
+        "binance-usdm-perpetual"
+    )
     market_session: Literal["24/7"] = "24/7"
     timezone: Literal["UTC"] = "UTC"
     quote_currency: Literal["USDT"] = "USDT"
@@ -57,6 +65,8 @@ class Stream(Model):
                     "venue",
                     "binance-spot"
                     if values.get("source") == "fixture"
+                    else "bybit-spot"
+                    if values.get("source") == "bybit"
                     else "binance-usdm-perpetual",
                 ),
             }
@@ -66,6 +76,8 @@ class Stream(Model):
     def matching_currency(self) -> Self:
         if self.base_currency != self.symbol.removesuffix("USDT"):
             raise ValueError("Base currency must match instrument identity")
+        if (self.source == "bybit") != (self.venue == "bybit-spot"):
+            raise ValueError("Bybit source and venue must match")
         return self
 
     @property

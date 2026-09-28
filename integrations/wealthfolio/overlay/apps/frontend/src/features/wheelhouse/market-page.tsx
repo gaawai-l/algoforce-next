@@ -71,13 +71,13 @@ export default function MarketPage() {
     )
       setSearch(next, { replace: true });
   };
-  const source: Stream["source"] = "binance";
   const symbol: Stream["symbol"] =
     search.get("symbol") === "MUUSDT"
       ? "MUUSDT"
       : search.get("symbol") === "ETHUSDT"
         ? "ETHUSDT"
         : "BTCUSDT";
+  const source: Stream["source"] = symbol === "BTCUSDT" ? "bybit" : "binance";
   const timeframe: Stream["timeframe"] =
     timeframes.find((tf) => tf === search.get("timeframe")) ?? "1h";
   const method: Method =
@@ -126,7 +126,7 @@ export default function MarketPage() {
       source,
       symbol,
       timeframe,
-      venue: "binance-usdm-perpetual",
+      venue: source === "bybit" ? "bybit-spot" : "binance-usdm-perpetual",
       market_session: "24/7",
       timezone: "UTC",
       quote_currency: "USDT",
@@ -369,7 +369,7 @@ export default function MarketPage() {
             </div>
           </div>
           <div className="wh-meta">
-            <span className="wh-badge">{text("badge.perpetual")}</span>
+            <span className="wh-badge">{text(source === "bybit" ? "badge.bybitSpot" : "badge.perpetual")}</span>
             <span className="wh-badge">
               {offline
                 ? text("frame.offline")

@@ -1200,7 +1200,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "fixture" | "binance";
+            source: "fixture" | "binance" | "bybit";
             /**
              * Symbol
              * @enum {string}
@@ -1762,7 +1762,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "fixture" | "binance";
+            source: "fixture" | "binance" | "bybit";
             /**
              * Symbol
              * @enum {string}
@@ -1778,7 +1778,7 @@ export interface components {
              * @default binance-usdm-perpetual
              * @enum {string}
              */
-            venue: "binance-spot" | "binance-usdm-perpetual";
+            venue: "binance-spot" | "binance-usdm-perpetual" | "bybit-spot";
             /**
              * Market Session
              * @default 24/7
@@ -1816,7 +1816,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "fixture" | "binance";
+            source: "fixture" | "binance" | "bybit";
             /**
              * Symbol
              * @enum {string}
@@ -1832,7 +1832,7 @@ export interface components {
              * @default binance-usdm-perpetual
              * @enum {string}
              */
-            venue: "binance-spot" | "binance-usdm-perpetual";
+            venue: "binance-spot" | "binance-usdm-perpetual" | "bybit-spot";
             /**
              * Market Session
              * @default 24/7
@@ -2146,7 +2146,7 @@ export interface operations {
     market_context_api_wheelhouse_v1_market_context_get: {
         parameters: {
             query?: {
-                source?: "fixture" | "binance";
+                source?: ("fixture" | "binance" | "bybit") | null;
                 symbol?: string;
                 market_at?: string | null;
                 knowledge_at?: string | null;
@@ -2180,7 +2180,7 @@ export interface operations {
     workspace_api_wheelhouse_v1_workspace_get: {
         parameters: {
             query?: {
-                source?: "fixture" | "binance";
+                source?: ("fixture" | "binance" | "bybit") | null;
                 symbol?: string;
                 timeframe?: "5m" | "15m" | "1h" | "4h" | "1d";
             };
@@ -2213,7 +2213,7 @@ export interface operations {
     snapshots_api_wheelhouse_v1_snapshots_get: {
         parameters: {
             query?: {
-                source?: "fixture" | "binance";
+                source?: ("fixture" | "binance" | "bybit") | null;
                 symbol?: string;
                 timeframe?: "5m" | "15m" | "1h" | "4h" | "1d";
                 limit?: number;

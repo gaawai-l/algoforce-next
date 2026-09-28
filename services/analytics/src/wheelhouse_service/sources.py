@@ -1,4 +1,4 @@
-"""Two market adapters behind one normalized batch interface."""
+"""Market adapters behind one normalized batch interface."""
 
 import math
 from datetime import UTC, datetime, timedelta
@@ -128,6 +128,94 @@ class BinanceSource:
             raise FetchError("provider_invalid_data", retryable=False) from exc
 
 
+class BybitSource:
+    INTERVALS = {"5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D"}
+
+    def __init__(self, client: httpx.Client | None = None) -> None:
+        self.client = client
+
+    @staticmethod
+    def normalize(
+        stream: Stream, rows: list[Any], fetched_at: datetime, *, closed_before: datetime
+    ) -> Batch:
+        bars = []
+        for row in sorted(rows, key=lambda item: int(item[0])):
+            opened = datetime.fromtimestamp(int(row[0]) / 1000, UTC)
+            closed = opened + timedelta(seconds=DURATIONS[stream.timeframe])
+            bars.append(
+                Bar(
+                    open_time=opened,
+                    close_time=closed,
+                    open=str(row[1]),
+                    high=str(row[2]),
+                    low=str(row[3]),
+                    close=str(row[4]),
+                    volume=str(row[5]),
+                    is_closed=closed <= closed_before,
+                )
+            )
+        return Batch(
+            stream=stream,
+            fetched_at=fetched_at,
+            bars=bars,
+            raw_payload={
+                "endpoint": "/v5/market/kline",
+                "category": "spot",
+                "rows": rows,
+                "closed_before": closed_before.isoformat(),
+            },
+        )
+
+    def fetch(self, stream: Stream, now: datetime) -> Batch:
+        if stream.source != "bybit" or stream.venue != "bybit-spot":
+            raise FetchError("unsupported_market", retryable=False)
+        params = {
+            "category": "spot",
+            "symbol": stream.symbol,
+            "interval": self.INTERVALS[stream.timeframe],
+            "limit": 500,
+        }
+        try:
+            requested_at = datetime.now(UTC)
+            if self.client:
+                response = self.client.get("https://api.bybit.com/v5/market/kline", params=params)
+            else:
+                with httpx.Client(timeout=5, follow_redirects=False) as client:
+                    response = client.get("https://api.bybit.com/v5/market/kline", params=params)
+            response.raise_for_status()
+            body = response.json()
+            if body.get("retCode") in {10006, 10016}:
+                raise FetchError("provider_unavailable")
+            result = body.get("result", {})
+            if (
+                body.get("retCode") != 0
+                or result.get("category") != "spot"
+                or result.get("symbol") != stream.symbol
+            ):
+                raise ValueError("Invalid Bybit market response")
+            rows = result.get("list")
+            if not isinstance(rows, list) or not rows:
+                raise ValueError("Empty or invalid OHLCV envelope")
+            return self.normalize(
+                stream, rows, datetime.now(UTC), closed_before=requested_at - timedelta(seconds=2)
+            )
+        except httpx.HTTPError as exc:
+            raise FetchError("provider_unavailable") from exc
+        except (
+            ValueError,
+            ValidationError,
+            IndexError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as exc:
+            raise FetchError("provider_invalid_data", retryable=False) from exc
+
+
 def fetch_market(stream: Stream, now: datetime) -> Batch:
-    adapter: SourceAdapter = FixtureSource() if stream.source == "fixture" else BinanceSource()
-    return adapter.fetch(stream, now)
+    adapters: dict[str, SourceAdapter] = {
+        "fixture": FixtureSource(),
+        "binance": BinanceSource(),
+        "bybit": BybitSource(),
+    }
+    return adapters[stream.source].fetch(stream, now)

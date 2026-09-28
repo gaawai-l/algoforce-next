@@ -166,12 +166,19 @@
             "in": "query",
             "required": false,
             "schema": {
-              "enum": [
-                "fixture",
-                "binance"
+              "anyOf": [
+                {
+                  "enum": [
+                    "fixture",
+                    "binance",
+                    "bybit"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "type": "string",
-              "default": "binance",
               "title": "Source"
             }
           },
@@ -254,12 +261,19 @@
             "in": "query",
             "required": false,
             "schema": {
-              "enum": [
-                "fixture",
-                "binance"
+              "anyOf": [
+                {
+                  "enum": [
+                    "fixture",
+                    "binance",
+                    "bybit"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "type": "string",
-              "default": "binance",
               "title": "Source"
             }
           },
@@ -325,12 +339,19 @@
             "in": "query",
             "required": false,
             "schema": {
-              "enum": [
-                "fixture",
-                "binance"
+              "anyOf": [
+                {
+                  "enum": [
+                    "fixture",
+                    "binance",
+                    "bybit"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "type": "string",
-              "default": "binance",
               "title": "Source"
             }
           },
@@ -3318,7 +3339,8 @@
             "type": "string",
             "enum": [
               "fixture",
-              "binance"
+              "binance",
+              "bybit"
             ],
             "title": "Source"
           },
@@ -4772,7 +4794,8 @@
             "type": "string",
             "enum": [
               "fixture",
-              "binance"
+              "binance",
+              "bybit"
             ],
             "title": "Source"
           },
@@ -4800,7 +4823,8 @@
             "type": "string",
             "enum": [
               "binance-spot",
-              "binance-usdm-perpetual"
+              "binance-usdm-perpetual",
+              "bybit-spot"
             ],
             "title": "Venue",
             "default": "binance-usdm-perpetual"
@@ -4855,7 +4879,8 @@
             "type": "string",
             "enum": [
               "fixture",
-              "binance"
+              "binance",
+              "bybit"
             ],
             "title": "Source"
           },
@@ -4883,7 +4908,8 @@
             "type": "string",
             "enum": [
               "binance-spot",
-              "binance-usdm-perpetual"
+              "binance-usdm-perpetual",
+              "bybit-spot"
             ],
             "title": "Venue",
             "default": "binance-usdm-perpetual"

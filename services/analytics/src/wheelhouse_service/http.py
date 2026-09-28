@@ -36,6 +36,7 @@ from .market import (
     Stream,
     Timeframe,
     Workspace,
+    default_source,
 )
 from .portfolio.api import create_router as portfolio_router
 from .repository import Repository
@@ -203,10 +204,10 @@ def create_app(
             ).model_dump(),
         )
 
-    def stream_params(source: Source, symbol: str, timeframe: Timeframe) -> Stream:
+    def stream_params(source: Source | None, symbol: str, timeframe: Timeframe) -> Stream:
         if symbol not in {"BTCUSDT", "ETHUSDT", "MUUSDT"}:
             raise APIException(422)
-        return Stream(source=source, symbol=symbol, timeframe=timeframe)  # type: ignore[arg-type]
+        return Stream(source=source or default_source(symbol), symbol=symbol, timeframe=timeframe)  # type: ignore[arg-type]
 
     @app.post(f"{PREFIX}/jobs", response_model=Job, status_code=202)
     def submit(
@@ -227,7 +228,7 @@ def create_app(
 
     @app.get(f"{PREFIX}/market-context", response_model=MarketContext)
     def market_context(
-        source: Source = "binance",
+        source: Source | None = None,
         symbol: str = "BTCUSDT",
         market_at: datetime | None = None,
         knowledge_at: datetime | None = None,
@@ -243,7 +244,7 @@ def create_app(
             raise APIException(422)
         return build_context(
             repo(),
-            source,
+            source or default_source(symbol),
             symbol,  # type: ignore[arg-type]
             market_at=market,
             knowledge_at=knowledge,
@@ -252,13 +253,13 @@ def create_app(
 
     @app.get(f"{PREFIX}/workspace", response_model=Workspace)
     def workspace(
-        source: Source = "binance", symbol: str = "BTCUSDT", timeframe: Timeframe = "1h"
+        source: Source | None = None, symbol: str = "BTCUSDT", timeframe: Timeframe = "1h"
     ) -> Workspace:
         stream = stream_params(source, symbol, timeframe)
         snapshot = repo().live_snapshot(stream)
         at = datetime.now(UTC)
         state = data_state(
-            source,
+            stream.source,
             snapshot.closed_bar_time if snapshot else None,
             at,
             DURATIONS[timeframe],
@@ -276,7 +277,7 @@ def create_app(
 
     @app.get(f"{PREFIX}/snapshots", response_model=list[SnapshotSummary])
     def snapshots(
-        source: Source = "binance",
+        source: Source | None = None,
         symbol: str = "BTCUSDT",
         timeframe: Timeframe = "1h",
         limit: int = Query(default=30, ge=1, le=100),

@@ -17,13 +17,13 @@ export const PREFIX = "/api/wheelhouse/v1";
 
 const time = z.string().datetime({ offset: true });
 const decimal = z.string().regex(/^\d+(?:\.\d+)?$/);
-const source = z.enum(["fixture", "binance"]);
+const source = z.enum(["fixture", "binance", "bybit"]);
 const state = z.enum(["fresh", "delayed", "stale", "unavailable", "simulated"]);
 const streamSchema: z.ZodType<Stream, z.ZodTypeDef, unknown> = z.object({
   source,
   symbol: z.enum(["BTCUSDT", "ETHUSDT", "MUUSDT"]),
   timeframe: z.enum(["5m", "15m", "1h", "4h", "1d"]),
-  venue: z.enum(["binance-spot", "binance-usdm-perpetual"]),
+  venue: z.enum(["binance-spot", "binance-usdm-perpetual", "bybit-spot"]),
   market_session: z.literal("24/7"),
   timezone: z.literal("UTC"),
   quote_currency: z.literal("USDT"),

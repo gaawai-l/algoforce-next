@@ -21,41 +21,53 @@ vi.mock("./client", async (original) => ({
   getJobEvents: async () => [],
   submitJob: mocks.submit,
 }));
-afterEach(cleanup);
-it("defaults to TD and real perpetual acquisition even with a legacy fixture URL", async () => {
-  mocks.workspace.mockResolvedValue({
-    snapshot: null,
-    latest_job: null,
-    refresh_job: null,
-    schedule: null,
-    current_state: "unavailable",
-  });
-  mocks.submit.mockImplementation(() => new Promise(() => {}));
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter
-        initialEntries={["/market-intelligence?source=fixture&symbol=MUUSDT"]}
-      >
-        <MarketPage />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
-  expect(mocks.submit.mock.calls[0][0].stream).toMatchObject({
-    source: "binance",
-    symbol: "MUUSDT",
-    venue: "binance-usdm-perpetual",
-    base_currency: "MU",
-  });
-  expect(
-    screen
-      .getByRole("tab", { name: /method\.td/ })
-      .getAttribute("aria-selected"),
-  ).toBe("true");
-  expect(screen.queryByLabelText("field.source")).toBeNull();
-  expect(screen.queryByRole("button", { name: "action.refresh" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "chart.load" })).toBeNull();
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
 });
+it.each([
+  ["BTCUSDT", "bybit", "bybit-spot", "BTC"],
+  ["ETHUSDT", "binance", "binance-usdm-perpetual", "ETH"],
+  ["MUUSDT", "binance", "binance-usdm-perpetual", "MU"],
+])(
+  "routes %s to its assigned market even with a legacy fixture URL",
+  async (symbol, source, venue, currency) => {
+    mocks.workspace.mockResolvedValue({
+      snapshot: null,
+      latest_job: null,
+      refresh_job: null,
+      schedule: null,
+      current_state: "unavailable",
+    });
+    mocks.submit.mockImplementation(() => new Promise(() => {}));
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter
+          initialEntries={[
+            `/market-intelligence?source=fixture&symbol=${symbol}`,
+          ]}
+        >
+          <MarketPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+    expect(mocks.submit.mock.calls[0][0].stream).toMatchObject({
+      source,
+      symbol,
+      venue,
+      base_currency: currency,
+    });
+    expect(
+      screen
+        .getByRole("tab", { name: /method\.td/ })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(screen.queryByLabelText("field.source")).toBeNull();
+    expect(screen.queryByRole("button", { name: "action.refresh" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "chart.load" })).toBeNull();
+  },
+);
