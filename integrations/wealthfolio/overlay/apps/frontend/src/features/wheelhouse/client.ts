@@ -17,6 +17,7 @@ import {
   perpsStatusSchema,
   type PerpStatesView,
 } from "./perps-contract";
+import { marketCycleSchema } from "./cycle-contract";
 import { marketContextSchema } from "./regime-contract";
 import type { components } from "./api-schema";
 
@@ -257,6 +258,8 @@ export const getPerpStates = (
   );
 export const getPerpStatus = (signal?: AbortSignal) =>
   query("/perps/status", perpsStatusSchema, { signal });
+export const getMarketCycle = (signal?: AbortSignal) =>
+  query("/market-cycle", marketCycleSchema, { signal });
 export const getJob = (id: string, signal?: AbortSignal) =>
   query(`/jobs/${encodeURIComponent(id)}`, jobSchema, { signal });
 export const getJobEvents = (id: string, signal?: AbortSignal) =>

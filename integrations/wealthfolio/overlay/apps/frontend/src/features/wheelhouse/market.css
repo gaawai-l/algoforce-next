@@ -2948,3 +2948,7 @@
     padding-inline: 14px;
   }
 }
+.wh-regime-table tr[aria-current] th[scope="row"],
+.wh-regime-table tr[aria-current] td {
+  color: var(--wh-cyan);
+}
