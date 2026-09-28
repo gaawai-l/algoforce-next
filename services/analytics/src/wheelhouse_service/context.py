@@ -33,7 +33,7 @@ CONFIG = DemarkConfig(
     perfection_policy="strict_at_nine",
 )
 DataStatus = Literal["fresh", "delayed", "stale", "unavailable", "simulated"]
-Symbol = Literal["BTCUSDT", "ETHUSDT"]
+Symbol = Literal["BTCUSDT", "ETHUSDT", "MUUSDT"]
 
 
 class WindowResult(Model):

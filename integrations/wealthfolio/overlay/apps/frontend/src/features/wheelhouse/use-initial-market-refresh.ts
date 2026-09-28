@@ -53,3 +53,34 @@ export function useCloseBoundaryRefresh(
     };
   }, [scope, enabled, nextClose, refresh]);
 }
+
+/** Refresh the visible live view and recover failures without creating a retry storm. */
+export function useLiveMarketRefresh(
+  scope: string,
+  enabled: boolean,
+  refresh: () => Promise<void>,
+) {
+  const latest = useRef(refresh);
+  latest.current = refresh;
+  const attempted = useRef(new Map<string, number>());
+  useEffect(() => {
+    if (!enabled) return;
+    const run = () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      const previous = attempted.current.get(scope);
+      if (previous !== undefined && now - previous < 60_000) return;
+      attempted.current.set(scope, now);
+      void latest.current().catch(() => {
+        /* The page displays the acquisition error. */
+      });
+    };
+    run();
+    const timer = setInterval(run, 5000);
+    document.addEventListener("visibilitychange", run);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", run);
+    };
+  }, [scope, enabled]);
+}

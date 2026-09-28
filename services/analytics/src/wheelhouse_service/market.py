@@ -35,22 +35,30 @@ class Model(BaseModel):
 
 class Stream(Model):
     source: Source
-    symbol: Literal["BTCUSDT", "ETHUSDT"]
+    symbol: Literal["BTCUSDT", "ETHUSDT", "MUUSDT"]
     timeframe: Timeframe
-    venue: Literal["binance-spot"] = "binance-spot"
+    venue: Literal["binance-spot", "binance-usdm-perpetual"] = "binance-usdm-perpetual"
     market_session: Literal["24/7"] = "24/7"
     timezone: Literal["UTC"] = "UTC"
     quote_currency: Literal["USDT"] = "USDT"
-    base_currency: Literal["BTC", "ETH"] = "BTC"
+    base_currency: Literal["BTC", "ETH", "MU"] = "BTC"
     price_encoding: Literal["decimal_string_18_places"] = "decimal_string_18_places"
 
     @model_validator(mode="before")
     @classmethod
     def base_from_symbol(cls, values: Any) -> Any:
-        if isinstance(values, dict) and "base_currency" not in values:
+        if isinstance(values, dict):
             return {
                 **values,
-                "base_currency": "ETH" if values.get("symbol") == "ETHUSDT" else "BTC",
+                "base_currency": values.get(
+                    "base_currency", str(values.get("symbol", "BTCUSDT")).removesuffix("USDT")
+                ),
+                "venue": values.get(
+                    "venue",
+                    "binance-spot"
+                    if values.get("source") == "fixture"
+                    else "binance-usdm-perpetual",
+                ),
             }
         return values
 

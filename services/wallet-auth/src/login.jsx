@@ -14,7 +14,7 @@ import './login.css';
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
 const connectors = connectorsForWallets([
   { groupName: 'Your wallets', wallets: [injectedWallet, ...(projectId ? [walletConnectWallet] : [])] },
-], { appName: 'Orbit', ...(projectId ? { projectId } : {}) });
+], { appName: 'Sirius', ...(projectId ? { projectId } : {}) });
 const config = createConfig({ chains: [base], connectors, transports: { [base.id]: http() } });
 const queryClient = createLoginQueryClient();
 createRoot(document.getElementById('root')).render(

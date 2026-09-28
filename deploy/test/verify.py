@@ -15,6 +15,8 @@ values=json.loads(args.session_file.read_text()) if args.session_file else None
 base=args.url.rstrip('/')
 with httpx.Client(timeout=30,follow_redirects=False) as client:
     page = client.get(base + '/')
+    if page.status_code == 302 and page.headers.get('location') == '/market-intelligence?method=td':
+        page = client.get(base + page.headers['location'])
     assert page.status_code == 302 and page.headers['location'].startswith('/login/'), page.status_code
     assert 'www-authenticate' not in page.headers
     assert client.get(base + '/login/').status_code == 200
@@ -27,7 +29,7 @@ with httpx.Client(timeout=30,follow_redirects=False) as client:
         print(json.dumps({'wallet_login_page': 'passed', 'anonymous_api': 'blocked', 'basic_auth': 'removed', 'broker_sync': 'blocked'}))
         raise SystemExit(0)
     client.headers['Cookie'] = values['session_cookie']
-    for endpoint in ('/','/api/v1/healthz','/api/wheelhouse/v1/status'):
+    for endpoint in ('/market-intelligence?method=td','/api/v1/healthz','/api/wheelhouse/v1/status'):
         response=client.get(base+endpoint)
         assert response.status_code==200,(endpoint,response.status_code)
     assert client.post(base+'/api/wheelhouse/v1/portfolio/sync',json={}).status_code==403

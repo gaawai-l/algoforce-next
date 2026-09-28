@@ -52,3 +52,49 @@ def test_request_crossing_close_boundary_does_not_finalize_a_forming_sample():
     result = BinanceSource.normalize(stream, rows, received, closed_before=sampled)
     assert result.bars[0].is_closed is False
     assert result.fetched_at == received
+
+
+def test_usdt_perpetual_identity_and_mu_base_are_distinct_from_legacy_spot():
+    for symbol in ("BTCUSDT", "ETHUSDT", "MUUSDT"):
+        stream = Stream(source="binance", symbol=symbol, timeframe="1h")
+        assert stream.venue == "binance-usdm-perpetual"
+        assert stream.base_currency == symbol.removesuffix("USDT")
+        legacy = Stream(source="binance", symbol=symbol, timeframe="1h", venue="binance-spot")
+        assert legacy.key != stream.key
+        assert Stream.model_validate_json(legacy.model_dump_json()).venue == "binance-spot"
+
+
+def test_mu_fetch_uses_usdm_trade_klines_and_rejects_legacy_spot_jobs():
+    seen = []
+    start = int(START.timestamp() * 1000)
+
+    def respond(request):
+        seen.append(request)
+        return httpx.Response(
+            200, json=[[start, "120", "122", "119", "121", "23", start + 3600000 - 1]]
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        stream = Stream(source="binance", symbol="MUUSDT", timeframe="1h")
+        batch = BinanceSource(client).fetch(stream, START)
+        assert str(seen[0].url).startswith("https://fapi.binance.com/fapi/v1/klines?")
+        assert seen[0].url.params["symbol"] == "MUUSDT"
+        assert batch.raw_payload["endpoint"] == "/fapi/v1/klines"
+        with pytest.raises(FetchError, match="unsupported_market"):
+            BinanceSource(client).fetch(stream.model_copy(update={"venue": "binance-spot"}), START)
+        assert len(seen) == 1
+
+
+def test_stored_spot_candles_do_not_populate_perpetual_workspace(tmp_path):
+    from test_data import batch
+
+    from wheelhouse_service.repository import Repository
+
+    repo = Repository(tmp_path / "identity.sqlite")
+    spot = Stream(source="binance", symbol="BTCUSDT", timeframe="1h", venue="binance-spot")
+    perpetual = Stream(source="binance", symbol="BTCUSDT", timeframe="1h")
+    capture = batch().model_copy(update={"stream": spot})
+    repo.ingest(capture)
+    arguments = {"market_at": capture.fetched_at, "knowledge_at": capture.fetched_at}
+    assert repo.read(spot, **arguments).bars
+    assert repo.read(perpetual, **arguments).bars == []

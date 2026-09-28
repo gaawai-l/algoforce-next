@@ -23,12 +23,12 @@ beforeEach(() => {
   mocks.account = { address: undefined, chainId: 8453, isConnected: false };
   mocks.sign.mockResolvedValue('0xsigned');
   mocks.switchChain.mockResolvedValue({ id: 8453 });
-  vi.stubGlobal('fetch', vi.fn(async (url) => url === '/auth/session' ? response({}, false) : url === '/auth/challenge' ? response({ message: 'Sign in to Orbit' }) : response({})));
+  vi.stubGlobal('fetch', vi.fn(async (url) => url === '/auth/session' ? response({}, false) : url === '/auth/challenge' ? response({ message: 'Sign in to Sirius' }) : response({})));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 function connected() { mocks.account = { address, chainId: 8453, isConnected: true }; }
 
-describe('Orbit login', () => {
+describe('Sirius login', () => {
   it('connects from one button and automatically signs once after connection', async () => {
     const view = render(<Login navigate={mocks.navigate} />);
     const button = await screen.findByRole('button', { name: 'Connect Wallet' });
@@ -36,7 +36,7 @@ describe('Orbit login', () => {
     fireEvent.click(button); expect(mocks.open).toHaveBeenCalledOnce();
     connected(); view.rerender(<Login navigate={mocks.navigate} />);
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledOnce());
-    expect(mocks.sign).toHaveBeenCalledExactlyOnceWith({ account: address, message: 'Sign in to Orbit' });
+    expect(mocks.sign).toHaveBeenCalledExactlyOnceWith({ account: address, message: 'Sign in to Sirius' });
     view.rerender(<Login navigate={mocks.navigate} />);
     expect(mocks.sign).toHaveBeenCalledOnce();
     expect(screen.queryByText('Sign in with wallet')).toBeNull();
@@ -55,7 +55,7 @@ describe('Orbit login', () => {
     fetch.mockImplementation(async (url) => url === '/auth/session' ? response({}, false) : response({ error: 'Not allowed' }, false));
     const view = render(<Login navigate={mocks.navigate} />);
     await waitFor(() => expect(mocks.disconnect).toHaveBeenCalledOnce());
-    expect(mocks.toast).toHaveBeenCalledWith('This wallet does not have access to Orbit.', expect.any(Object));
+    expect(mocks.toast).toHaveBeenCalledWith('This wallet does not have access to Sirius.', expect.any(Object));
     mocks.account = { address: undefined, chainId: 8453, isConnected: false };
     view.rerender(<Login navigate={mocks.navigate} />);
     fireEvent.click(screen.getByRole('button', { name: 'Connect Wallet' }));

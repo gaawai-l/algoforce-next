@@ -171,7 +171,7 @@
                 "binance"
               ],
               "type": "string",
-              "default": "fixture",
+              "default": "binance",
               "title": "Source"
             }
           },
@@ -259,7 +259,7 @@
                 "binance"
               ],
               "type": "string",
-              "default": "fixture",
+              "default": "binance",
               "title": "Source"
             }
           },
@@ -330,7 +330,7 @@
                 "binance"
               ],
               "type": "string",
-              "default": "fixture",
+              "default": "binance",
               "title": "Source"
             }
           },
@@ -3326,7 +3326,8 @@
             "type": "string",
             "enum": [
               "BTCUSDT",
-              "ETHUSDT"
+              "ETHUSDT",
+              "MUUSDT"
             ],
             "title": "Symbol"
           },
@@ -4779,7 +4780,8 @@
             "type": "string",
             "enum": [
               "BTCUSDT",
-              "ETHUSDT"
+              "ETHUSDT",
+              "MUUSDT"
             ],
             "title": "Symbol"
           },
@@ -4796,9 +4798,12 @@
           },
           "venue": {
             "type": "string",
-            "const": "binance-spot",
+            "enum": [
+              "binance-spot",
+              "binance-usdm-perpetual"
+            ],
             "title": "Venue",
-            "default": "binance-spot"
+            "default": "binance-usdm-perpetual"
           },
           "market_session": {
             "type": "string",
@@ -4822,7 +4827,8 @@
             "type": "string",
             "enum": [
               "BTC",
-              "ETH"
+              "ETH",
+              "MU"
             ],
             "title": "Base Currency",
             "default": "BTC"
@@ -4857,7 +4863,8 @@
             "type": "string",
             "enum": [
               "BTCUSDT",
-              "ETHUSDT"
+              "ETHUSDT",
+              "MUUSDT"
             ],
             "title": "Symbol"
           },
@@ -4874,9 +4881,12 @@
           },
           "venue": {
             "type": "string",
-            "const": "binance-spot",
+            "enum": [
+              "binance-spot",
+              "binance-usdm-perpetual"
+            ],
             "title": "Venue",
-            "default": "binance-spot"
+            "default": "binance-usdm-perpetual"
           },
           "market_session": {
             "type": "string",
@@ -4900,7 +4910,8 @@
             "type": "string",
             "enum": [
               "BTC",
-              "ETH"
+              "ETH",
+              "MU"
             ],
             "title": "Base Currency",
             "default": "BTC"

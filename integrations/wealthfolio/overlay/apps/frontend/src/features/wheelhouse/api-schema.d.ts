@@ -1205,7 +1205,7 @@ export interface components {
              * Symbol
              * @enum {string}
              */
-            symbol: "BTCUSDT" | "ETHUSDT";
+            symbol: "BTCUSDT" | "ETHUSDT" | "MUUSDT";
             /**
              * Checked At
              * Format: date-time
@@ -1767,7 +1767,7 @@ export interface components {
              * Symbol
              * @enum {string}
              */
-            symbol: "BTCUSDT" | "ETHUSDT";
+            symbol: "BTCUSDT" | "ETHUSDT" | "MUUSDT";
             /**
              * Timeframe
              * @enum {string}
@@ -1775,10 +1775,10 @@ export interface components {
             timeframe: "5m" | "15m" | "1h" | "4h" | "1d";
             /**
              * Venue
-             * @default binance-spot
-             * @constant
+             * @default binance-usdm-perpetual
+             * @enum {string}
              */
-            venue: "binance-spot";
+            venue: "binance-spot" | "binance-usdm-perpetual";
             /**
              * Market Session
              * @default 24/7
@@ -1802,7 +1802,7 @@ export interface components {
              * @default BTC
              * @enum {string}
              */
-            base_currency: "BTC" | "ETH";
+            base_currency: "BTC" | "ETH" | "MU";
             /**
              * Price Encoding
              * @default decimal_string_18_places
@@ -1821,7 +1821,7 @@ export interface components {
              * Symbol
              * @enum {string}
              */
-            symbol: "BTCUSDT" | "ETHUSDT";
+            symbol: "BTCUSDT" | "ETHUSDT" | "MUUSDT";
             /**
              * Timeframe
              * @enum {string}
@@ -1829,10 +1829,10 @@ export interface components {
             timeframe: "5m" | "15m" | "1h" | "4h" | "1d";
             /**
              * Venue
-             * @default binance-spot
-             * @constant
+             * @default binance-usdm-perpetual
+             * @enum {string}
              */
-            venue: "binance-spot";
+            venue: "binance-spot" | "binance-usdm-perpetual";
             /**
              * Market Session
              * @default 24/7
@@ -1856,7 +1856,7 @@ export interface components {
              * @default BTC
              * @enum {string}
              */
-            base_currency: "BTC" | "ETH";
+            base_currency: "BTC" | "ETH" | "MU";
             /**
              * Price Encoding
              * @default decimal_string_18_places

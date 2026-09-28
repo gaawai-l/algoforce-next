@@ -6,16 +6,13 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Page, PageContent, PageHeader } from "@wealthfolio/ui";
 import { useSearchParams } from "react-router-dom";
 import { LanguageToggle } from "./language-toggle";
 import { issueText, labeled, useWheelhouseText } from "./i18n";
 import { MarketChart } from "./market-chart";
-import {
-  useInitialMarketRefresh,
-  useCloseBoundaryRefresh,
-} from "./use-initial-market-refresh";
+import { useLiveMarketRefresh } from "./use-initial-market-refresh";
 import { DemarkDetails } from "./demark-details";
 import { RegimeCheck } from "./regime-check";
 import { defaultDemarkConfig } from "./demark-contract";
@@ -28,7 +25,6 @@ import {
   getJob,
   getJobEvents,
   submitJob,
-  updateSchedule,
   money,
   stamp,
   type JobRequest,
@@ -75,19 +71,30 @@ export default function MarketPage() {
     )
       setSearch(next, { replace: true });
   };
-  const source: Stream["source"] =
-    search.get("source") === "fixture" ? "fixture" : "binance";
+  const source: Stream["source"] = "binance";
   const symbol: Stream["symbol"] =
-    search.get("symbol") === "ETHUSDT" ? "ETHUSDT" : "BTCUSDT";
+    search.get("symbol") === "MUUSDT"
+      ? "MUUSDT"
+      : search.get("symbol") === "ETHUSDT"
+        ? "ETHUSDT"
+        : "BTCUSDT";
   const timeframe: Stream["timeframe"] =
     timeframes.find((tf) => tf === search.get("timeframe")) ?? "1h";
   const method: Method =
-    methods.find((item) => item.id === search.get("method"))?.id ?? "levels";
-  const setSource = (value: Stream["source"]) => updateQuery("source", value);
+    methods.find((item) => item.id === search.get("method"))?.id ?? "td";
   const setSymbol = (value: Stream["symbol"]) => updateQuery("symbol", value);
   const setTimeframe = (value: Stream["timeframe"]) =>
     updateQuery("timeframe", value);
   const setMethod = (value: Method) => updateQuery("method", value);
+  useEffect(() => {
+    const next = new URLSearchParams(search);
+    if (next.get("source") === "fixture") next.delete("snapshot");
+    next.delete("source");
+    if (!methods.some((item) => item.id === next.get("method")))
+      next.set("method", "td");
+    if (next.toString() !== search.toString())
+      setSearch(next, { replace: true });
+  }, [search, setSearch]);
   const initialWindow = Number(search.get("window") ?? 20);
   const [windowSize, setWindowSize] = useState(
     Number.isInteger(initialWindow) &&
@@ -119,11 +126,12 @@ export default function MarketPage() {
       source,
       symbol,
       timeframe,
-      venue: "binance-spot",
+      venue: "binance-usdm-perpetual",
       market_session: "24/7",
       timezone: "UTC",
       quote_currency: "USDT",
-      base_currency: symbol === "BTCUSDT" ? "BTC" : "ETH",
+      base_currency:
+        symbol === "BTCUSDT" ? "BTC" : symbol === "ETHUSDT" ? "ETH" : "MU",
       price_encoding: "decimal_string_18_places",
     }),
     [source, symbol, timeframe],
@@ -175,22 +183,16 @@ export default function MarketPage() {
     retry: false,
     refetchInterval: pending ? 1000 : false,
   });
-  const schedule = useMutation({
-    mutationFn: (enabled: boolean) => updateSchedule(stream, rules, enabled),
-    onSuccess: () => {
-      void cache.invalidateQueries({ queryKey: ["wh", "workspace"] });
-    },
-    onError: (error: Error) => setActionError(error.message),
-  });
   const candidate = selectedId ? saved.data : workspace.data?.snapshot;
   const analysis =
     candidate?.stream.source === source &&
+    candidate.stream.venue === stream.venue &&
     candidate.stream.symbol === symbol &&
     candidate.stream.timeframe === timeframe
       ? candidate
       : undefined;
   const offline = status.isError || workspace.isError;
-  const busy = !!pending || schedule.isPending || submitting;
+  const busy = !!pending || submitting;
   const latestJob = task.data ?? workspace.data?.latest_job;
   const frameState = offline
     ? "offline cache"
@@ -266,39 +268,14 @@ export default function MarketPage() {
       setSubmitting(false);
     }
   };
-  useInitialMarketRefresh(
-    `${source}:${symbol}:${timeframe}`,
+  useLiveMarketRefresh(
+    `${stream.venue}:${symbol}:${timeframe}`,
     !selectedId &&
       workspace.isSuccess &&
       !!status.data &&
       !offline &&
       !busy &&
-      !actionError &&
-      !workspace.data?.refresh_job?.error_code &&
-      !activeStates.has(workspace.data?.latest_job?.state ?? "") &&
-      (!analysis?.bars.length ||
-        (source === "binance" && analysis.bars.length < 499) ||
-        !analysis.demark ||
-        analysis.demark.config.ruleset_version !==
-          defaultDemarkConfig.ruleset_version),
-    () => start("refresh"),
-  );
-  useCloseBoundaryRefresh(
-    `${source}:${symbol}:${timeframe}`,
-    source === "binance" &&
-      !selectedId &&
-      workspace.isSuccess &&
-      !!status.data &&
-      !offline &&
-      !busy &&
-      !actionError &&
-      !workspace.data?.refresh_job?.error_code &&
-      !workspace.data?.schedule?.request.enabled &&
-      !activeStates.has(workspace.data?.latest_job?.state ?? "") &&
-      !!analysis?.bars.length &&
-      analysis?.demark?.config.ruleset_version ===
-        defaultDemarkConfig.ruleset_version,
-    analysis?.expected_next_close,
+      !activeStates.has(workspace.data?.latest_job?.state ?? ""),
     () => start("refresh"),
   );
   const methodKey = (
@@ -366,21 +343,7 @@ export default function MarketPage() {
                 <DropdownOption value="ETHUSDT">
                   {text("option.eth")}
                 </DropdownOption>
-              </Dropdown>
-            </label>
-            <label>
-              {text("field.source")}
-              <Dropdown
-                aria-label={text("field.source")}
-                value={source}
-                onValueChange={(value) => setSource(value as Stream["source"])}
-              >
-                <DropdownOption value="fixture">
-                  {text("option.fixture")}
-                </DropdownOption>
-                <DropdownOption value="binance">
-                  {text("option.binance")}
-                </DropdownOption>
+                <DropdownOption value="MUUSDT">MU / USDT</DropdownOption>
               </Dropdown>
             </label>
             <label className="wh-window">
@@ -397,15 +360,6 @@ export default function MarketPage() {
                 }}
               />
             </label>
-            <button
-              className="wh-primary"
-              disabled={busy || offline}
-              onClick={() => void start("refresh")}
-            >
-              {pending?.kind === "refresh"
-                ? text("action.refreshing")
-                : text("action.refresh")}
-            </button>
             <div className="wh-price">
               <span>{text("price.label")}</span>
               <strong>
@@ -415,13 +369,7 @@ export default function MarketPage() {
             </div>
           </div>
           <div className="wh-meta">
-            <span
-              className={`wh-badge ${source === "fixture" ? "wh-amber" : ""}`}
-            >
-              {source === "fixture"
-                ? text("badge.simulated")
-                : text("badge.public")}
-            </span>
+            <span className="wh-badge">{text("badge.perpetual")}</span>
             <span className="wh-badge">
               {offline
                 ? text("frame.offline")
@@ -429,27 +377,7 @@ export default function MarketPage() {
                   ? text("frame.saved")
                   : labeled(text, "state", frameState)}
             </span>
-            <label className="wh-inline">
-              <input
-                type="checkbox"
-                checked={workspace.data?.schedule?.request.enabled ?? false}
-                disabled={schedule.isPending || offline}
-                onChange={(e) => schedule.mutate(e.target.checked)}
-              />{" "}
-              {text("meta.background")}
-            </label>
-            {source === "binance" &&
-              !selectedId &&
-              !workspace.data?.schedule?.request.enabled && (
-                <small>{text("meta.whileOpen")}</small>
-              )}
-            {workspace.data?.schedule?.request.enabled && (
-              <small>
-                {text("meta.next", {
-                  time: stamp(workspace.data.schedule.next_due, missing),
-                })}
-              </small>
-            )}
+            {!selectedId && <small>{text("meta.autoRefresh")}</small>}
           </div>
           {(offline ||
             actionError ||
@@ -587,12 +515,6 @@ export default function MarketPage() {
                           })
                         : text("chart.none", { tf: timeframe.toUpperCase() })}
                   </p>
-                  <button
-                    disabled={busy || offline}
-                    onClick={() => void start("refresh")}
-                  >
-                    {busy ? text("chart.loading") : text("chart.load")}
-                  </button>
                 </div>
               )}
               {analysis && (
@@ -716,7 +638,9 @@ export default function MarketPage() {
               )}
             </aside>
           </section>
-          {method === "td" && <RegimeCheck stream={stream} rules={rules} />}
+          {method === "td" && (
+            <RegimeCheck stream={stream} rules={rules} live={!selectedId} />
+          )}
           <section className="wh-replay">
             <div className="wh-section-title">
               <div>

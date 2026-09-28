@@ -204,7 +204,7 @@ def create_app(
         )
 
     def stream_params(source: Source, symbol: str, timeframe: Timeframe) -> Stream:
-        if symbol not in {"BTCUSDT", "ETHUSDT"}:
+        if symbol not in {"BTCUSDT", "ETHUSDT", "MUUSDT"}:
             raise APIException(422)
         return Stream(source=source, symbol=symbol, timeframe=timeframe)  # type: ignore[arg-type]
 
@@ -227,12 +227,12 @@ def create_app(
 
     @app.get(f"{PREFIX}/market-context", response_model=MarketContext)
     def market_context(
-        source: Source = "fixture",
+        source: Source = "binance",
         symbol: str = "BTCUSDT",
         market_at: datetime | None = None,
         knowledge_at: datetime | None = None,
     ) -> MarketContext:
-        if symbol not in {"BTCUSDT", "ETHUSDT"}:
+        if symbol not in {"BTCUSDT", "ETHUSDT", "MUUSDT"}:
             raise APIException(422)
         if (market_at is None) != (knowledge_at is None):
             raise APIException(422)
@@ -252,7 +252,7 @@ def create_app(
 
     @app.get(f"{PREFIX}/workspace", response_model=Workspace)
     def workspace(
-        source: Source = "fixture", symbol: str = "BTCUSDT", timeframe: Timeframe = "1h"
+        source: Source = "binance", symbol: str = "BTCUSDT", timeframe: Timeframe = "1h"
     ) -> Workspace:
         stream = stream_params(source, symbol, timeframe)
         snapshot = repo().live_snapshot(stream)
@@ -276,7 +276,7 @@ def create_app(
 
     @app.get(f"{PREFIX}/snapshots", response_model=list[SnapshotSummary])
     def snapshots(
-        source: Source = "fixture",
+        source: Source = "binance",
         symbol: str = "BTCUSDT",
         timeframe: Timeframe = "1h",
         limit: int = Query(default=30, ge=1, le=100),

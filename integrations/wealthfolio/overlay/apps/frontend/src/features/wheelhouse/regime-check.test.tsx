@@ -1,15 +1,31 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Rules, Stream } from "./client";
 import { defaultDemarkConfig } from "./demark-contract";
 import { messages } from "./i18n";
 import { RegimeCheck } from "./regime-check";
 import { sampleContext } from "./regime-sample";
 
+beforeEach(() => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse(sampleContext.checked_at));
+});
+
+vi.mock("./client", async (original) => ({
+  ...(await original<typeof import("./client")>()),
+  getWorkspace: vi.fn(async () => ({ latest_job: null })),
+}));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const stream = {
@@ -23,7 +39,11 @@ const stream = {
   base_currency: "BTC",
   price_encoding: "decimal_string_18_places",
 } as Stream;
-const rules: Rules = { engine_version: "baseline-v1", window: 20, demark: defaultDemarkConfig };
+const rules: Rules = {
+  engine_version: "baseline-v1",
+  window: 20,
+  demark: defaultDemarkConfig,
+};
 
 it("shows regimes, calibrated levels and unavailable timeframes without guessing", async () => {
   const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
@@ -37,7 +57,9 @@ it("shows regimes, calibrated levels and unavailable timeframes without guessing
       <RegimeCheck stream={stream} rules={rules} />
     </QueryClientProvider>,
   );
-  await waitFor(() => expect(screen.getByText(/Selloff exhausted/)).toBeTruthy());
+  await waitFor(() =>
+    expect(screen.getByText(/Selloff exhausted/)).toBeTruthy(),
+  );
   expect(screen.getByText(/Unavailable · anchor data/)).toBeTruthy();
   expect(
     screen.getByText(/BUY 2 · 83,788.60 · Moderately strong \(中等偏强\)/),
@@ -47,13 +69,21 @@ it("shows regimes, calibrated levels and unavailable timeframes without guessing
   await waitFor(() => {
     const posted = fetchMock.mock.calls
       .filter(([url]) => String(url).endsWith("/jobs"))
-      .map(([, init]) => JSON.parse(String((init as RequestInit).body)).stream.timeframe);
+      .map(
+        ([, init]) =>
+          JSON.parse(String((init as RequestInit).body)).stream.timeframe,
+      );
     expect(posted.sort()).toEqual(["15m", "1d", "4h"]);
   });
+  expect(screen.queryByRole("button", { name: /Refresh/i })).toBeNull();
   // Option board uses the swing regime, which is unavailable in the sample.
-  fireEvent.click(screen.getByRole("radio", { name: "Option strangle (期权双卖)" }));
+  fireEvent.click(
+    screen.getByRole("radio", { name: "Option strangle (期权双卖)" }),
+  );
   expect(
-    screen.getByText(/BUY 2 · 83,788.60 · Moderate \(中等\) · base level · regime unavailable/),
+    screen.getByText(
+      /BUY 2 · 83,788.60 · Moderate \(中等\) · base level · regime unavailable/,
+    ),
   ).toBeTruthy();
 });
 
@@ -80,14 +110,19 @@ it("also refreshes a fresh timeframe whose history is incomplete", async () => {
   await waitFor(() => {
     const posted = fetchMock.mock.calls
       .filter(([url]) => String(url).endsWith("/jobs"))
-      .map(([, init]) => JSON.parse(String((init as RequestInit).body)).stream.timeframe);
+      .map(
+        ([, init]) =>
+          JSON.parse(String((init as RequestInit).body)).stream.timeframe,
+      );
     expect(posted.sort()).toEqual(["15m", "1d", "1h", "4h"]);
   });
 });
 
 it("has an i18n entry for every dynamic key the component can build", () => {
   const dynamicKeys = [
-    ...["decay", "rev", "pump", "none", "unavailable"].map((v) => `regime.value.${v}`),
+    ...["decay", "rev", "pump", "none", "unavailable"].map(
+      (v) => `regime.value.${v}`,
+    ),
     ...["fresh", "delayed", "stale", "unavailable", "simulated"].map(
       (v) => `regime.status.${v}`,
     ),

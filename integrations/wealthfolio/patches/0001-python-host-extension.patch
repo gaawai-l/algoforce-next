@@ -20,7 +20,7 @@ index cbebb89..3f1faf1 100644
 +      {
 +        icon: <Icons.Insight className="size-6" />,
 +        title: wheelhouseNavLabel("nav.market"),
-+        href: "/market-intelligence",
++        href: "/market-intelligence?method=td",
 +        keywords: ["wheelhouse", "market", "analysis", "市场"],
 +        label: wheelhouseNavLabel("nav.marketHint"),
 +      },

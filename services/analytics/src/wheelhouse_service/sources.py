@@ -88,24 +88,26 @@ class BinanceSource:
             fetched_at=fetched_at,
             bars=bars,
             raw_payload={
-                "endpoint": "/api/v3/klines",
+                "endpoint": "/fapi/v1/klines",
                 "rows": rows,
                 "closed_before": closed_before.isoformat(),
             },
         )
 
     def fetch(self, stream: Stream, now: datetime) -> Batch:
+        if stream.venue != "binance-usdm-perpetual":
+            raise FetchError("unsupported_market", retryable=False)
         try:
             requested_at = datetime.now(UTC)
             if self.client:
                 response = self.client.get(
-                    "https://data-api.binance.vision/api/v3/klines",
+                    "https://fapi.binance.com/fapi/v1/klines",
                     params={"symbol": stream.symbol, "interval": stream.timeframe, "limit": 500},
                 )
             else:
                 with httpx.Client(timeout=5, follow_redirects=False) as client:
                     response = client.get(
-                        "https://data-api.binance.vision/api/v3/klines",
+                        "https://fapi.binance.com/fapi/v1/klines",
                         params={
                             "symbol": stream.symbol,
                             "interval": stream.timeframe,

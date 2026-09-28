@@ -85,3 +85,41 @@ it("waits while hidden and catches up once on return without background scheduli
     vi.useRealTimers();
   }
 });
+
+it("automatically loads, retries on a bounded interval, and pauses hidden or saved views", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-28T01:00:00Z"));
+  const visibility = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockReturnValue("visible");
+  try {
+    const { act } = await import("@testing-library/react");
+    const { useLiveMarketRefresh } =
+      await import("./use-initial-market-refresh");
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const view = renderHook(
+      ({ enabled }) => useLiveMarketRefresh("binance:MU:1h", enabled, refresh),
+      { initialProps: { enabled: true } },
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
+    view.rerender({ enabled: false });
+    view.rerender({ enabled: true });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(refresh).toHaveBeenCalledTimes(2);
+    visibility.mockReturnValue("hidden");
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(refresh).toHaveBeenCalledTimes(2);
+    visibility.mockReturnValue("visible");
+    await act(async () =>
+      document.dispatchEvent(new Event("visibilitychange")),
+    );
+    expect(refresh).toHaveBeenCalledTimes(3);
+    view.rerender({ enabled: false });
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(refresh).toHaveBeenCalledTimes(3);
+  } finally {
+    visibility.mockRestore();
+    vi.useRealTimers();
+  }
+});

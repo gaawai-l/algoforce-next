@@ -75,7 +75,7 @@ export const marketContextSchema: z.ZodType<
   unknown
 > = z.object({
   source: z.enum(["fixture", "binance"]),
-  symbol: z.enum(["BTCUSDT", "ETHUSDT"]),
+  symbol: z.enum(["BTCUSDT", "ETHUSDT", "MUUSDT"]),
   checked_at: time,
   market_at: time,
   knowledge_at: time,

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   getMarketContext,
+  getWorkspace,
   money,
   stamp,
   submitJob,
@@ -9,20 +10,50 @@ import {
   type Stream,
 } from "./client";
 import { useWheelhouseText, type MessageKey } from "./i18n";
-import { regimeSideFor, shortAge, signalLevel, type Board } from "./regime-board";
+import {
+  regimeSideFor,
+  shortAge,
+  signalLevel,
+  type Board,
+} from "./regime-board";
 import type { MarketContext, TimeframeContext } from "./regime-contract";
+
+import { useLiveMarketRefresh } from "./use-initial-market-refresh";
+
+const durations: Record<string, number> = {
+  "5m": 300,
+  "15m": 900,
+  "1h": 3600,
+  "4h": 14400,
+  "1d": 86400,
+};
 
 type Row = { key: MessageKey; cell: (tf: TimeframeContext) => string };
 
-export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules }) {
+export function RegimeCheck({
+  stream,
+  rules,
+  live = true,
+}: {
+  stream: Stream;
+  rules: Rules;
+  live?: boolean;
+}) {
   const { text } = useWheelhouseText();
   const missing = text("missing");
   const cache = useQueryClient();
   const [board, setBoard] = useState<Board>("cta");
   const [calibrate, setCalibrate] = useState({ intraday: true, swing: true });
   const context = useQuery({
-    queryKey: ["wh", "market-context", stream.source, stream.symbol],
-    queryFn: ({ signal }) => getMarketContext(stream.source, stream.symbol, signal),
+    queryKey: [
+      "wh",
+      "market-context",
+      stream.source,
+      stream.venue,
+      stream.symbol,
+    ],
+    queryFn: ({ signal }) =>
+      getMarketContext(stream.source, stream.symbol, signal),
     refetchInterval: 30000,
     retry: false,
   });
@@ -31,41 +62,70 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
     // `skip` is the page's own timeframe on auto refresh: the page already refreshes it.
     // Due when stale/delayed/unavailable OR fresh-but-incomplete history; simulated (fixture,
     // capped at 320 bars) can never complete history, so it is always excluded.
-    mutationFn: async ({ data, skip }: { data: MarketContext; skip?: string }) => {
+    mutationFn: async ({
+      data,
+      skip,
+    }: {
+      data: MarketContext;
+      skip?: string;
+    }) => {
       const due = data.timeframes.filter(
         (tf) =>
-          (tf.status !== "fresh" || !tf.history_complete) &&
+          (tf.status !== "fresh" ||
+            !tf.history_complete ||
+            (tf.last_closed_at &&
+              Date.now() >=
+                Date.parse(tf.last_closed_at) +
+                  durations[tf.timeframe] * 1000 +
+                  2000)) &&
           tf.status !== "simulated" &&
           tf.timeframe !== skip,
       );
-      await Promise.all(
-        due.map((tf) =>
-          submitJob(
-            { kind: "refresh", stream: { ...stream, timeframe: tf.timeframe }, rules },
+      const results = await Promise.allSettled(
+        due.map(async (tf) => {
+          const selected = { ...stream, timeframe: tf.timeframe };
+          const workspace = await getWorkspace(selected);
+          if (
+            ["queued", "running", "retry_wait"].includes(
+              workspace.latest_job?.state ?? "",
+            )
+          )
+            return;
+          await submitJob(
+            { kind: "refresh", stream: selected, rules },
             crypto.randomUUID(),
-          ),
-        ),
+          );
+        }),
       );
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
     },
     onSuccess: () => setRefreshError(null),
     onError: (error) => setRefreshError(String((error as Error).message)),
     onSettled: () => cache.invalidateQueries({ queryKey: ["wh"] }),
   });
-  const refreshedScope = useRef<string | null>(null);
-  useEffect(() => {
-    const scope = `${stream.source}:${stream.symbol}`;
-    const current = context.data;
-    if (!current || refreshedScope.current === scope) return;
-    if (`${current.source}:${current.symbol}` !== scope) return;
-    refreshedScope.current = scope;
-    refresh.mutate({ data: current, skip: stream.timeframe });
-  }, [context.data, refresh, stream.source, stream.symbol, stream.timeframe]);
+  useLiveMarketRefresh(
+    `context:${stream.venue}:${stream.symbol}:${stream.timeframe}`,
+    live &&
+      !!context.data &&
+      context.data.source === stream.source &&
+      context.data.symbol === stream.symbol &&
+      !refresh.isPending,
+    async () => {
+      if (context.data)
+        await refresh.mutateAsync({
+          data: context.data,
+          skip: stream.timeframe,
+        });
+    },
+  );
 
   const data = context.data;
   // Keys built from payload enums; the cast is only as safe as the enumeration test in
   // regime-check.test.tsx, which asserts every dynamic key this component can build exists
   // in messages.en (both catalogs share the same key set, checked by i18n.test.ts).
-  const tk = (key: string, vars?: Parameters<typeof text>[1]) => text(key as MessageKey, vars);
+  const tk = (key: string, vars?: Parameters<typeof text>[1]) =>
+    text(key as MessageKey, vars);
   const trendWord = (trend: "up" | "down") => tk(`regime.trend.${trend}`);
   const signalCell = (tf: TimeframeContext, n: 1 | 2) => {
     const signal = tf.signals.find((s) => s.n === n);
@@ -73,7 +133,9 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
     const side = regimeSideFor(board, tf.timeframe);
     const level = signalLevel(signal, side, calibrate[side]);
     const label = `${signal.side.toUpperCase()} ${n}`;
-    const price = signal.price ? money(signal.price, missing) : text("regime.signal.none");
+    const price = signal.price
+      ? money(signal.price, missing)
+      : text("regime.signal.none");
     if (level == null) return `${label} · ${text("regime.signal.none")}`;
     // Calibration requested but its regime is unavailable: the level is the base level.
     const uncalibrated =
@@ -116,7 +178,11 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
           : tf.state.s9 === "none"
             ? "—"
             : tf.state.s13
-              ? text(tf.state.s9 === "down" ? "regime.s13.downDone" : "regime.s13.upDone")
+              ? text(
+                  tf.state.s9 === "down"
+                    ? "regime.s13.downDone"
+                    : "regime.s13.upDone",
+                )
               : text("regime.s13.pending", { count: tf.state.countdown }),
     },
     {
@@ -128,12 +194,15 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
     },
     {
       key: "regime.row.since9",
-      cell: (tf) => (!tf.state ? missing : (shortAge(tf.state.setup9_seconds_ago) ?? "—")),
+      cell: (tf) =>
+        !tf.state ? missing : (shortAge(tf.state.setup9_seconds_ago) ?? "—"),
     },
     {
       key: "regime.row.since13",
       cell: (tf) =>
-        !tf.state ? missing : (shortAge(tf.state.qualified13_seconds_ago) ?? "—"),
+        !tf.state
+          ? missing
+          : (shortAge(tf.state.qualified13_seconds_ago) ?? "—"),
     },
     {
       key: "regime.row.risk9",
@@ -144,7 +213,9 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
         const sign = tf.summary.trend === "up" ? "<" : ">";
         const beyond = tf.state?.beyond_risk9;
         const note =
-          beyond == null ? "" : ` · ${text(beyond ? "regime.beyond.yes" : "regime.beyond.no")}`;
+          beyond == null
+            ? ""
+            : ` · ${text(beyond ? "regime.beyond.yes" : "regime.beyond.no")}`;
         return `${sign} ${money(risk9, missing)}${note}`;
       },
     },
@@ -180,7 +251,9 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
         if (!trend.present) return text("regime.newTrend.none");
         const vars = { trend: trendWord(trend.trend), count: trend.step };
         const body = text(
-          trend.confirmed ? "regime.newTrend.confirmed" : "regime.newTrend.forming",
+          trend.confirmed
+            ? "regime.newTrend.confirmed"
+            : "regime.newTrend.forming",
           vars,
         );
         const age = shortAge(trend.seconds);
@@ -190,7 +263,11 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
     {
       key: "regime.row.tdst",
       cell: (tf) =>
-        !tf.summary ? missing : tf.summary.risk.tdst == null ? "—" : money(tf.summary.risk.tdst),
+        !tf.summary
+          ? missing
+          : tf.summary.risk.tdst == null
+            ? "—"
+            : money(tf.summary.risk.tdst),
     },
     {
       key: "regime.row.window",
@@ -200,7 +277,8 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
           : text("regime.window.short", {
               count: tf.bars_used,
               window: data?.window ?? 499,
-            })) + (tf.history_gapped ? ` · ${text("regime.window.gapped")}` : ""),
+            })) +
+        (tf.history_gapped ? ` · ${text("regime.window.gapped")}` : ""),
     },
   ];
   const cellOf = (key: MessageKey, tf: TimeframeContext) =>
@@ -208,7 +286,9 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
   const basis = (side: "intraday" | "swing") => {
     if (!data) return missing;
     const anchorTimeframe = data[side].anchor;
-    const anchor = data.timeframes.find((tf) => tf.timeframe === anchorTimeframe);
+    const anchor = data.timeframes.find(
+      (tf) => tf.timeframe === anchorTimeframe,
+    );
     return anchor
       ? `${cellOf("regime.row.nine", anchor)} · ${cellOf("regime.row.thirteen", anchor)}`
       : missing;
@@ -227,7 +307,10 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
         <>
           <div className="wh-regime-head">
             {(["intraday", "swing"] as const).map((side) => (
-              <div key={side} className={`wh-regime-pill is-${data[side].value}`}>
+              <div
+                key={side}
+                className={`wh-regime-pill is-${data[side].value}`}
+              >
                 <span>{tk(`regime.${side}`)}</span>
                 <strong>{tk(`regime.value.${data[side].value}`)}</strong>
                 <em>{basis(side)}</em>
@@ -261,21 +344,15 @@ export function RegimeCheck({ stream, rules }: { stream: Stream; rules: Rules })
                 </button>
               ))}
             </div>
-            <button
-              type="button"
-              className="wh-regime-refresh"
-              disabled={refresh.isPending}
-              onClick={() => refresh.mutate({ data })}
-            >
-              {refresh.isPending ? text("action.refreshing") : text("regime.refreshAll")}
-            </button>
           </div>
           {refreshError ? (
             <p className="wh-regime-error" role="alert">
               {text("regime.refreshFailed")}: {refreshError}
             </p>
           ) : null}
-          <p className="wh-regime-note">{text("regime.note", { window: data.window })}</p>
+          <p className="wh-regime-note">
+            {text("regime.note", { window: data.window })}
+          </p>
           <div className="wh-regime-scroll">
             <table className="wh-regime-table">
               <thead>

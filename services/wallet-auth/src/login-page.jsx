@@ -14,7 +14,7 @@ async function post(path, body = {}) {
     const error = new Error('Authentication failed');
     error.accessDenied = path === 'challenge' && response.status === 401;
     error.publicMessage = response.status === 429 ? 'Too many attempts. Please wait a minute.'
-      : path === 'challenge' && response.status === 401 ? 'This wallet does not have access to Orbit.'
+      : path === 'challenge' && response.status === 401 ? 'This wallet does not have access to Sirius.'
       : 'Could not sign in. Please try again.';
     throw error;
   }
@@ -22,16 +22,16 @@ async function post(path, body = {}) {
 }
 function destination() {
   const next = new URLSearchParams(location.search).get('next');
-  if (next?.startsWith('/') && !next.startsWith('//') && !next.startsWith('/login') && !next.startsWith('/auth')) {
+  if (next !== '/' && next?.startsWith('/') && !next.startsWith('//') && !next.startsWith('/login') && !next.startsWith('/auth')) {
     const target = new URL(next, location.origin);
     if (target.origin === location.origin) return target.pathname + target.search + target.hash;
   }
-  return '/market-intelligence';
+  return '/market-intelligence?method=td';
 }
 const navigateDefault = (url) => location.replace(url);
 
-function OrbitArt() {
-  return <svg className="orbit-art" viewBox="0 0 600 420" role="img" aria-label="Orbit: market paths circling a shared center">
+function SiriusArt() {
+  return <svg className="orbit-art" viewBox="0 0 600 420" role="img" aria-label="Sirius: market paths circling a shared center">
     <defs>
       <radialGradient id="halo"><stop stopColor="#2dd4bf" stopOpacity=".2" /><stop offset="1" stopColor="#2dd4bf" stopOpacity="0" /></radialGradient>
       <linearGradient id="path" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#5eead4" /><stop offset=".5" stopColor="#99f6e4" /><stop offset="1" stopColor="#a78bfa" /></linearGradient>
@@ -122,9 +122,9 @@ export function Login({ navigate = navigateDefault }) {
     finally { setBusy(false); }
   }
   return <main>
-    <section className="login" aria-label="Orbit wallet login">
-      <OrbitArt />
-      <h1>ORBIT</h1>
+    <section className="login" aria-label="Sirius wallet login">
+      <SiriusArt />
+      <h1>SIRIUS</h1>
       {session ? <div className="session">
         <code>{session.address}</code>
         <a className="primary" href={destination()}>Open workspace</a>

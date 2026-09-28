@@ -21,13 +21,13 @@ const source = z.enum(["fixture", "binance"]);
 const state = z.enum(["fresh", "delayed", "stale", "unavailable", "simulated"]);
 const streamSchema: z.ZodType<Stream, z.ZodTypeDef, unknown> = z.object({
   source,
-  symbol: z.enum(["BTCUSDT", "ETHUSDT"]),
+  symbol: z.enum(["BTCUSDT", "ETHUSDT", "MUUSDT"]),
   timeframe: z.enum(["5m", "15m", "1h", "4h", "1d"]),
-  venue: z.literal("binance-spot"),
+  venue: z.enum(["binance-spot", "binance-usdm-perpetual"]),
   market_session: z.literal("24/7"),
   timezone: z.literal("UTC"),
   quote_currency: z.literal("USDT"),
-  base_currency: z.enum(["BTC", "ETH"]),
+  base_currency: z.enum(["BTC", "ETH", "MU"]),
   price_encoding: z.literal("decimal_string_18_places"),
 });
 const rulesSchema: z.ZodType<Rules, z.ZodTypeDef, unknown> = z.object({
