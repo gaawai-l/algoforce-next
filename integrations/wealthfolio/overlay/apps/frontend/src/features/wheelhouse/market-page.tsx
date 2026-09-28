@@ -21,6 +21,7 @@ import { FlowsPanel } from "./flows-panel";
 import { CycleCheck } from "./cycle-check";
 import { MacroCheck } from "./macro-check";
 import { RegimeCheck } from "./regime-check";
+import { StrategyFlow } from "./strategy-flow";
 import { defaultDemarkConfig } from "./demark-contract";
 import {
   PREFIX,
@@ -849,6 +850,9 @@ export default function MarketPage() {
           )}
           {method === "td" && symbol === "BTCUSDT" && <CycleCheck />}
           {method === "td" && symbol === "BTCUSDT" && <MacroCheck />}
+          {method === "td" && symbol === "BTCUSDT" && (
+            <StrategyFlow stream={stream} />
+          )}
           {/* Replay, audit and OHLC describe the K-line dataset; Flows has none. */}
           {method !== "flows" && (
             <>
