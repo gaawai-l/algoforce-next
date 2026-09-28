@@ -8,7 +8,7 @@
 - [x] Stream新增 `binance-usdm-perpetual` venue，Binance默认该venue；保留历史spot模型可读，禁止新永续请求进入旧spot key。fixture仅保留内部测试，用户界面不提供也不回退。
 - [x] 市场页固定真实永续与BTC/ETH/MU，默认td；进入后自动请求，页面可见时每60秒刷新，重试受限，服务已有任务时不重复请求；缺失/失败明确显示，不伪装实时。继续仅使用已收盘K线计算DeMark。
 - [x] 更新API schema/前端契约、Sirius登录与产品名称；运行测试、构建、三标的真实行情计算与浏览器验收。
-- [ ] 发布test并核对SHA、接口与真实合约结果，记录限制。
+- [x] 发布test并核对SHA、接口与真实合约结果，记录限制。
 
 自检：旧行情不能改变venue后复用；后台旧spot任务必须拒绝继续拉取而不能写入永续；MU base_currency=MU。API明确指定fixture仍用于隔离测试，不出现在默认应用。标的失败不回退spot或fixture。
 
@@ -22,3 +22,5 @@
 - 桌面/390px窄屏浏览器检查MU页面：默认TD、永续标识、无来源/刷新按钮、5个周期自动得到真实结果。截图 `.local/test-deploy/sirius-mu-market.png`。
 - 审查发现跨周期面板仍手动刷新；新增失败测试复现后移除按钮，复用60秒自动刷新，提交前检查各周期活动任务，历史快照视图不自动采集。
 - 站点根路径和钱包默认返回均进入 `/market-intelligence?method=td`。
+
+最终发布 `usjukgqekfc7q08v8sgsjsb6` 完成，SHA `1fab597f62a2b94ae00c73dc9036f1f5d8d79dae`；线上15组真实永续任务全部成功且fresh，默认入口/登录/匿名API保护检查通过。
