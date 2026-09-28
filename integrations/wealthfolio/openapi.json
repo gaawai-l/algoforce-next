@@ -269,6 +269,24 @@
         }
       }
     },
+    "/api/wheelhouse/v1/macro-watch": {
+      "get": {
+        "summary": "Macro Watch",
+        "operationId": "macro_watch_api_wheelhouse_v1_macro_watch_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacroWatch"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/workspace": {
       "get": {
         "summary": "Workspace",
@@ -2728,6 +2746,31 @@
         ],
         "title": "FillReconciliation"
       },
+      "Fomc": {
+        "properties": {
+          "decision_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Decision At"
+          },
+          "meeting": {
+            "type": "string",
+            "title": "Meeting"
+          },
+          "projections": {
+            "type": "boolean",
+            "title": "Projections"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decision_at",
+          "meeting",
+          "projections"
+        ],
+        "title": "Fomc"
+      },
       "FxRate": {
         "properties": {
           "currency": {
@@ -3485,6 +3528,67 @@
           "opening_event_id"
         ],
         "title": "Lot"
+      },
+      "MacroWatch": {
+        "properties": {
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "fomc": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fomc"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fomc_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fomc Error"
+          },
+          "spread": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/YieldSpread"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spread_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spread Error"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "checked_at",
+          "fomc",
+          "fomc_error",
+          "spread",
+          "spread_error"
+        ],
+        "title": "MacroWatch"
       },
       "MarketContext": {
         "properties": {
@@ -5039,6 +5143,26 @@
         ],
         "title": "SnapshotSummary"
       },
+      "SpreadPoint": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "spread": {
+            "type": "number",
+            "title": "Spread"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "spread"
+        ],
+        "title": "SpreadPoint"
+      },
       "StateStats": {
         "properties": {
           "state": {
@@ -5876,6 +6000,49 @@
           "schedule"
         ],
         "title": "Workspace"
+      },
+      "YieldSpread": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "ten_year": {
+            "type": "number",
+            "title": "Ten Year"
+          },
+          "one_year": {
+            "type": "number",
+            "title": "One Year"
+          },
+          "spread": {
+            "type": "number",
+            "title": "Spread"
+          },
+          "inverted": {
+            "type": "boolean",
+            "title": "Inverted"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/SpreadPoint"
+            },
+            "type": "array",
+            "title": "History"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "ten_year",
+          "one_year",
+          "spread",
+          "inverted",
+          "history"
+        ],
+        "title": "YieldSpread"
       }
     }
   }

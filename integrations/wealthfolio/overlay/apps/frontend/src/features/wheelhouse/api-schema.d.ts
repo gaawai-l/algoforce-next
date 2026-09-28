@@ -106,6 +106,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/macro-watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Macro Watch */
+        get: operations["macro_watch_api_wheelhouse_v1_macro_watch_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/workspace": {
         parameters: {
             query?: never;
@@ -1009,6 +1026,18 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** Fomc */
+        Fomc: {
+            /**
+             * Decision At
+             * Format: date-time
+             */
+            decision_at: string;
+            /** Meeting */
+            meeting: string;
+            /** Projections */
+            projections: boolean;
+        };
         /** FxRate */
         FxRate: {
             /** Currency */
@@ -1261,6 +1290,20 @@ export interface components {
             entry_price: string;
             /** Opening Event Id */
             opening_event_id: string;
+        };
+        /** MacroWatch */
+        MacroWatch: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            fomc: components["schemas"]["Fomc"] | null;
+            /** Fomc Error */
+            fomc_error: string | null;
+            spread: components["schemas"]["YieldSpread"] | null;
+            /** Spread Error */
+            spread_error: string | null;
         };
         /** MarketContext */
         MarketContext: {
@@ -1853,6 +1896,16 @@ export interface components {
             /** Bar Count */
             bar_count: number;
         };
+        /** SpreadPoint */
+        SpreadPoint: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Spread */
+            spread: number;
+        };
         /** StateStats */
         StateStats: {
             /**
@@ -2156,6 +2209,24 @@ export interface components {
             refresh_job: components["schemas"]["Job"] | null;
             schedule: components["schemas"]["Schedule"] | null;
         };
+        /** YieldSpread */
+        YieldSpread: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Ten Year */
+            ten_year: number;
+            /** One Year */
+            one_year: number;
+            /** Spread */
+            spread: number;
+            /** Inverted */
+            inverted: boolean;
+            /** History */
+            history: components["schemas"]["SpreadPoint"][];
+        };
     };
     responses: never;
     parameters: never;
@@ -2332,6 +2403,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MarketCycle"];
+                };
+            };
+        };
+    };
+    macro_watch_api_wheelhouse_v1_macro_watch_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MacroWatch"];
                 };
             };
         };

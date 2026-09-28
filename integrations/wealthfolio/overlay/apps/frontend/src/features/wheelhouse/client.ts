@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { demarkConfigSchema, demarkResultSchema } from "./demark-contract";
 import { marketCycleSchema } from "./cycle-contract";
+import { macroWatchSchema } from "./macro-contract";
 import { marketContextSchema } from "./regime-contract";
 import type { components } from "./api-schema";
 
@@ -200,6 +201,8 @@ export const getMarketContext = (
   );
 export const getMarketCycle = (signal?: AbortSignal) =>
   query("/market-cycle", marketCycleSchema, { signal });
+export const getMacroWatch = (signal?: AbortSignal) =>
+  query("/macro-watch", macroWatchSchema, { signal });
 export const getJob = (id: string, signal?: AbortSignal) =>
   query(`/jobs/${encodeURIComponent(id)}`, jobSchema, { signal });
 export const getJobEvents = (id: string, signal?: AbortSignal) =>

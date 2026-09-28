@@ -384,6 +384,17 @@ const en = {
     "{{changes}} state changes since 2015 · deadband {{multiplier}}× · depth {{depth}}% · spread {{spread}}%",
   "cycle.status.stale": "Stale · bitview has not published yesterday yet",
   "cycle.unavailable": "Unavailable",
+  "macro.title": "Rate expectations · AlphaBTC theme inputs",
+  "macro.fomc": "Next FOMC decision",
+  "macro.countdown": "{{days}} d {{hours}} h",
+  "macro.meeting": "{{meeting}} · {{at}} UTC",
+  "macro.projections": "with projections",
+  "macro.spread": "10Y − 1Y Treasury spread",
+  "macro.inverted": "Inverted",
+  "macro.normal": "Not inverted",
+  "macro.spreadDetail": "10Y {{ten}}% · 1Y {{one}}% · FRED {{day}}",
+  "macro.note":
+    "Federal Reserve calendar and FRED daily yields (one business day behind). Hike odds, CPI/PPI surprises and news are not connected yet.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -759,6 +770,16 @@ const zh: Record<MessageKey, string> = {
     "2015 年以来共切换 {{changes}} 次 · 死区 {{multiplier}}× · 深度 {{depth}}% · 价差 {{spread}}%",
   "cycle.status.stale": "过期 · bitview 尚未发布昨日数据",
   "cycle.unavailable": "不可用",
+  "macro.title": "加息预期 · AlphaBTC 主题数据",
+  "macro.fomc": "下次 FOMC 决议",
+  "macro.countdown": "{{days}} 天 {{hours}} 小时",
+  "macro.meeting": "{{meeting}} · {{at}} UTC",
+  "macro.projections": "含经济预测",
+  "macro.spread": "10Y − 1Y 国债利差",
+  "macro.inverted": "倒挂",
+  "macro.normal": "未倒挂",
+  "macro.spreadDetail": "10Y {{ten}}% · 1Y {{one}}% · FRED {{day}}",
+  "macro.note": "数据来自美联储官网日历和 FRED 日度收益率（晚一个工作日）。加息概率、CPI/PPI 超预期和新闻监控尚未接入。",
 };
 
 export const messages = { en, zh };
