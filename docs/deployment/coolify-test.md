@@ -16,3 +16,7 @@
 本地验收：两镜像构建成功；匿名访问页面及两API为401，正确凭据访问200，跨源请求403、broker sync403；通过容器完整执行fixture DeMark320根任务，重启Python容器后旧快照仍可读取。单元测试验证broker worker不会启动，market worker正常启动。部署审查发现的worker开关与Python依赖锁问题已修复并由Standards/Spec两轴复核关闭。
 
 远端部署结果和最终URL以实际Coolify运行与外网验证后补充。
+
+## 2026-09-28 钱包认证替换
+
+用户明确要求取消 Basic Auth，并使用 RainbowKit + Base 钱包签名登录。上方 Basic Auth 验收是历史记录，不再代表当前认证设计。先已在线热修复关闭密码弹窗，再通过源码发布钱包认证。新配置与验收入口见 `deploy/test/README.md`，设计与执行记录见 `docs/deployment/WALLET-LOGIN-PLAN.md`。

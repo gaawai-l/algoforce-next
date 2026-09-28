@@ -1,16 +1,23 @@
 # Wheelhouse test deployment
 
-Deploy the `codex/test-environment` branch with Coolify Docker Compose. Compose path: `/deploy/test/compose.yaml`; base directory `/`. Only the `web` service receives a public HTTPS domain. Internal Python and Wealthfolio services have no published ports.
+Deploy `codex/test-environment` through Coolify Docker Compose. Compose path: `/deploy/test/compose.yaml`; base directory `/`. Only `web` has a public HTTPS domain. Python, Wealthfolio and wallet-auth have internal ports only.
 
-Runtime variables:
-- `TEST_AUTH_USER`: test access username.
-- `TEST_AUTH_HASH`: Base64-encoded Apache APR1 password hash (not the plaintext password).
-- `WF_SECRET_KEY`: independent 32-byte encryption key, encoded as base64 or a 32-character ASCII value.
+Authentication uses RainbowKit and Base SIWE. Basic Auth is disabled. The server permits only the configured wallet addresses and issues a 30-day HttpOnly/Secure session cookie. Visit `/login/?manage=1` to sign out. See [wallet authentication](../../services/wallet-auth/README.md).
 
-Store these in Coolify environment variables; never commit their values. The hash is base64-encoded to prevent Compose or the platform from interpreting dollar signs. Keep test credentials separate from brokerage credentials.
+Runtime configuration:
 
-The web image compiles the pinned upstream Wealthfolio source with this repository's overlay. Python is installed from the local source tree. The image context is an allowlist, so local databases, `.env`, virtual environments and broker SDK/runtime files are excluded. There is no OpenD in this stack; public broker discovery/sync paths return 403.
+- `WF_SECRET_KEY`: independent Wealthfolio encryption key; preserve it across deployments.
+- `WALLET_AUTH_ORIGIN`: exact public HTTPS origin. The Compose default is this test environment's existing domain; update it when the domain changes.
+- `WALLET_AUTH_ADDRESSES`: comma-separated address allowlist. Defaults to the two Base addresses provided by the owner.
+- `BASE_RPC_URL`: Base JSON-RPC endpoint for contract-wallet signature verification; defaults to Base's public endpoint.
+- Optional build argument `VITE_WALLETCONNECT_PROJECT_ID`: real WalletConnect project ID for QR connections. Without it, RainbowKit discovers installed browser wallets.
 
-Nginx protects static content and both API namespaces with test authentication, verifies browser Origin against Host, proxies the APIs to their internal services and serves the React SPA. `/healthz` is public and contains only `ok`. HTTPS is terminated by Coolify. This is a shared single-user test workspace, not a multi-tenant deployment.
+`TEST_AUTH_USER` and `TEST_AUTH_HASH` are obsolete and ignored. `web-entrypoint.sh` is retained as historical material but is no longer copied into images.
 
-Named volumes keep test data across redeploys. Real statements and account captures must not be imported into this environment. Rotate test credentials in Coolify when sharing ends. Database backup/restore and production authentication are separate release requirements.
+The web image compiles pinned Wealthfolio source with this repository's overlay plus the independent login page. The Python image installs our analytics package, including DeMark. Coolify builds these and the wallet-auth image on the server; no custom registry is used.
+
+Nginx authorizes the application and both API namespaces via wallet-auth. The login resources and `/healthz` are public. Anonymous APIs return 401 without a Basic challenge. Browser Origin checks remain active. Broker discovery/sync return 403 and the broker worker stays disabled.
+
+Separate named volumes preserve test analytics, Wealthfolio data and hashed wallet sessions. Use public market data and fixtures only. Session data and credentials never enter Git. Production authentication, backup policy and brokerage connectivity remain separate decisions.
+
+Anonymous acceptance: `python deploy/test/verify.py https://<test-domain>`. Full acceptance additionally accepts `--session-file /absolute/private/session.json`, containing `session_cookie` from a legitimate wallet session; the script never prints its value. Do not provide a wallet private key.

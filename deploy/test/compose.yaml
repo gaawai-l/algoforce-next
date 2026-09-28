@@ -4,17 +4,36 @@ services:
       context: .
       dockerfile: deploy/test/Dockerfile
       target: web
-    environment:
-      TEST_AUTH_USER: ${TEST_AUTH_USER:?Set a test login username}
-      TEST_AUTH_HASH: ${TEST_AUTH_HASH:?Set a test password hash}
+      args:
+        VITE_WALLETCONNECT_PROJECT_ID: ${VITE_WALLETCONNECT_PROJECT_ID:-}
     expose:
       - "80"
     depends_on:
       - analytics
       - wealthfolio
+      - wallet-auth
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  wallet-auth:
+    build:
+      context: .
+      dockerfile: deploy/test/Dockerfile
+      target: wallet-auth
+    environment:
+      WALLET_AUTH_ORIGIN: ${WALLET_AUTH_ORIGIN:-https://gfbk0bsvzvpdv2tonftg9cp6.45.32.124.189.sslip.io}
+      WALLET_AUTH_ADDRESSES: ${WALLET_AUTH_ADDRESSES:-0x11890834531ad1127863895fa83983bfc6347bb0,0x092b5f11c081b7f607e7dbf0167d5f9267da215e}
+      BASE_RPC_URL: ${BASE_RPC_URL:-https://mainnet.base.org}
+    volumes:
+      - wallet-auth-test:/data
+    expose:
+      - "8790"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -50,5 +69,6 @@ services:
       - "8088"
     restart: unless-stopped
 volumes:
+  wallet-auth-test:
   analytics-test:
   wealthfolio-test:

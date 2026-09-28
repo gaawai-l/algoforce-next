@@ -9,14 +9,24 @@ import httpx
 
 parser=argparse.ArgumentParser()
 parser.add_argument('url')
-parser.add_argument('--credentials',type=Path,required=True)
+parser.add_argument('--session-file', type=Path, help='Private JSON containing session_cookie; omit for anonymous checks')
 args=parser.parse_args()
-values=json.loads(args.credentials.read_text())
+values=json.loads(args.session_file.read_text()) if args.session_file else None
 base=args.url.rstrip('/')
 with httpx.Client(timeout=30,follow_redirects=False) as client:
-    for endpoint in ('/','/api/v1/settings','/api/wheelhouse/v1/status'):
-        assert client.get(base+endpoint).status_code==401,endpoint
-    client.auth=(values['TEST_AUTH_USER'],values['password'])
+    page = client.get(base + '/')
+    assert page.status_code == 302 and page.headers['location'].startswith('/login/'), page.status_code
+    assert 'www-authenticate' not in page.headers
+    assert client.get(base + '/login/').status_code == 200
+    for endpoint in ('/api/v1/settings', '/api/wheelhouse/v1/status'):
+        response = client.get(base + endpoint)
+        assert response.status_code == 401 and 'www-authenticate' not in response.headers, endpoint
+    assert client.post(base + '/api/wheelhouse/v1/portfolio/sync', json={}).status_code == 403
+    assert client.post(base + '/auth/challenge', json={}, headers={'Origin': 'https://unrelated.example'}).status_code == 403
+    if values is None:
+        print(json.dumps({'wallet_login_page': 'passed', 'anonymous_api': 'blocked', 'basic_auth': 'removed', 'broker_sync': 'blocked'}))
+        raise SystemExit(0)
+    client.headers['Cookie'] = values['session_cookie']
     for endpoint in ('/','/api/v1/healthz','/api/wheelhouse/v1/status'):
         response=client.get(base+endpoint)
         assert response.status_code==200,(endpoint,response.status_code)
