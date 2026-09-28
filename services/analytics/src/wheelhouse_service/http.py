@@ -24,6 +24,7 @@ from .calculation import data_state
 from .context import MarketContext, build_context
 from .contracts import ErrorBody, Integrations, ServiceStatus
 from .cycle import Fetch, MarketCycle, build_cycle
+from .macro import Get, MacroWatch, build_macro, http_get
 from .market import (
     DURATIONS,
     Analysis,
@@ -55,6 +56,7 @@ from .settings import Settings
 PREFIX = "/api/wheelhouse/v1"
 # bitview publishes daily; a failed read is retried sooner than a good one is refreshed.
 CYCLE_TTL = {"fresh": 900.0, "stale": 900.0, "unavailable": 60.0}
+MACRO_TTL = 3600.0
 logger = logging.getLogger("wheelhouse.requests")
 
 
@@ -71,6 +73,7 @@ def create_app(
     rules: Rules | None = None,
     coinalyze_key: str | None = None,
     cycle_fetch: Fetch = fetch_daily,
+    macro_get: Get = http_get,
 ) -> FastAPI:
     """`start_perps` defaults to the WHEELHOUSE_PERPS setting; nothing starts without
     `start_worker`. `perps_collectors` defaults to the WHEELHOUSE_PERPS_COLLECTORS one (off),
@@ -78,6 +81,7 @@ def create_app(
     WHEELHOUSE_RULES setting and `coinalyze_key` to the WHEELHOUSE_COINALYZE_KEY one."""
     repository: Repository | None = None
     cycle_cache: tuple[float, MarketCycle] | None = None
+    macro_cache: tuple[float, MacroWatch] | None = None
 
     def repo() -> Repository:
         assert repository is not None, "Application lifespan has not started"
@@ -200,6 +204,7 @@ def create_app(
                 "onchain",
                 "perps",
                 "market_cycle",
+                "macro_watch",
             ],
         )
 
@@ -287,6 +292,16 @@ def create_app(
         if cycle_cache is None or monotonic() - cycle_cache[0] > CYCLE_TTL[cycle_cache[1].status]:
             cycle_cache = (monotonic(), build_cycle(datetime.now(UTC), cycle_fetch))
         return cycle_cache[1]
+
+    @app.get(f"{PREFIX}/macro-watch", response_model=MacroWatch)
+    def macro_watch() -> MacroWatch:
+        nonlocal macro_cache
+        failed = macro_cache is not None and (
+            macro_cache[1].fomc is None or macro_cache[1].spread is None
+        )
+        if macro_cache is None or monotonic() - macro_cache[0] > (60.0 if failed else MACRO_TTL):
+            macro_cache = (monotonic(), build_macro(datetime.now(UTC), macro_get))
+        return macro_cache[1]
 
     @app.get(f"{PREFIX}/workspace", response_model=Workspace)
     def workspace(

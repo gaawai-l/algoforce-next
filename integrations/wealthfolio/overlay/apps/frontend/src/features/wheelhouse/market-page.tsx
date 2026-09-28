@@ -19,6 +19,7 @@ import { OnchainLevels, lineLabel } from "./onchain-levels";
 import { bandsLegend, railBands, type CostBucket } from "./cost-basis-panel";
 import { FlowsPanel } from "./flows-panel";
 import { CycleCheck } from "./cycle-check";
+import { MacroCheck } from "./macro-check";
 import { RegimeCheck } from "./regime-check";
 import { defaultDemarkConfig } from "./demark-contract";
 import {
@@ -847,6 +848,7 @@ export default function MarketPage() {
             <RegimeCheck stream={stream} rules={rules} live={!selectedId} />
           )}
           {method === "td" && symbol === "BTCUSDT" && <CycleCheck />}
+          {method === "td" && symbol === "BTCUSDT" && <MacroCheck />}
           {/* Replay, audit and OHLC describe the K-line dataset; Flows has none. */}
           {method !== "flows" && (
             <>
