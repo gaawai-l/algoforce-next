@@ -10,8 +10,8 @@ const en = {
   "nav.market": "Market intelligence",
   "nav.marketHint": "Local Python analysis",
   "page.title": "Market intelligence",
-  "page.subtitle": "Wheelhouse · Traceable market analysis",
-  "portfolio.subtitle": "Wheelhouse · Read-only account analytics",
+  "page.subtitle": "Orbit · Traceable market analysis",
+  "portfolio.subtitle": "Orbit · Read-only account analytics",
   "lang.group": "Language",
   "missing": "Unavailable",
   "issue.windowOnly":
@@ -273,7 +273,7 @@ const en = {
   "demark.rulesBreach":
     "TDST breach: {{tdst}}. Risk breach: {{risk}}. Recycling: {{recycling}}. Expiry: {{expiry}}.",
   "demark.rulesRisk":
-    "Risk uses the true extreme in the Countdown span, with the earliest tie. Risk and recycling details are declared Wheelhouse policies, not a claim of proprietary platform equivalence.",
+    "Risk uses the true extreme in the Countdown span, with the earliest tie. Risk and recycling details are declared Orbit policies, not a claim of proprietary platform equivalence.",
   "demark.noneExpiry": "None",
   "regime.title": "Cross-timeframe check · AlphaBTC parity",
   "regime.note":
@@ -354,8 +354,8 @@ const zh: Record<MessageKey, string> = {
   "nav.market": "市场分析",
   "nav.marketHint": "本地 Python 分析",
   "page.title": "市场分析",
-  "page.subtitle": "Wheelhouse · 可追溯市场分析",
-  "portfolio.subtitle": "Wheelhouse · 只读账户分析",
+  "page.subtitle": "Orbit · 可追溯市场分析",
+  "portfolio.subtitle": "Orbit · 只读账户分析",
   "lang.group": "语言",
   "missing": "不可用",
   "issue.windowOnly": "第一根输入 K 线之前的历史未知；计数只覆盖当前窗口。",
@@ -607,7 +607,7 @@ const zh: Record<MessageKey, string> = {
   "demark.rulesBreach":
     "TDST 突破：{{tdst}}。风险突破：{{risk}}。再循环：{{recycling}}。到期：{{expiry}}。",
   "demark.rulesRisk":
-    "风险水平取倒计时区间内的真实极值，并列时取最早者。风险与再循环细节是 Wheelhouse 声明的策略，并不表示与专有平台等价。",
+    "风险水平取倒计时区间内的真实极值，并列时取最早者。风险与再循环细节是 Orbit 声明的策略，并不表示与专有平台等价。",
   "demark.noneExpiry": "无",
   "regime.title": "跨周期核对 · AlphaBTC 对照",
   "regime.note": "只用已收盘 K 线，每个周期取最近 {{window}} 根。AlphaBTC 含未收盘 K 线，数值可能比它晚一根。",

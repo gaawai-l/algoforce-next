@@ -30,7 +30,7 @@ export async function createAuth({ origin, addresses, directory, now = Date.now,
   return {
     challenge(address) {
       const normalized = getAddress(address.toLowerCase());
-      if (!allowed.has(normalized.toLowerCase())) throw new Error('This wallet is not allowed to access Wheelhouse.');
+      if (!allowed.has(normalized.toLowerCase())) throw new Error('This wallet is not allowed to access Orbit.');
       for (const [key, value] of challenges) if (value.expires <= now()) challenges.delete(key);
       if (challenges.size >= 500) throw new Error('Too many login attempts. Try again later.');
       const token = random();
@@ -38,7 +38,7 @@ export async function createAuth({ origin, addresses, directory, now = Date.now,
       const message = createSiweMessage({
         address: normalized, chainId: 8453, domain: site.host, uri: origin,
         version: '1', nonce: random(), issuedAt: new Date(now()), expirationTime: new Date(expires),
-        statement: 'Sign in to Wheelhouse. This does not authorize any transaction.',
+        statement: 'Sign in to Orbit. This does not authorize any transaction.',
       });
       challenges.set(digest(token), { message, address: normalized, expires });
       return { token, message };

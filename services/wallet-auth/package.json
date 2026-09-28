@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs && vitest run",
     "build": "vite build",
     "start": "node src/server.mjs"
   },
@@ -13,11 +13,15 @@
     "@tanstack/react-query": "5.90.21",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "sonner": "2.0.7",
     "viem": "2.56.9",
     "wagmi": "2.19.5"
   },
   "devDependencies": {
-    "vite": "7.3.6"
+    "@testing-library/react": "16.3.0",
+    "jsdom": "26.1.0",
+    "vite": "7.3.6",
+    "vitest": "3.2.6"
   },
   "overrides": {
     "ws": "8.22.0"
