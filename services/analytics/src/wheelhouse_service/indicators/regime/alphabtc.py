@@ -64,8 +64,8 @@ def derive_state(summary: DemarkSummary) -> TimeframeState:
         (ls is not None and ls.kind == 13)
         or (last_ex13 is not None and (last9 is None or last_ex13 > last9))
     )
-    # DemarkSummary reports countdown_step 0 outside countdown, so AlphaBTC's alternative
-    # `countdownStep >= 13` cannot occur here; a carried 13 always has a qualified prev.
+    # Outside countdown, DemarkSummary reports countdown_step 13 only on the bar a prev 13
+    # qualifies, so AlphaBTC's alternative `countdownStep >= 13` never adds to prev_q13.
     carry13 = (
         last_is_13
         and summary.phase != "countdown"

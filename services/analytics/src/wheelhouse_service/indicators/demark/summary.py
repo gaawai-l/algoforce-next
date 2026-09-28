@@ -136,7 +136,7 @@ def summarize(result: DemarkResult, bars: list[Bar], as_of: datetime) -> DemarkS
     side = primary.side
 
     # Rounds, rule B: a same-side chain that restarts on an opposite 9 or on a new 9
-    # after any chain round already reached qualified 13.
+    # after any chain round already reached qualified 13; unperfected held-back 9s are skipped.
     chain: list[DemarkSequence] = []
     for seq in done:
         if chain and (
@@ -148,8 +148,16 @@ def summarize(result: DemarkResult, bars: list[Bar], as_of: datetime) -> DemarkS
             )
         ):
             chain = []
+        elif chain and seq.countdown_status == "inactive" and not seq.setup_perfected:
+            # A same-side 9 held back by retain_active is listed only once perfected
+            # (TradingSignal 2026-09-27 4h lists a perfected one; 2026-09-28 5m omits one).
+            continue
         chain.append(seq)
-    if not active and chain and chain[0].side != run.side:
+    if not active and chain and chain[0].side != run.side and not any(
+        c.countdown_status == "qualified13" and c.risk_status == "valid" for c in chain
+    ):
+        # An opposite run drops the chain once its 13's risk level has broken (2026-09-27
+        # 15m); a 13 whose risk level holds stays listed (2026-09-28 5m).
         chain = []
     if not any(c is run for c in chain):
         chain.append(run)
@@ -181,6 +189,9 @@ def summarize(result: DemarkResult, bars: list[Bar], as_of: datetime) -> DemarkS
         if prev_seq
         else None
     )
+    if phase == "setup" and prev is not None and prev.qualified and prev.bars_ago == 0:
+        # TradingSignal still reports the count on the bar the 13 qualifies (2026-09-28 5m).
+        countdown_step = prev.countdown
 
     first = chain[0]
     last_signal: SignalRef | None
@@ -258,7 +269,14 @@ def summarize(result: DemarkResult, bars: list[Bar], as_of: datetime) -> DemarkS
         risk=SummaryRisk(
             risk9=text(risk9) if risk9 is not None else None,
             risk9_at=_t9(setup9) if setup9 is not None else None,
-            setup_close=setup9.setup_bars[8].close if setup9 is not None else None,
+            # TradingSignal drops the close once the 9's countdown started and was cancelled
+            # (2026-09-28 5m, cancelled at 12); cancelled before counting keeps it (2026-09-27 15m).
+            setup_close=(
+                setup9.setup_bars[8].close
+                if setup9 is not None
+                and not (setup9.countdown_status == "cancelled" and setup9.countdown_count > 0)
+                else None
+            ),
             risk_level=risk13.risk_level if risk13 is not None else None,
             risk13_at=_t13(risk13) if risk13 is not None else None,
             provisional=not (risk13 is not None and first is risk13),

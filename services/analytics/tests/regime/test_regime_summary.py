@@ -1,9 +1,20 @@
-"""TradingSignal-equivalent primary-sequence summary, pinned to the 2026-09-27 snapshot."""
+"""TradingSignal-equivalent primary-sequence summary, pinned to captured snapshots."""
 
 from decimal import Decimal
 
 import pytest
-from regime_fixture import TIMEFRAMES, V2, load_fixture, replay_dataset
+from regime_fixture import (
+    FIXTURE,
+    FIXTURE_0350,
+    FIXTURE_0400,
+    FIXTURE_0407,
+    FIXTURE_0416,
+    FIXTURE_0431,
+    TIMEFRAMES,
+    V2,
+    load_fixture,
+    replay_dataset,
+)
 from test_sequential import BUY, dataset
 
 from wheelhouse_service.indicators.demark import evaluate_demark
@@ -13,9 +24,9 @@ STRUCTURAL = (
     "side", "regime", "phase", "step", "target", "setupStep", "countdownStep",
     "barsSinceQualified13", "lastSignal", "prev", "second", "rounds",
 )
-# 5m's previous SELL 13 sits 2-7 USDT from its thresholds; the feeds disagree there.
-FEED_SENSITIVE = {"5m": {"prev", "barsSinceQualified13"}}
 PRICES = ("riskLevel", "risk9", "setupClose", "close13", "tdst")
+FIXTURES = (FIXTURE, FIXTURE_0350, FIXTURE_0400, FIXTURE_0407, FIXTURE_0416, FIXTURE_0431)
+CASES = [(path, tf) for path in FIXTURES for tf in TIMEFRAMES]
 
 
 def _strip(value):
@@ -26,47 +37,35 @@ def _strip(value):
     return value
 
 
-def _replay(tf):
-    data, as_of = replay_dataset(tf)
+def _replay(tf, path=FIXTURE):
+    data, as_of = replay_dataset(tf, path)
     summary = summarize(evaluate_demark(data, V2), [b.bar for b in data.bars], as_of)
     assert summary is not None
     return as_tradingsignal(summary)
 
 
-@pytest.mark.parametrize("tf", TIMEFRAMES)
-def test_structure_matches_tradingsignal(tf):
-    expected = load_fixture()["timeframes"][tf]
-    across, risk = _replay(tf)
+@pytest.mark.parametrize(("path", "tf"), CASES)
+def test_structure_matches_tradingsignal(path, tf):
+    expected = load_fixture(path)["timeframes"][tf]
+    across, risk = _replay(tf, path)
     for key in STRUCTURAL:
-        if key in FEED_SENSITIVE.get(tf, set()):
-            continue
         assert _strip(across.get(key)) == _strip(expected["across"].get(key)), key
     for key in ("provisional", "risk13Ts", "risk9Ts", "side", "setupRun"):
         assert risk[key] == expected["risk"][key], key
     assert risk["nextBarNeeds"]["direction"] == expected["risk"]["nextBarNeeds"]["direction"]
+    need = Decimal(str(expected["risk"]["nextBarNeeds"]["price"]))
+    assert abs(Decimal(risk["nextBarNeeds"]["price"]) - need) < Decimal("1e-6")
 
 
-@pytest.mark.parametrize("tf", TIMEFRAMES)
-def test_prices_differ_only_by_feed(tf):
-    expected = load_fixture()["timeframes"][tf]["risk"]
-    _, risk = _replay(tf)
+@pytest.mark.parametrize(("path", "tf"), CASES)
+def test_prices_match_tradingsignal(path, tf):
+    expected = load_fixture(path)["timeframes"][tf]["risk"]
+    _, risk = _replay(tf, path)
     for key in PRICES:
         assert (risk[key] is None) == (expected[key] is None), key
         if risk[key] is not None:
-            # Binance vs TradingSignal's feed: largest observed gap is 64.54 (4h risk9).
-            assert abs(Decimal(risk[key]) - Decimal(str(expected[key]))) <= 70, key
-
-
-def test_15m_prices_are_exact_on_tradingsignal_candles():
-    expected = load_fixture()["timeframes"]["15m"]["risk"]
-    _, risk = _replay("15m")
-    for key in ("risk9", "setupClose", "riskLevel", "tdst"):
-        assert abs(Decimal(risk[key]) - Decimal(str(expected[key]))) < Decimal("1e-6"), key
-
-
-def test_5m_previous_thirteen_is_the_locally_observed_one():
-    across, _ = _replay("5m")
-    assert across["prev"] == {"side": "SELL", "countdown": 13, "qualified": True, "barsAgo": 35}
+            # TradingSignal serialises floats (84632.79999999999); prices have one decimal.
+            assert abs(Decimal(risk[key]) - Decimal(str(expected[key]))) < Decimal("1e-6"), key
 
 
 def test_no_observed_sequence_returns_none():
