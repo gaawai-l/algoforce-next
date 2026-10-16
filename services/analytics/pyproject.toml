@@ -7,7 +7,7 @@ name = "wheelhouse-service"
 version = "0.2.0"
 description = "Local Python analysis foundation for the Wealthfolio host"
 requires-python = ">=3.12"
-dependencies = ["fastapi==0.141.1", "uvicorn==0.54.0", "httpx==0.28.1"]
+dependencies = ["fastapi==0.141.1", "uvicorn==0.54.0", "httpx==0.28.1", "websockets==17.2"]
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1", "httpx==0.28.1", "mypy==1.20.2", "ruff==0.16.9"]

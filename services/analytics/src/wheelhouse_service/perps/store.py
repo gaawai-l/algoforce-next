@@ -163,6 +163,11 @@ class PerpsStore:
         with self.connection(write=True) as db:
             db.execute("UPDATE coverage SET end=MAX(end, ?) WHERE id=?", (end, row_id))
 
+    def close_coverage(self, row_id: int, end: float) -> None:
+        """A connection ended: its interval stops at `end` (an end never moves back)."""
+        with self.connection(write=True) as db:
+            db.execute("UPDATE coverage SET end=MAX(end, ?), open=0 WHERE id=?", (end, row_id))
+
     def close_open_coverage(self) -> None:
         """At startup: the intervals a stopped process left open end at their last saved end."""
         with self.connection(write=True) as db:

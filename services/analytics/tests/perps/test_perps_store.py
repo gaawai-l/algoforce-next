@@ -122,6 +122,23 @@ def test_coverage_union_and_close_open_on_restart(tmp_path: Path):
     assert restarted.coverage("bybit_liq", T0) == union
 
 
+def test_close_coverage_ends_one_interval(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    first = store.open_coverage("binance_liq", 0, T0)
+    second = store.open_coverage("binance_liq", 1, T0 + 60)
+    store.extend_coverage(first, T0 + 500)
+    store.close_coverage(first, T0 + 400)  # an end never moves back
+    store.extend_coverage(second, T0 + 700)
+
+    with store.connection() as db:
+        rows = [tuple(row) for row in db.execute("SELECT id, end, open FROM coverage ORDER BY id")]
+    assert rows == [(first, T0 + 500, 0), (second, T0 + 700, 1)]
+    store.close_coverage(second, T0 + 800)
+    assert store.coverage("binance_liq", T0) == [(T0, T0 + 800)]
+    with store.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM coverage WHERE open=1").fetchone()[0] == 0
+
+
 def test_prune_drops_old_rows_and_trade_ids(tmp_path: Path):
     store = PerpsStore(tmp_path / "perps.sqlite3")
     old, new = T0 - DAY, T0
