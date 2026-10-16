@@ -9,8 +9,18 @@ from threading import Event, Thread
 
 from ..market import timestamp
 from .brk import DAY1_SERIES, HOUR1_BACKFILL, HOUR1_SERIES, START, BrkClient, BrkError, Index, Urpd
+from .costbasis import (
+    BUCKETS,
+    COHORTS,
+    LINE_ORDER,
+    PAST_DAYS,
+    BucketCostBasis,
+    StoredCostBasis,
+    cost_basis,
+)
 from .cycle import classify
-from .levels import last_complete, model_lines
+from .levels import ModelLine, last_complete, model_lines
+from .models import GRACE_END
 from .pressure import LOOKBACK, seller_pressure
 from .store import OnchainStore
 
@@ -28,6 +38,19 @@ CYCLE_SERIES = (
 BACKFILL: dict[Index, int | date] = {"day1": START, "hour1": -HOUR1_BACKFILL}
 URPD_COHORT = "all"
 URPD_AGG = "lin500"
+# The snapshots the cost basis needs: every cohort at every bucket width. The first one gives the
+# median line and the day D that the others are fetched for.
+URPD_SET: tuple[tuple[str, str], ...] = (
+    (URPD_COHORT, URPD_AGG),
+    ("sth", "lin500"),
+    ("lth", "lin500"),
+    ("all", "lin200"),
+    ("sth", "lin200"),
+    ("lth", "lin200"),
+    ("all", "lin1000"),
+    ("sth", "lin1000"),
+    ("lth", "lin1000"),
+)
 # Refreshes are due at HH:12 UTC.
 SLOT_MINUTE = 12
 RETRY_AFTER = timedelta(minutes=5)
@@ -198,14 +221,45 @@ class OnchainSync:
         return {entry.removeprefix("hour1:") for entry in entries if entry.startswith("hour1:")}
 
     def _urpd(self, at: datetime) -> Urpd | None:
-        """Today's snapshot, or yesterday's while today's does not exist yet."""
+        """Today's snapshot, or yesterday's while today's does not exist yet.
+
+        The rest of URPD_SET is fetched for the same day D, and so are the past snapshots the
+        cost-basis grid needs while they are missing or not final. All are stored, and the days no
+        longer needed are pruned.
+        """
         today = at.astimezone(UTC).date()
+        urpd: Urpd | None = None
         for day in (today, today - timedelta(days=1)):
             urpd = self.client.urpd(URPD_COHORT, day, URPD_AGG)
             if urpd is not None:
-                self.store.save_urpd(urpd, at)
-                return urpd
-        return None
+                break
+        if urpd is None:
+            # Without D nothing else is asked for, and nothing is pruned.
+            return None
+        self.store.save_urpd(urpd, at)
+        for cohort, agg in URPD_SET[1:]:
+            # A failure here fails the stage, like one of `all lin500`.
+            self._save_urpd(cohort, urpd.date, agg, at)
+        past = [urpd.date - timedelta(days=n) for n in PAST_DAYS]
+        for day in past:
+            # Fetched before the day closed, plus the grace day1 rows get, it may have been forming.
+            final = datetime.combine(day + timedelta(days=1), GRACE_END, tzinfo=UTC)
+            for cohort, agg in URPD_SET:
+                fetched_at = self.store.urpd_fetched_at(cohort, day, agg)
+                if fetched_at is not None and fetched_at >= final:
+                    continue
+                try:
+                    self._save_urpd(cohort, day, agg, at)
+                except BrkError as exc:
+                    # Past snapshots only widen the grid: the derived reasons tell what is missing.
+                    logger.warning("onchain_urpd_past_failed code=%s", exc.code)
+        self.store.prune_urpd({today, today - timedelta(days=1), urpd.date, *past})
+        return urpd
+
+    def _save_urpd(self, cohort: str, day: date, agg: str, at: datetime) -> None:
+        urpd = self.client.urpd(cohort, day, agg)
+        if urpd is not None:
+            self.store.save_urpd(urpd, at)
 
     def _recent_urpd(self, at: datetime) -> Urpd | None:
         """The stored snapshot, unless it is older than yesterday: that would pass for current."""
@@ -238,15 +292,23 @@ class OnchainSync:
         last = last_complete(rows)
         if last is None:
             self.store.clear_derived("levels")
+            self.store.clear_derived("costbasis")
         else:
             as_of, values = last
+            lines = model_lines(values, urpd)
             levels = {
                 "as_of": as_of.isoformat(),
                 "urpd_date": urpd.date.isoformat() if urpd else None,
                 "onchain_close": urpd.close if urpd else None,
-                "lines": [line.model_dump() for line in model_lines(values, urpd)],
+                "lines": [line.model_dump() for line in lines],
             }
             self.store.save_derived("levels", json.dumps(levels, allow_nan=False), at)
+            if urpd is None or len(lines) < len(LINE_ORDER):
+                # Without all five lines the bands would quietly change, so there is none.
+                self.store.clear_derived("costbasis")
+            else:
+                stored = self._cost_basis(urpd.date, as_of.date(), lines)
+                self.store.save_derived("costbasis", stored.model_dump_json(), at)
 
         if hour1_at is None:
             # The stored pressure stays, with the time it was computed, until hour1 is fetched.
@@ -264,6 +326,53 @@ class OnchainSync:
             self.store.clear_derived("pressure")
         else:
             self.store.save_derived("pressure", pressure.model_dump_json(), hour1_at)
+
+    def _cost_basis(self, day: date, lines_as_of: date, lines: list[ModelLine]) -> StoredCostBasis:
+        """Every bucket width whose snapshots of `day` are all stored; the reasons say what is not.
+
+        Only the store is read, so what was fetched in this run does not matter.
+        """
+        buckets: list[BucketCostBasis] = []
+        reasons: list[str] = []
+        used: list[tuple[str, str]] = []
+        for bucket in BUCKETS:
+            agg = f"lin{bucket}"
+            today: dict[str, Urpd] = {}
+            for cohort in COHORTS:
+                snapshot = self.store.urpd(cohort, day, agg)
+                if snapshot is None:
+                    reasons.append(f"urpd_missing:{cohort}:{agg}")
+                else:
+                    today[cohort] = snapshot
+            if len(today) < len(COHORTS):
+                continue
+            past = [
+                self.store.urpd(cohort, day - timedelta(days=n), agg)
+                for n in PAST_DAYS
+                for cohort in COHORTS
+            ]
+            found = [snapshot for snapshot in past if snapshot is not None]
+            if len(found) < len(past):
+                # The grid is built from the days there are.
+                reasons.append(f"urpd_grid_partial:{agg}")
+            result = cost_basis(today, found, bucket, lines)
+            if result is None:
+                reasons.append(f"urpd_empty:{agg}")
+            else:
+                buckets.append(result)
+                used += [(cohort, agg) for cohort in COHORTS]
+        # Without a usable width, the snapshot the median came from.
+        stamps = [
+            self.store.urpd_fetched_at(cohort, day, agg)
+            for cohort, agg in used or [(URPD_COHORT, URPD_AGG)]
+        ]
+        return StoredCostBasis(
+            urpd_date=day,
+            lines_as_of=lines_as_of,
+            snapshot_at=min(stamp for stamp in stamps if stamp is not None),
+            buckets=buckets,
+            reasons=reasons,
+        )
 
     def _fail(self, at: datetime, code: str, *, retry: bool, brk: bool) -> None:
         """Record a failed run; `last_success_at` keeps meaning the last complete refresh."""

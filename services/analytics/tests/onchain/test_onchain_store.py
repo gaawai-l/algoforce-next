@@ -1,5 +1,5 @@
 import stat
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -190,6 +190,59 @@ def test_state_roundtrip_and_latest_urpd(tmp_path: Path):
     assert store.latest_urpd("sth", "lin500") is None
     with store.connection() as db:
         assert db.execute("SELECT COUNT(*) FROM urpd").fetchone()[0] == 2
+
+
+def test_store_urpd_by_day_and_fetched_at(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    snapshot = load_urpd("sth")
+    day = snapshot.date
+    assert store.urpd("sth", day, "lin500") is None
+    assert store.urpd_fetched_at("sth", day, "lin500") is None
+
+    older = snapshot.model_copy(update={"date": day - timedelta(days=1)})
+    store.save_urpd(older, FETCHED)
+    store.save_urpd(snapshot, FETCHED)
+    store.save_urpd(snapshot, FETCHED + timedelta(hours=1))
+
+    assert store.urpd("sth", day, "lin500") == snapshot
+    assert store.urpd("sth", day - timedelta(days=1), "lin500") == older
+    # The time of the last save, in UTC.
+    fetched = store.urpd_fetched_at("sth", day, "lin500")
+    assert fetched == FETCHED + timedelta(hours=1)
+    assert fetched is not None and fetched.utcoffset() == timedelta(0)
+    assert store.urpd_fetched_at("sth", day - timedelta(days=1), "lin500") == FETCHED
+    # Another cohort, aggregation or day is another snapshot.
+    assert store.urpd("all", day, "lin500") is None
+    assert store.urpd("sth", day, "lin200") is None
+    assert store.urpd("sth", day + timedelta(days=1), "lin500") is None
+    assert store.urpd_fetched_at("all", day, "lin500") is None
+    assert store.urpd_fetched_at("sth", day, "lin200") is None
+
+
+def test_prune_urpd_keeps_listed_days(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    days = [date(2026, 10, 16) - timedelta(days=n) for n in range(4)]
+    for day in days:
+        for cohort in ("all", "sth"):
+            for agg in ("lin200", "lin500"):
+                snapshot = load_urpd(cohort).model_copy(update={"date": day, "aggregation": agg})
+                store.save_urpd(snapshot, FETCHED)
+
+    # A listed day without snapshots is no problem.
+    store.prune_urpd({days[0], days[2], date(2026, 10, 17)})
+
+    with store.connection() as db:
+        kept = {tuple(row) for row in db.execute("SELECT cohort, day, agg FROM urpd")}
+    assert kept == {
+        (cohort, day.isoformat(), agg)
+        for day in (days[0], days[2])
+        for cohort in ("all", "sth")
+        for agg in ("lin200", "lin500")
+    }
+
+    store.prune_urpd(set())
+    with store.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM urpd").fetchone()[0] == 0
 
 
 def test_derived_roundtrip_and_clear(tmp_path: Path):

@@ -68,12 +68,13 @@ def _bulk(params: dict[str, str], missing: Set[str]) -> httpx.Response:
     return httpx.Response(200, json=body)
 
 
-def _urpd(cohort: str, day: str, params: dict[str, str]) -> httpx.Response:
-    if not (FIXTURES / f"urpd_{cohort}_lin500.json").exists():
-        return _error(404, "not_found")
-    if params.get("agg") != "lin500":
-        return _error(400, "bad_request", "invalid_request")
-    return httpx.Response(200, json={**_raw(f"urpd_{cohort}_lin500.json"), "date": day})
+def _urpd(directory: Path, cohort: str, day: str, agg: str) -> httpx.Response:
+    """The snapshot captured for `day`, else the directory's undated one, dated `day`."""
+    for name in (f"urpd_{cohort}_{agg}_{day}.json", f"urpd_{cohort}_{agg}.json"):
+        path = directory / name
+        if path.exists():
+            return httpx.Response(200, json={**json.loads(path.read_text()), "date": day})
+    return _error(404, "not_found")
 
 
 def brk_transport(
@@ -83,10 +84,15 @@ def brk_transport(
     fail_paths: Set[str] = frozenset(),
     fail_index: Set[str] = frozenset(),
     urpd_dates: Set[date] | None = None,
+    urpd_dir: Path | None = None,
+    urpd_missing: Set[tuple[str, str]] = frozenset(),
+    urpd_fail: Set[tuple[str, str]] = frozenset(),
 ) -> tuple[httpx.MockTransport, Calls]:
     """A fake BRK serving the fixtures; `urpd_dates=None` means every date has a snapshot.
 
-    Series requests for an index in `fail_index` always get a 503.
+    Series requests for an index in `fail_index` always get a 503. URPD snapshots come from
+    `urpd_dir` (the P1 fixtures by default); a (cohort, agg) in `urpd_missing` gets a 404 for every
+    date, and one in `urpd_fail` a 500.
     """
     calls = Calls()
 
@@ -104,9 +110,14 @@ def brk_transport(
             return _bulk(params, missing)
         if path.startswith("/api/urpd/"):
             _, _, _, cohort, day = path.split("/")
+            agg = params["agg"]
+            if (cohort, agg) in urpd_fail:
+                return httpx.Response(500)
+            if (cohort, agg) in urpd_missing:
+                return _error(404, "not_found")
             if urpd_dates is not None and date.fromisoformat(day) not in urpd_dates:
                 return _error(404, "not_found")
-            return _urpd(cohort, day, params)
+            return _urpd(urpd_dir or FIXTURES, cohort, day, agg)
         return _error(404, "not_found")
 
     return httpx.MockTransport(handler), calls

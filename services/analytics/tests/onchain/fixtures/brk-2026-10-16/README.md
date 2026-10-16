@@ -37,6 +37,7 @@ data). Replayed by `../../onchain_fixture.py`; do not edit the JSON by hand.
 | `hour1_utxos_under_1h_old_supply_in_loss.json` | `utxos_under_1h_old_supply_in_loss` | 1011942293 | 2026-10-16T10:02:02Z | sample copy |
 | `hour1_utxos_under_1h_old_supply_in_profit.json` | `utxos_under_1h_old_supply_in_profit` | 1011942293 | 2026-10-16T10:02:03Z | sample copy |
 | `urpd_all_lin500.json` | `/api/urpd/all/2026-10-16?agg=lin500` | n/a | n/a (no stamp; `date` 2026-10-16, `close` 82154.25) | fetched 2026-10-16T13:39:58Z |
+| `urpd_{sth,lth}_lin500.json`, `urpd_{all,sth,lth}_lin{200,1000}.json` | `/api/urpd/{cohort}/2026-10-16?agg=lin{N}` | n/a | n/a (no stamp; `date` 2026-10-16, `close` 81217.6) | copy of `../brk-2026-10-16T1829Z/` (fetched 2026-10-16T18:29:37Z) |
 
 ## Origin
 
@@ -55,6 +56,11 @@ data). Replayed by `../../onchain_fixture.py`; do not edit the JSON by hand.
   removed, bytes otherwise unchanged) to match the sample copies.
 - `urpd_all_lin500.json` was fetched on 2026-10-16 with `GET /api/urpd/all/2026-10-16?agg=lin500`,
   unchanged (252 buckets, `price_floor` 0 to 125,500 in steps of 500).
+- The other 8 `urpd_*.json` are byte-for-byte copies of the same-named files in
+  `../brk-2026-10-16T1829Z/`, so the sync can fetch all 9 snapshots of the day. They were captured
+  at 18:29Z, not 13:39Z like `urpd_all_lin500.json` here, and do not match it (`close` 81217.6
+  against 82154.25). Never assert cost-basis values on this directory: assert them only on
+  `../brk-2026-10-16T1829Z/`.
 - Version mismatch: none to report. The two fetched items have no earlier sample to compare
   with, and the fetched series has the same `start`/`end` as the samples.
 

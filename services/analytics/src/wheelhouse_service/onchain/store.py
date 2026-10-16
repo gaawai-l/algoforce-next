@@ -3,9 +3,9 @@
 import json
 import os
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Set
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from ..market import digest, timestamp
@@ -170,18 +170,31 @@ class OnchainStore:
                 "SELECT * FROM urpd WHERE cohort=? AND agg=? ORDER BY day DESC LIMIT 1",
                 (cohort, agg),
             ).fetchone()
-        if row is None:
-            return None
-        return Urpd.model_validate(
-            {
-                "cohort": row["cohort"],
-                "date": row["day"],
-                "aggregation": row["agg"],
-                "close": row["close"],
-                "total_supply": row["total_supply"],
-                "buckets": json.loads(row["buckets_json"]),
-            }
-        )
+        return None if row is None else _urpd(row)
+
+    def urpd(self, cohort: str, day: date, agg: str) -> Urpd | None:
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT * FROM urpd WHERE cohort=? AND day=? AND agg=?",
+                (cohort, day.isoformat(), agg),
+            ).fetchone()
+        return None if row is None else _urpd(row)
+
+    def urpd_fetched_at(self, cohort: str, day: date, agg: str) -> datetime | None:
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT fetched_at FROM urpd WHERE cohort=? AND day=? AND agg=?",
+                (cohort, day.isoformat(), agg),
+            ).fetchone()
+        return None if row is None else datetime.fromisoformat(row["fetched_at"]).astimezone(UTC)
+
+    def prune_urpd(self, keep: Set[date]) -> None:
+        """Delete the snapshots of every day not in `keep`."""
+        days = [day.isoformat() for day in keep]
+        marks = ",".join("?" * len(days))
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(f"DELETE FROM urpd WHERE day NOT IN ({marks})", days)
 
     def save_derived(self, kind: str, payload: str, computed_at: datetime) -> None:
         with self.connection() as db:
@@ -223,3 +236,16 @@ class OnchainStore:
         with self.connection() as db:
             stored = {row["key"]: row["value"] for row in db.execute("SELECT * FROM sync_state")}
         return {key: stored.get(key) for key in STATE_KEYS}
+
+
+def _urpd(row: sqlite3.Row) -> Urpd:
+    return Urpd.model_validate(
+        {
+            "cohort": row["cohort"],
+            "date": row["day"],
+            "aggregation": row["agg"],
+            "close": row["close"],
+            "total_supply": row["total_supply"],
+            "buckets": json.loads(row["buckets_json"]),
+        }
+    )

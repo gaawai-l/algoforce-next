@@ -18,13 +18,17 @@ from wheelhouse_service.onchain.brk import (
     START,
     BrkClient,
 )
+from wheelhouse_service.onchain.costbasis import PAST_DAYS, StoredCostBasis
 from wheelhouse_service.onchain.cycle import Cycle
 from wheelhouse_service.onchain.pressure import Pressure
 from wheelhouse_service.onchain.store import OnchainStore
-from wheelhouse_service.onchain.sync import OnchainSync
+from wheelhouse_service.onchain.sync import URPD_SET, OnchainSync
 
 NOW = datetime(2026, 10, 16, 10, 40, tzinfo=UTC)
 LINES = {"true_mean", "short_term", "average", "long_term", "median"}
+# The cost-basis golden sample: unlike the P1 fixtures, it has its own snapshot for each past day.
+GOLDEN = Path(__file__).parent / "fixtures" / "brk-2026-10-16T1829Z"
+D = date(2026, 10, 16)
 
 
 def instant(value: str | None) -> datetime:
@@ -75,6 +79,45 @@ def pressure_of(store: OnchainStore) -> Pressure:
     derived = store.derived("pressure")
     assert derived is not None
     return Pressure.model_validate_json(derived[0])
+
+
+def costbasis_of(store: OnchainStore) -> StoredCostBasis:
+    derived = store.derived("costbasis")
+    assert derived is not None
+    return StoredCostBasis.model_validate_json(derived[0])
+
+
+def bucket_widths(store: OnchainStore) -> list[int]:
+    return [bucket.bucket for bucket in costbasis_of(store).buckets]
+
+
+def urpd_calls(calls: list[tuple[str, dict[str, str]]]) -> list[tuple[str, str, str]]:
+    """The URPD requests, in order, as (cohort, date, agg)."""
+    found = []
+    for path, params in calls:
+        if path.startswith("/api/urpd/"):
+            _, _, _, cohort, day = path.split("/")
+            found.append((cohort, day, params["agg"]))
+    return found
+
+
+def same_day(day: date) -> list[tuple[str, str, str]]:
+    """The requests for the nine snapshots of `day`, in the order they are made."""
+    return [(cohort, day.isoformat(), agg) for cohort, agg in URPD_SET]
+
+
+def past_of(day: date) -> list[tuple[str, str, str]]:
+    """The requests for the past snapshots of D = `day`, in the order they are made."""
+    return [
+        (cohort, (day - timedelta(days=n)).isoformat(), agg)
+        for n in PAST_DAYS
+        for cohort, agg in URPD_SET
+    ]
+
+
+def urpd_rows(store: OnchainStore) -> set[tuple[str, str, str]]:
+    with store.connection() as db:
+        return {tuple(row) for row in db.execute("SELECT cohort, day, agg FROM urpd")}
 
 
 def strings(value: str | None) -> list[str]:
@@ -720,6 +763,268 @@ def test_missing_hour1_series_on_first_run_leaves_no_pressure(tmp_path: Path):
         "series_missing:hour1:price_close",
     ]
     assert store.derived("pressure") is None
+
+
+def test_urpd_set_is_every_cohort_at_every_bucket_width():
+    assert URPD_SET[0] == ("all", "lin500")
+    assert len(URPD_SET) == 9
+    assert set(URPD_SET) == {
+        (cohort, f"lin{bucket}") for cohort in ("all", "sth", "lth") for bucket in (200, 500, 1000)
+    }
+
+
+def test_sync_fetches_nine_snapshots_for_one_day(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, calls = brk_transport(urpd_dir=GOLDEN)
+
+    assert run(store, transport, NOW) is True
+
+    # Today's `all lin500` exists, so D is today and no other day is probed.
+    assert urpd_calls(calls) == same_day(D) + past_of(D)
+    assert len(past_of(D)) == 36
+    cost = costbasis_of(store)
+    assert cost.urpd_date == D
+    assert cost.lines_as_of == D
+    assert cost.snapshot_at == NOW
+    assert cost.reasons == []
+    assert bucket_widths(store) == [200, 500, 1000]
+    # The golden snapshots were used: their close, not the P1 fixture's 82154.25.
+    assert {bucket.spot for bucket in cost.buckets} == {81217.6}
+    assert urpd_rows(store) == {(c, d, a) for c, d, a in same_day(D) + past_of(D)}
+    state = store.state()
+    assert state["last_error"] is None
+    assert strings(state["reasons"]) == []
+
+    second = NOW + timedelta(hours=1)
+    again, calls = brk_transport(urpd_dir=GOLDEN)
+    assert run(store, again, second) is True
+
+    # Every past snapshot was fetched after its day was final, so only the nine are asked again.
+    assert urpd_calls(calls) == same_day(D)
+    derived = store.derived("costbasis")
+    assert derived is not None and derived[1] == second
+    assert costbasis_of(store).snapshot_at == second
+
+
+def test_past_snapshot_stored_intraday_is_refetched(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    yesterday = D - timedelta(days=1)
+    final = datetime(2026, 10, 16, 2, tzinfo=UTC)
+    # One past snapshot was stored a second before its day counted as final, one right at it.
+    for cohort, fetched_at in (("sth", final - timedelta(seconds=1)), ("lth", final)):
+        snapshot = store.urpd(cohort, yesterday, "lin200")
+        assert snapshot is not None
+        store.save_urpd(snapshot, fetched_at)
+
+    later = NOW + timedelta(hours=1)
+    again, calls = brk_transport()
+    assert run(store, again, later) is True
+
+    assert urpd_calls(calls) == same_day(D) + [("sth", "2026-10-15", "lin200")]
+    assert store.urpd_fetched_at("sth", yesterday, "lin200") == later
+    assert store.urpd_fetched_at("lth", yesterday, "lin200") == final
+
+
+def test_past_snapshot_error_does_not_fail_the_stage(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Every past lin200 snapshot fails; D's are served.
+        path = request.url.path
+        if (
+            path.startswith("/api/urpd/")
+            and not path.endswith(f"/{D.isoformat()}")
+            and request.url.params["agg"] == "lin200"
+        ):
+            return httpx.Response(500)
+        return inner.handler(request)
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, httpx.MockTransport(handler), NOW) is True
+
+    state = store.state()
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == NOW
+    assert strings(state["reasons"]) == []
+    assert bucket_widths(store) == [200, 500, 1000]
+    assert costbasis_of(store).reasons == ["urpd_grid_partial:lin200"]
+    # One line per failed request, with the error code only.
+    assert caplog.text.count("onchain_urpd_past_failed code=brk_unavailable") == 12
+
+
+def test_all_buckets_missing_still_stores_reasons(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport(urpd_missing=set(URPD_SET[1:]))
+
+    assert run(store, transport, NOW) is True
+
+    cost = costbasis_of(store)
+    assert cost.buckets == []
+    assert cost.urpd_date == D
+    assert cost.lines_as_of == D
+    # No bucket width was usable, so this is when `all lin500` was fetched.
+    assert cost.snapshot_at == NOW
+    assert cost.reasons == [
+        "urpd_missing:all:lin200",
+        "urpd_missing:sth:lin200",
+        "urpd_missing:lth:lin200",
+        "urpd_missing:sth:lin500",
+        "urpd_missing:lth:lin500",
+        "urpd_missing:all:lin1000",
+        "urpd_missing:sth:lin1000",
+        "urpd_missing:lth:lin1000",
+    ]
+
+
+def test_costbasis_reasons_stay_out_of_shared_reasons(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport(urpd_missing=set(URPD_SET[1:]))
+
+    assert run(store, transport, NOW) is True
+
+    assert costbasis_of(store).reasons
+    state = store.state()
+    assert strings(state["reasons"]) == []
+    assert strings(state["missing_series"]) == []
+    assert state["last_error"] is None
+
+
+def test_missing_snapshot_drops_only_that_bucket(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport(urpd_missing={("sth", "lin200")})
+
+    assert run(store, transport, NOW) is True
+
+    assert bucket_widths(store) == [500, 1000]
+    # The past lin200 snapshots of sth are missing too, but an unusable width has no grid.
+    assert costbasis_of(store).reasons == ["urpd_missing:sth:lin200"]
+    state = store.state()
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == NOW
+    assert strings(state["reasons"]) == []
+
+
+def test_failed_snapshot_keeps_stored_same_day(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+
+    second = NOW + timedelta(hours=1)
+    failing, _ = brk_transport(urpd_fail={("lth", "lin1000")})
+    assert run(store, failing, second) is True
+
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["next_due"]) == second + timedelta(minutes=5)
+    assert instant(state["last_success_at"]) == NOW
+    assert "brk_unavailable" not in strings(state["reasons"])
+    for kind in ("cycle", "levels", "costbasis"):
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == second
+    # D's lth lin1000 from the first run is still stored, so every width is usable.
+    cost = costbasis_of(store)
+    assert bucket_widths(store) == [200, 500, 1000]
+    assert cost.reasons == []
+    assert cost.urpd_date == D
+    # The oldest snapshot in use is that one.
+    assert cost.snapshot_at == NOW
+
+
+def test_hour1_failure_still_derives_costbasis(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    failing, _ = brk_transport(fail_index={"hour1"})
+
+    assert run(store, failing, NOW) is True
+
+    assert store.state()["last_error"] == "brk_unavailable"
+    assert store.derived("pressure") is None
+    derived = store.derived("costbasis")
+    assert derived is not None and derived[1] == NOW
+    assert bucket_widths(store) == [200, 500, 1000]
+    assert costbasis_of(store).reasons == []
+
+
+def test_day_rollover_uses_yesterday_for_all(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # A snapshot of a day no longer needed, which the stage prunes.
+    store.save_urpd(load_urpd("all").model_copy(update={"date": date(2026, 10, 14)}), NOW)
+    after_midnight = datetime(2026, 10, 17, 0, 30, tzinfo=UTC)
+    published = {D, *(D - timedelta(days=n) for n in PAST_DAYS)}
+    transport, calls = brk_transport(urpd_dates=published)
+
+    assert run(store, transport, after_midnight) is True
+
+    # Only `all lin500` is asked for today; all nine snapshots are then yesterday's, D.
+    assert urpd_calls(calls) == [("all", "2026-10-17", "lin500"), *same_day(D), *past_of(D)]
+    cost = costbasis_of(store)
+    assert cost.urpd_date == D
+    assert bucket_widths(store) == [200, 500, 1000]
+    assert cost.reasons == []
+    assert levels_of(store)["urpd_date"] == "2026-10-16"
+    assert urpd_rows(store) == {(c, d, a) for c, d, a in same_day(D) + past_of(D)}
+
+
+def test_no_urpd_sends_no_other_requests_and_clears_costbasis(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("costbasis") is not None
+    stored = urpd_rows(store)
+    assert len(stored) == 45
+
+    later = datetime(2026, 10, 18, 10, 40, tzinfo=UTC)
+    none, calls = brk_transport(urpd_dates=set())
+    assert run(store, none, later) is True
+
+    assert urpd_calls(calls) == [("all", "2026-10-18", "lin500"), ("all", "2026-10-17", "lin500")]
+    assert store.derived("costbasis") is None
+    # Without D nothing is pruned, although none of these days would be kept.
+    assert urpd_rows(store) == stored
+
+
+def test_missing_lines_clears_costbasis(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("costbasis") is not None
+
+    # A snapshot without supply has no median.
+    inner, _ = brk_transport()
+
+    def no_supply(request: httpx.Request) -> httpx.Response:
+        response = inner.handler(request)
+        if request.url.path == f"/api/urpd/all/{D.isoformat()}":
+            body = json.loads(response.content)
+            body["buckets"] = [{**bucket, "supply": 0.0} for bucket in body["buckets"]]
+            return httpx.Response(200, json=body)
+        return response
+
+    second = NOW + timedelta(hours=1)
+    assert run(store, httpx.MockTransport(no_supply), second) is True
+
+    assert {line["name"] for line in levels_of(store)["lines"]} == LINES - {"median"}
+    assert store.derived("costbasis") is None
+
+    third = second + timedelta(hours=1)
+    healthy, _ = brk_transport()
+    assert run(store, healthy, third) is True
+    assert store.derived("costbasis") is not None
+
+    # Without one of the series lines there are no levels at all.
+    with store.connection() as db:
+        db.execute("DELETE FROM series WHERE series='lth_realized_price'")
+    fourth = third + timedelta(hours=1)
+    partial, _ = brk_transport(missing={"lth_realized_price"})
+    assert run(store, partial, fourth) is True
+
+    assert store.derived("levels") is None
+    assert store.derived("costbasis") is None
+    assert store.state()["last_error"] is None
 
 
 def test_non_retryable_error_waits_for_next_slot(tmp_path: Path):
