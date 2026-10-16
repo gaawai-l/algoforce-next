@@ -236,15 +236,17 @@ def test_grid_edge_is_min_of_series_last(store: PerpsStore):
     assert grid_of(store, "all").last == at("00:30")
 
 
-def test_price_and_vd_need_both_bars(store: PerpsStore):
+def test_price_reads_closing_bar_and_vd_needs_both_bars(store: PerpsStore):
+    """Price is the close of the bar opening at t+5m alone; vd needs the bars at t and t+5m."""
     rest(store, at("00:50"))
     with store.connection(write=True) as db:
         db.execute("DELETE FROM kline WHERE venue='bybit' AND t=?", (at("00:10"),))
+        db.execute("DELETE FROM kline WHERE venue='bybit' AND t=?", (at("00:35"),))
         db.execute("DELETE FROM kline WHERE venue='binance' AND t=?", (at("00:25"),))
     grid = grid_of(store, "binance")
-    assert grid.price[idx("00:00")] is not None
-    assert grid.price[idx("00:10")] is None  # its first bar is missing
-    assert grid.price[idx("00:00")] == grid.price[idx("00:30")] == 100.0
+    assert grid.price[idx("00:10")] == 100.0  # its first bar is missing, its closing bar is not
+    assert grid.price[idx("00:30")] is None  # its closing bar is missing
+    assert grid.price[idx("00:00")] == grid.price[idx("00:40")] == 100.0
     assert grid.vd[idx("00:20")] is None  # its second bar is missing
     assert grid.vd[idx("00:10")] == 2 * (2 * 6.0 - 10.0)
 

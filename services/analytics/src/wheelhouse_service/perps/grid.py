@@ -19,8 +19,8 @@ REQUIRED: dict[Exchange, tuple[str, ...]] = {
     "bybit": ("bybit:price", "bybit:oi"),
     "all": ("bybit:price", "binance:oi", "binance:kline", "bybit:oi"),
 }
-# How far past a bucket's start the last row it reads is stamped: price and delta read the bars
-# opening at t and t+5m, OI the row at t+10m.
+# How far past a bucket's start the last row it reads is stamped: price reads the bar opening at
+# t+5m, delta the bars opening at t and t+5m, OI the row at t+10m.
 LAG = {"bybit:price": BAR, "binance:kline": BAR, "binance:oi": STEP, "bybit:oi": STEP}
 # Whether the raw side field means longs were liquidated (spec §3.1).
 LONGS: dict[Venue, dict[str, bool]] = {
@@ -68,7 +68,7 @@ def build_grid(store: PerpsStore, exchange: Exchange, start: int) -> Grid | list
     last = min(edge for edge in edges.values() if edge is not None)
     buckets = range(start, last + STEP, STEP)
 
-    price = [spot[t + BAR][0] if t in spot and t + BAR in spot else None for t in buckets]
+    price = [spot[t + BAR][0] if t + BAR in spot else None for t in buckets]
     series: dict[str, Values] = {"bybit:price": price}
     parts: dict[Venue, _Part] = {}
     for venue in venues:

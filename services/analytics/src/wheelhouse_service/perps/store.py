@@ -144,7 +144,7 @@ class PerpsStore:
         with self.connection() as db:
             rows = db.execute(
                 "SELECT conn, event_ts, raw_json, key FROM liquidations "
-                "WHERE venue=? AND event_ts>=? ORDER BY id",
+                "WHERE venue=? AND event_ts>=?",
                 (venue, since),
             ).fetchall()
         return [(row["conn"], row["event_ts"], row["raw_json"], row["key"]) for row in rows]
