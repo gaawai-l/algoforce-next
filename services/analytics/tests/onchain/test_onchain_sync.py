@@ -210,11 +210,16 @@ def test_version_change_failure_keeps_old_data(tmp_path: Path):
     assert len(store.read_series("price_close", "day1")) == 5037
 
 
-def test_failure_after_replacement_does_not_repeat_it(tmp_path: Path):
+def test_urpd_failure_after_replacement_still_derives_and_does_not_repeat_it(tmp_path: Path):
     store = OnchainStore(tmp_path / "onchain.sqlite")
+
+    def drop_today(name: str, item: dict[str, Any]) -> None:
+        item["data"] = item["data"][:-1]
+        item["end"] -= 1
+
     transport, _ = brk_transport()
-    run(store, transport, NOW)
-    cycle = store.derived("cycle")
+    run(store, rewritten(transport, drop_today), NOW)
+    assert cycle_of(store).as_of == date(2026, 10, 15)
 
     second = NOW + timedelta(hours=1)
     no_urpd, _ = brk_transport(version="0.13.0", fail_paths={"/api/urpd"})
@@ -226,8 +231,13 @@ def test_failure_after_replacement_does_not_repeat_it(tmp_path: Path):
     # The series were replaced, so the new version is recorded and nothing is refreshing.
     assert state["brk_version"] == "0.13.0"
     assert state["refreshing"] == "false"
+    # Not a full success, so the last success is unchanged.
     assert instant(state["last_success_at"]) == NOW
-    assert store.derived("cycle") == cycle
+    # The fresh series were still derived, with the snapshot stored by the first run.
+    assert cycle_of(store).as_of == date(2026, 10, 16)
+    cycle = store.derived("cycle")
+    assert cycle is not None and cycle[1] == second
+    assert instant(levels_of(store)["as_of"]) == datetime(2026, 10, 16, tzinfo=UTC)
 
     third = second + timedelta(minutes=5)
     healthy, calls = brk_transport(version="0.13.0")
@@ -236,6 +246,74 @@ def test_failure_after_replacement_does_not_repeat_it(tmp_path: Path):
     assert all(params["start"] != START.isoformat() for params in bulk_calls(calls))
     assert store.state()["last_error"] is None
     assert instant(store.state()["last_success_at"]) == third
+
+
+def test_urpd_outage_uses_latest_stored_snapshot(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    snapshot, _ = brk_transport(urpd_dates={date(2026, 10, 15)})
+    run(store, snapshot, NOW)
+
+    second = NOW + timedelta(hours=1)
+    outage, _ = brk_transport(fail_paths={"/api/urpd"})
+    assert run(store, outage, second) is True
+
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["next_due"]) == second + timedelta(minutes=5)
+    assert instant(state["last_success_at"]) == NOW
+    assert strings(state["reasons"]) == ["brk_unavailable"]
+    levels = levels_of(store)
+    assert levels["urpd_date"] == "2026-10-15"
+    assert levels["onchain_close"] == 82154.25
+    assert {line["name"] for line in levels["lines"]} == LINES
+    derived = store.derived("levels")
+    assert derived is not None and derived[1] == second
+
+    third = second + timedelta(minutes=5)
+    healthy, _ = brk_transport()
+    assert run(store, healthy, third) is True
+
+    assert levels_of(store)["urpd_date"] == "2026-10-16"
+    assert strings(store.state()["reasons"]) == []
+    assert store.state()["last_error"] is None
+
+
+def test_urpd_outage_without_snapshot_gives_four_lines(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    outage, _ = brk_transport(fail_paths={"/api/urpd"})
+
+    assert run(store, outage, NOW) is True
+
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["next_due"]) == NOW + timedelta(minutes=5)
+    assert state["last_success_at"] is None
+    assert state["refreshing"] == "false"
+    assert strings(state["reasons"]) == ["urpd_missing", "brk_unavailable"]
+    assert cycle_of(store).state == "breakout"
+    levels = levels_of(store)
+    assert levels["urpd_date"] is None
+    assert {line["name"] for line in levels["lines"]} == LINES - {"median"}
+
+
+def test_refreshing_clears_when_brk_returns_to_the_old_version(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+
+    second = NOW + timedelta(hours=1)
+    failing, _ = brk_transport(version="0.13.0", fail_paths={"/api/series"})
+    run(store, failing, second)
+    assert store.state()["refreshing"] == "true"
+
+    third = second + timedelta(minutes=5)
+    reverted, _ = brk_transport(version="0.12.2")
+    assert run(store, reverted, third) is True
+
+    state = store.state()
+    assert state["refreshing"] == "false"
+    assert state["brk_version"] == "0.12.2"
+    assert state["last_error"] is None
 
 
 def test_empty_full_refetch_keeps_old_series(tmp_path: Path):

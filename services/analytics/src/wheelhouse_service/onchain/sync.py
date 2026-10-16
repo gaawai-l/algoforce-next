@@ -23,6 +23,7 @@ CYCLE_SERIES = (
     "price_close",
 )
 URPD_COHORT = "all"
+URPD_AGG = "lin500"
 # Refreshes are due at HH:12 UTC.
 SLOT_MINUTE = 12
 RETRY_AFTER = timedelta(minutes=5)
@@ -94,10 +95,19 @@ class OnchainSync:
             # Every series is rebuilt in one transaction; the old data stays readable until then.
             self.store.set_state(refreshing="true")
             self._replace(DAY1_SERIES, at, missing)
-            self.store.set_state(brk_version=version, refreshing="false")
         else:
             self._increment(at, missing)
-        urpd = self._urpd(at)
+        # The series stage is done, so nothing is being rebuilt any more.
+        self.store.set_state(brk_version=version, refreshing="false")
+
+        urpd_error: BrkError | None = None
+        try:
+            urpd = self._urpd(at)
+        except BrkError as exc:
+            # The series are fresh whatever happens to URPD, so still derive from them, with the
+            # latest snapshot on hand. The run is then recorded as failed.
+            urpd_error = exc
+            urpd = self.store.latest_urpd(URPD_COHORT, URPD_AGG)
 
         done = clock()
         self._derive(urpd, done)
@@ -105,12 +115,13 @@ class OnchainSync:
         reasons = [f"series_missing:{name}" for name in absent]
         if urpd is None:
             reasons.append("urpd_missing")
+        self.store.set_state(missing_series=json.dumps(absent), reasons=json.dumps(reasons))
+        if urpd_error is not None:
+            raise urpd_error
         self.store.set_state(
             last_success_at=timestamp(done),
             last_error=None,
             next_due=timestamp(next_slot(done)),
-            missing_series=json.dumps(absent),
-            reasons=json.dumps(reasons),
         )
 
     def _replace(self, names: Sequence[str], at: datetime, missing: set[str]) -> None:
@@ -147,7 +158,7 @@ class OnchainSync:
         """Today's snapshot, or yesterday's while today's does not exist yet."""
         today = at.astimezone(UTC).date()
         for day in (today, today - timedelta(days=1)):
-            urpd = self.client.urpd(URPD_COHORT, day)
+            urpd = self.client.urpd(URPD_COHORT, day, URPD_AGG)
             if urpd is not None:
                 self.store.save_urpd(urpd, at)
                 return urpd
@@ -182,7 +193,7 @@ class OnchainSync:
         self.store.save_derived("levels", json.dumps(levels, allow_nan=False), at)
 
     def _fail(self, at: datetime, code: str, *, retry: bool, brk: bool) -> None:
-        """Record a failed run. Series and derived results stay as they were."""
+        """Record a failed run; `last_success_at` keeps meaning the last complete refresh."""
         logger.warning("onchain_sync_failed code=%s", code)
         state = self.store.state()
         reasons: list[str] = json.loads(state["reasons"] or "[]")
