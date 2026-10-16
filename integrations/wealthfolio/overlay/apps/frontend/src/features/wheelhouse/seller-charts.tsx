@@ -54,15 +54,17 @@ export function compactUsd(value: number, decimals: number) {
   return `${value < 0 ? "−" : ""}$${(abs / divisor).toFixed(decimals)}${unit}`;
 }
 const SI = ["", "k", "M", "B"];
-// Chart 1 amounts as the original prints them (d3 ".3s"): three significant digits and a lowercase
-// SI suffix, the unit picked after rounding so 999,950 reads $1.00M. The original shows billions
-// as B. The amounts are whole hundreds of dollars, so nothing lies between $0 and $1.
+// Chart 1 amounts as the original prints them (`v < 1 ? v.toFixed(2) : d3.format(".3~s")`): three
+// significant digits without trailing zeros and a lowercase SI suffix, the unit picked after
+// rounding so 999,950 reads $1M. The original shows billions as B and anything under 1 as $0.00.
 export function sigUsd(value: number) {
-  if (value === 0) return "$0";
-  const [digits, power] = Math.abs(value).toExponential(2).split("e");
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "−" : "";
+  if (abs < 1) return `${sign}$${abs.toFixed(2)}`;
+  const [digits, power] = abs.toExponential(2).split("e");
   const tier = Math.min(SI.length - 1, Math.floor(Number(power) / 3));
   const scaled = Number(digits) * 10 ** (Number(power) - tier * 3);
-  return `${value < 0 ? "−" : ""}$${scaled.toPrecision(3)}${SI[tier]}`;
+  return `${sign}$${Number(scaled.toPrecision(3))}${SI[tier]}`;
 }
 export const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
 // The original rounds the price to one decimal.

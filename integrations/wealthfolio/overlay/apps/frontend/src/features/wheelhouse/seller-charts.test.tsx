@@ -474,7 +474,7 @@ it("queries under the shared key and refreshes every five minutes", async () => 
   await waitFor(() => expect(mocks.pressure).toHaveBeenCalledOnce());
 });
 
-it("formats chart 1 amounts with three significant digits, as d3 .3s does", () => {
+it("formats chart 1 amounts with three significant digits, as d3 .3~s does", () => {
   for (const [value, shown] of [
     [37_600_000, "$37.6M"],
     [9_390_000, "$9.39M"],
@@ -486,10 +486,13 @@ it("formats chart 1 amounts with three significant digits, as d3 .3s does", () =
     [41_345_525, "$41.3M"],
     [10_050_150, "$10.1M"],
     [999, "$999"],
-    [0, "$0"],
+    // trailing zeros are dropped, and anything under 1 prints with two decimals
+    [10_000_000, "$10M"],
+    [1_500_000, "$1.5M"],
+    [0, "$0.00"],
     // rounded to three digits before the unit is picked, so never "$1000k"
-    [999_950, "$1.00M"],
-    [999_500, "$1.00M"],
+    [999_950, "$1M"],
+    [999_500, "$1M"],
     [99_950, "$100k"],
   ] as const)
     expect(sigUsd(value)).toBe(shown);
