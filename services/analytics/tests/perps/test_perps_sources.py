@@ -97,11 +97,17 @@ class Exchange:
         if (host, path) == (BINANCE_HOST, "/futures/data/openInterestHist"):
             return httpx.Response(200, json=hist_reply(self.hist, query))
         if (host, path) == (BYBIT_HOST, "/v5/market/kline"):
-            rows = [
-                row
-                for row in self.spot["result"]["list"]
-                if int(query["start"]) <= int(row[0]) <= int(query["end"])
-            ]
+            # Live behaviour (checked 2026-10-16): of the rows in [start, end] it returns the
+            # NEWEST `limit`, newest first - not the oldest `limit` of the range.
+            rows = sorted(
+                (
+                    row
+                    for row in self.spot["result"]["list"]
+                    if int(query["start"]) <= int(row[0]) <= int(query["end"])
+                ),
+                key=lambda row: int(row[0]),
+                reverse=True,
+            )
             result = {**self.spot["result"], "list": rows[: int(query["limit"])]}
             return httpx.Response(200, json={**self.spot, "result": result})
         if (host, path) == (BYBIT_HOST, "/v5/market/open-interest"):
@@ -177,6 +183,13 @@ def test_binance_klines_pages_and_maps_fields():
     assert exchange.requests[0].extensions["timeout"]["read"] == 20.0
 
 
+def windows_of(exchange: Exchange) -> list[tuple[int, int]]:
+    """(startTime, endTime) in ms of each request."""
+    return [
+        (int(r.url.params["startTime"]), int(r.url.params["endTime"])) for r in exchange.requests
+    ]
+
+
 def test_binance_oi_hist_pages_in_explicit_windows():
     exchange = Exchange()
     rest = rest_of(exchange, clock_at("23:55"), binance_oi_hist=100)
@@ -185,16 +198,29 @@ def test_binance_oi_hist_pages_in_explicit_windows():
 
     assert [p.t for p in points] == list(range(T0, DAY_END, 300))
     assert points[0] == OiPoint(t=T0, oi=93117.263, source="hist")
-    # Every request names both ends; the windows hold `limit` periods and tile without a gap.
-    windows = [
-        (int(r.url.params["startTime"]) // 1000, int(r.url.params["endTime"]) // 1000)
-        for r in exchange.requests
+    # Every request names both ends. The windows are half-open, `limit` periods wide, and tile
+    # without a gap or an overlap.
+    span = 100 * 300 * 1000
+    assert windows_of(exchange) == [
+        (T0 * 1000 + span * i, T0 * 1000 + span * (i + 1) - 1) for i in range(3)
     ]
-    assert windows == [(T0 + 30_000 * i, T0 + 30_000 * i + 99 * 300) for i in range(3)]
-    assert all(b[0] == a[1] + 300 for a, b in zip(windows, windows[1:], strict=False))
     assert {(r.url.params["period"], r.url.params["limit"]) for r in exchange.requests} == {
         ("5m", "100")
     }
+
+
+def test_binance_oi_hist_unaligned_start_loses_no_period():
+    exchange = Exchange()
+    rest = rest_of(exchange, clock_at("23:55"), binance_oi_hist=10)
+
+    points = rest.binance_oi_hist(T0 + 100)
+
+    # Every period stamped after the start, though no window edge falls on one.
+    assert [p.t for p in points] == list(range(T0 + 300, DAY_END, 300))
+    windows = windows_of(exchange)
+    assert windows[0][0] == (T0 + 100) * 1000
+    assert all(end - start + 1 == 10 * 300 * 1000 for start, end in windows)
+    assert all(b[0] == a[1] + 1 for a, b in zip(windows, windows[1:], strict=False))
 
 
 def test_binance_oi_hist_does_not_rely_on_start_time_alone():
@@ -565,3 +591,202 @@ def test_one_request_in_flight():
         thread.join()
 
     assert peak == 1
+
+
+# --- Hardening: failures stay RestErrors, paging cannot run away, waits are capped. ---
+
+
+def test_bybit_oi_stops_on_a_repeated_cursor():
+    page = {
+        "list": [{"timestamp": str(T0 * 1000), "openInterest": "2", "singleOpenInterest": "1"}],
+        "nextPageCursor": "again",
+    }
+    sent: list[httpx.Request] = []
+
+    def respond(n: int) -> httpx.Response:
+        assert n < 10, "paging ran away"
+        return bybit_ok(page)
+
+    rest = rest_of(scripted(respond, sent), bybit_oi=1)
+
+    assert rest.bybit_oi(T0, T0 + 3600) == [OiPoint(t=T0, oi=1.0, source="bybit")]
+    assert len(sent) == 2  # the cursor it just used came back
+
+
+def corrupt_stream(data: bytes) -> bytes:
+    """`data` with a byte of the deflated member flipped."""
+    start = 30 + len("BTCUSDT-metrics-2026-10-15.csv") + 8
+    return data[:start] + bytes([data[start] ^ 0xFF]) + data[start + 1 :]
+
+
+def archive_bytes(kind: str) -> bytes:
+    good = zip_of(metrics_csv([(f"00:{5 * i:02d}:00", 100.0 + i) for i in range(12)]))
+    if kind == "not-a-zip":
+        return b"<html>denied</html>"
+    if kind == "truncated":
+        return good[:40]
+    if kind == "corrupt-stream":
+        return corrupt_stream(good)
+    if kind == "missing-member":
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("README.txt", "hello")
+        return buffer.getvalue()
+    csv_text = {
+        "no-rows": metrics_csv([]),
+        "no-oi-column": "create_time,symbol\n2026-10-15 00:00:00,BTCUSDT\n",
+        "bad-time": "create_time,sum_open_interest\nyesterday,1.0\n",
+    }[kind]
+    return zip_of(csv_text)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "not-a-zip",
+        "truncated",
+        "corrupt-stream",
+        "missing-member",
+        "no-rows",
+        "no-oi-column",
+        "bad-time",
+    ],
+)
+def test_archive_that_is_not_a_daily_file_is_a_bad_response(kind: str):
+    rest = rest_of(lambda request: httpx.Response(200, content=archive_bytes(kind)))
+
+    with pytest.raises(RestError) as caught:
+        rest.binance_oi_archive(date(2026, 10, 15))
+
+    assert (caught.value.host, caught.value.code, caught.value.until) == (
+        ARCHIVE_HOST,
+        "bad_response",
+        None,
+    )
+
+
+@pytest.mark.parametrize(("status", "minutes"), [(429, 2), (418, 30), (403, 30)])
+def test_archive_host_backs_off_on_its_own(status: int, minutes: int):
+    sent: list[httpx.Request] = []
+
+    def respond(n: int) -> httpx.Response:
+        return httpx.Response(status) if sent[n].url.host == ARCHIVE_HOST else empty_ok(n)
+
+    rest = rest_of(scripted(respond, sent))
+
+    with pytest.raises(RestError) as caught:
+        rest.binance_oi_archive(date(2026, 10, 15))
+
+    until = NOW + timedelta(minutes=minutes)
+    assert (caught.value.host, caught.value.code, caught.value.until) == (
+        ARCHIVE_HOST,
+        str(status),
+        until,
+    )
+    assert rest.backoff_until(ARCHIVE_HOST) == until
+    assert rest.backoff_until(BINANCE_HOST) is None
+    with pytest.raises(RestError) as again:
+        rest.binance_oi_archive(date(2026, 10, 14))
+    assert again.value.until == until
+    assert len(sent) == 1  # nothing was sent while backed off
+    assert rest.binance_klines(T0, T0 + STEP) == []  # fapi.binance.com is unaffected
+    assert len(sent) == 2
+
+
+@pytest.mark.parametrize(
+    ("reply", "fetch"),
+    [
+        pytest.param(lambda: httpx.Response(200, content=b"<html>"), "bybit_oi", id="not-json"),
+        pytest.param(lambda: httpx.Response(200, json=[]), "bybit_oi", id="not-an-object"),
+        pytest.param(
+            lambda: httpx.Response(200, json={"retMsg": "OK"}), "bybit_oi", id="no-retcode"
+        ),
+        pytest.param(lambda: bybit_ok(None), "bybit_oi", id="no-result"),
+        pytest.param(lambda: bybit_ok({"nextPageCursor": ""}), "bybit_oi", id="no-list"),
+        pytest.param(
+            lambda: bybit_ok({"list": [{"timestamp": "1"}], "nextPageCursor": ""}),
+            "bybit_oi",
+            id="oi-row-without-value",
+        ),
+        pytest.param(
+            lambda: bybit_ok({"list": [["x"]]}), "bybit_spot_klines", id="short-kline-row"
+        ),
+    ],
+)
+def test_bybit_reply_of_the_wrong_shape_is_a_bad_response(
+    reply: Callable[[], httpx.Response], fetch: str
+):
+    rest = rest_of(lambda request: reply())
+
+    with pytest.raises(RestError) as caught:
+        getattr(rest, fetch)(T0, T0 + STEP)
+
+    assert (caught.value.host, caught.value.code, caught.value.until) == (
+        BYBIT_HOST,
+        "bad_response",
+        None,
+    )
+    assert rest.backoff_until(BYBIT_HOST) is None
+
+
+@pytest.mark.parametrize(
+    ("call", "host"),
+    [
+        pytest.param(lambda rest: rest.binance_klines(T0, DAY_END), BINANCE_HOST, id="klines"),
+        pytest.param(lambda rest: rest.binance_oi_hist(T0), BINANCE_HOST, id="oi-hist"),
+        pytest.param(lambda rest: rest.bybit_spot_klines(T0, DAY_END), BYBIT_HOST, id="spot"),
+        pytest.param(lambda rest: rest.bybit_oi(T0, DAY_END), BYBIT_HOST, id="bybit-oi"),
+    ],
+)
+def test_error_mid_pagination_raises_without_partial_rows(
+    call: Callable[[PerpsRest], object], host: str
+):
+    exchange = Exchange(oi_rows=5)
+    sent: list[httpx.Request] = []
+    rest = rest_of(
+        scripted(lambda n: exchange(sent[n]) if n == 0 else httpx.Response(429), sent),
+        clock_at("23:55"),
+        binance_klines=100,
+        binance_oi_hist=100,
+        bybit_spot_klines=100,
+        bybit_oi=2,
+    )
+
+    with pytest.raises(RestError) as caught:
+        call(rest)
+
+    assert (caught.value.host, caught.value.code) == (host, "429")
+    assert len(sent) == 2
+
+
+@pytest.mark.parametrize("fetch", ["binance_klines", "bybit_spot_klines"])
+@pytest.mark.parametrize(("slack", "requests"), [(0, 2), (3600, 3)])
+def test_klines_page_boundary_on_an_exact_multiple(fetch: str, slack: int, requests: int):
+    """288 rows in pages of 144: a full last page is followed by a request only if the window
+    reaches past it."""
+    exchange = Exchange()
+    rest = rest_of(exchange, binance_klines=144, bybit_spot_klines=144)
+    first, last = (T0 - slack, DAY_END) if fetch == "bybit_spot_klines" else (T0, DAY_END + slack)
+
+    klines = getattr(rest, fetch)(first, last)
+
+    assert [k.t for k in klines] == list(range(T0, DAY_END, 300))
+    assert len(exchange.requests) == requests
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "days"),
+    [
+        pytest.param("1" + "0" * 20, 3, id="seconds-beyond-timedelta"),
+        pytest.param("864000", 3, id="ten-days"),
+        pytest.param(format_datetime(datetime(2100, 1, 1, tzinfo=UTC), usegmt=True), 3, id="date"),
+        pytest.param("172800", 2, id="two-days-kept"),
+    ],
+)
+def test_backoff_is_capped_at_three_days(retry_after: str, days: int):
+    rest = rest_of(lambda request: httpx.Response(418, headers={"Retry-After": retry_after}))
+
+    with pytest.raises(RestError) as caught:
+        rest.binance_klines(T0, T0 + STEP)
+
+    assert caught.value.until == NOW + timedelta(days=days)

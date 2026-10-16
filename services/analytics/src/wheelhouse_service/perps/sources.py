@@ -12,6 +12,7 @@ import math
 import threading
 import time
 import zipfile
+import zlib
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -28,6 +29,8 @@ BYBIT_HOST = "api.bybit.com"
 SYMBOL = "BTCUSDT"
 TIMEOUT = 20.0
 BAR = 300  # one 5m kline or OI period
+# No wait is longer than this, whatever Retry-After asks (Binance bans last up to three days).
+MAX_BACKOFF = timedelta(days=3)
 
 # Rows per page; Binance's OI history documents 500 and its klines 1500.
 PAGE_LIMITS = {
@@ -63,29 +66,46 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+_SHAPE_ERRORS = (
+    ValueError,
+    TypeError,
+    KeyError,
+    IndexError,
+    csv.Error,
+    zipfile.BadZipFile,
+    zlib.error,
+    EOFError,
+)
+
+
 @contextmanager
 def _malformed(host: str) -> Iterator[None]:
     """Turn a response that does not have the documented shape into a RestError."""
     try:
         yield
-    except (ValueError, TypeError, KeyError, IndexError, csv.Error, zipfile.BadZipFile) as exc:
+    except _SHAPE_ERRORS as exc:
         raise RestError(host, "bad_response") from exc
 
 
 def _retry_after(response: httpx.Response, now: datetime) -> timedelta:
-    """The wait a Retry-After header asks for, in seconds or as an HTTP date; zero if absent."""
+    """The wait a Retry-After header asks for, in seconds or as an HTTP date; zero if absent.
+
+    Never more than MAX_BACKOFF, so that no value can overflow a date.
+    """
     value = response.headers.get("Retry-After")
     if value is None:
         return timedelta(0)
     try:
-        return timedelta(seconds=max(0, int(value)))
+        seconds = int(value)
     except ValueError:
-        pass
-    try:
-        when = parsedate_to_datetime(value)
-    except (TypeError, ValueError):
-        return timedelta(0)
-    return max(when.replace(tzinfo=when.tzinfo or UTC) - now, timedelta(0))
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return timedelta(0)
+        wait = when.replace(tzinfo=when.tzinfo or UTC) - now
+    else:
+        wait = timedelta(seconds=min(seconds, MAX_BACKOFF.total_seconds()))
+    return min(max(wait, timedelta(0)), MAX_BACKOFF)
 
 
 class PerpsRest:
@@ -147,22 +167,24 @@ class PerpsRest:
         """The OI history rows stamped from `start` up to now, oldest first.
 
         With only a `startTime` the endpoint returns the latest `limit` rows, not the ones after
-        it, so this asks for consecutive windows of `limit` periods with both ends given (`endTime`
-        is inclusive), each starting one period after the previous window's end.
+        it (checked live 2026-10-16). So this asks for consecutive windows with both ends given:
+        each is half-open and exactly `limit` periods wide (`endTime` is inclusive, hence the
+        `- 1`), so it holds `limit` stamps whatever the alignment of `start`, and the next window
+        begins where it ends.
         """
         limit = self._limits["binance_oi_hist"]
         now = self._clock().timestamp()
         found: dict[int, OiPoint] = {}
         cursor = start
         while cursor <= now:
-            last = cursor + (limit - 1) * BAR
+            following = cursor + limit * BAR
             rows = self._binance(
                 "/futures/data/openInterestHist",
                 {
                     "symbol": SYMBOL,
                     "period": "5m",
                     "startTime": cursor * 1000,
-                    "endTime": last * 1000,
+                    "endTime": following * 1000 - 1,
                     "limit": limit,
                 },
             )
@@ -170,7 +192,7 @@ class PerpsRest:
                 for row in rows:
                     t = int(row["timestamp"]) // 1000
                     found[t] = OiPoint(t=t, oi=float(row["sumOpenInterest"]), source="hist")
-            cursor = last + BAR
+            cursor = following
         return [found[t] for t in sorted(found)]
 
     def binance_oi_archive(self, day: date) -> tuple[list[OiPoint], bool] | None:
@@ -179,7 +201,7 @@ class PerpsRest:
         Rows are de-duplicated and sorted, then quarantined (spec §3.1): from the first row that
         is not positive, or is the first of two equal ones in a row, to the end of the file, the
         points are kept with `oi` None. The flag says whether any were. None if there is no
-        file for `day`.
+        file for `day`; a file with no rows is a bad response.
         """
         name = f"{SYMBOL}-metrics-{day.isoformat()}"
         try:
@@ -197,6 +219,8 @@ class PerpsRest:
             for row in csv.DictReader(io.StringIO(text)):
                 created = datetime.strptime(row["create_time"], "%Y-%m-%d %H:%M:%S")
                 by_time.setdefault(int(created.replace(tzinfo=UTC).timestamp()), _number(row))
+        if not by_time:
+            raise RestError(ARCHIVE_HOST, "bad_response")
         times = sorted(by_time)
         values = [by_time[t] for t in times]
         first_bad = next(
@@ -214,7 +238,12 @@ class PerpsRest:
         return points, first_bad < len(values)
 
     def bybit_spot_klines(self, start: int, end: int) -> list[Kline]:
-        """Closed 5m spot klines opening in [start, end), oldest first."""
+        """Closed 5m spot klines opening in [start, end), oldest first.
+
+        Of the rows in the range Bybit returns the NEWEST `limit`, newest first (checked live
+        2026-10-16: start 20 bars before the end, limit 3 gave the last three bars). So the
+        paging walks backwards: each page asks for what lies before the oldest row of the last.
+        """
         limit = self._limits["bybit_spot_klines"]
         found: dict[int, Kline] = {}
         upper = end
@@ -260,6 +289,7 @@ class PerpsRest:
             "limit": self._limits["bybit_oi"],
         }
         found: dict[int, OiPoint] = {}
+        used: set[str] = set()
         while True:
             result = self._bybit("/v5/market/open-interest", params)
             with _malformed(BYBIT_HOST):
@@ -269,8 +299,9 @@ class PerpsRest:
                     t = int(row["timestamp"]) // 1000
                     found[t] = OiPoint(t=t, oi=float(row["singleOpenInterest"]), source="bybit")
                 cursor = result.get("nextPageCursor")
-            if not rows or not cursor:
+            if not rows or not cursor or cursor in used:
                 break
+            used.add(cursor)
             params = {**params, "cursor": cursor}
         return [found[t] for t in sorted(found)]
 
