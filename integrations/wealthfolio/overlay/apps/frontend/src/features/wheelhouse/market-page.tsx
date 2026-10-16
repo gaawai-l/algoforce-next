@@ -11,10 +11,11 @@ import { Page, PageContent, PageHeader } from "@wealthfolio/ui";
 import { useSearchParams } from "react-router-dom";
 import { LanguageToggle } from "./language-toggle";
 import { issueText, labeled, useWheelhouseText } from "./i18n";
-import { MarketChart } from "./market-chart";
+import { MarketChart, type ChartOverlay } from "./market-chart";
 import { useLiveMarketRefresh } from "./use-initial-market-refresh";
 import { DemarkDetails } from "./demark-details";
 import { CycleBadge } from "./cycle-badge";
+import { OnchainLevels, lineNameKey } from "./onchain-levels";
 import { RegimeCheck } from "./regime-check";
 import { defaultDemarkConfig } from "./demark-contract";
 import {
@@ -23,6 +24,8 @@ import {
   getWorkspace,
   getSnapshots,
   getSnapshot,
+  getOnchainCycle,
+  getOnchainLevels,
   getJob,
   getJobEvents,
   submitJob,
@@ -92,9 +95,10 @@ export default function MarketPage() {
   useEffect(() => {
     if (!scrollToCycle || method !== "levels") return;
     const frame = requestAnimationFrame(() => {
-      document.getElementById("wh-onchain-cycle")?.scrollIntoView({
-        block: "start",
-      });
+      const target = document.getElementById("wh-onchain-cycle");
+      // The section starts collapsed on phones; open it so the badge lands on its content.
+      if (target instanceof HTMLDetailsElement) target.open = true;
+      target?.scrollIntoView({ block: "start" });
       setScrollToCycle(false);
     });
     return () => cancelAnimationFrame(frame);
@@ -179,6 +183,24 @@ export default function MarketPage() {
     staleTime: Infinity,
     enabled: !!selectedId,
     retry: false,
+  });
+  // On-chain cost lines are a live BTC reading: no other symbol has them and a saved
+  // snapshot has no matching historical reading, so those views never ask for them.
+  const onchainShown =
+    method === "levels" && symbol === "BTCUSDT" && !selectedId;
+  const onchainLevels = useQuery({
+    queryKey: ["wh", "onchain", "levels"],
+    queryFn: ({ signal }) => getOnchainLevels(signal),
+    refetchInterval: 60000,
+    retry: false,
+    enabled: onchainShown,
+  });
+  const onchainCycle = useQuery({
+    queryKey: ["wh", "onchain", "cycle"],
+    queryFn: ({ signal }) => getOnchainCycle(signal),
+    refetchInterval: 60000,
+    retry: false,
+    enabled: onchainShown,
   });
   const task = useQuery({
     queryKey: ["wh", "job", pending?.id],
@@ -306,6 +328,20 @@ export default function MarketPage() {
     setMethod(methods[next].id);
     document.getElementById(`wh-tab-${methods[next].id}`)?.focus();
   };
+  const onchainData = onchainLevels.isError ? undefined : onchainLevels.data;
+  const overlays: ChartOverlay[] | undefined =
+    onchainShown && onchainData && onchainData.data_state !== "unavailable"
+      ? onchainData.lines.map((line) => ({
+          id: line.name,
+          label:
+            onchainData.data_state === "stale"
+              ? text("levels.overlayStale", {
+                  name: text(lineNameKey[line.name]),
+                })
+              : text(lineNameKey[line.name]),
+          price: line.price,
+        }))
+      : undefined;
   const latestPoint = analysis?.points.at(-1);
   const tdSequences = [...(analysis?.demark?.sequences ?? [])].reverse();
   const selectedSequence =
@@ -522,6 +558,7 @@ export default function MarketPage() {
                   showLevels={method === "levels"}
                   showDemark={method === "td"}
                   sequence={selectedSequence}
+                  overlays={overlays}
                 />
               ) : (
                 <div className="wh-empty">
@@ -572,6 +609,31 @@ export default function MarketPage() {
               className="wh-inspector"
               aria-label={text("inspector.label")}
             >
+              {method === "levels" &&
+                (onchainShown ? (
+                  <OnchainLevels
+                    levels={onchainLevels.data}
+                    cycle={onchainCycle.data}
+                    levelsError={
+                      onchainLevels.isError
+                        ? onchainLevels.error.message
+                        : undefined
+                    }
+                    cycleError={
+                      onchainCycle.isError
+                        ? onchainCycle.error.message
+                        : undefined
+                    }
+                  />
+                ) : (
+                  <p className="wh-muted">
+                    {text(
+                      symbol === "BTCUSDT"
+                        ? "levels.latestOnly"
+                        : "levels.btcOnly",
+                    )}
+                  </p>
+                ))}
               <span className="wh-eyebrow">{text("inspector.eyebrow")}</span>
               <h2>
                 {method === "levels"

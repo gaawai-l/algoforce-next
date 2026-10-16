@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Analysis } from "./client";
-import { money, stamp } from "./client";
+import { money, stamp, usd } from "./client";
 import type { DemarkSequence } from "./demark-contract";
 import { labeled, useWheelhouseText } from "./i18n";
 import { visibleWindow, type RangeChoice, type BarWindow } from "./chart-range";
 import { ChartRangeNavigator } from "./chart-range-navigator";
+
+// A horizontal reference price drawn over the bars. It never takes part in the y-axis range.
+export interface ChartOverlay {
+  id: string;
+  label: string;
+  price: number;
+}
 
 interface ChartProps {
   analysis: Analysis;
@@ -12,6 +19,26 @@ interface ChartProps {
   showLevels: boolean;
   showDemark?: boolean;
   sequence?: DemarkSequence;
+  overlays?: ChartOverlay[];
+}
+
+// 11px JetBrains Mono advances about 6.6px per character.
+const EDGE_CHAR_WIDTH = 6.6;
+const EDGE_ROW_HEIGHT = 12;
+
+// Packs "label price" items into rows that fit the chart; every row starts with the arrow.
+function edgeRows(arrow: string, items: string[], maxChars: number) {
+  const rows: string[] = [];
+  let row = "";
+  for (const item of items) {
+    const joined = row ? `${row} · ${item}` : `${arrow} ${item}`;
+    if (row && joined.length > maxChars) {
+      rows.push(row);
+      row = `${arrow} ${item}`;
+    } else row = joined;
+  }
+  if (row) rows.push(row);
+  return rows;
 }
 
 export function MarketChart({
@@ -20,6 +47,7 @@ export function MarketChart({
   showLevels,
   showDemark = false,
   sequence,
+  overlays,
 }: ChartProps) {
   const { text } = useWheelhouseText();
   const missing = text("missing");
@@ -193,6 +221,39 @@ export function MarketChart({
   const y = (price: number) =>
     18 + ((top - price) / (top - bottom)) * (plotBottom - 18);
   const barWidth = Math.max(1, (plotWidth / bars.length) * 0.65);
+  // Overlays are judged against the domain the bars and levels already set. A line inside it
+  // is drawn with its label; one outside is summarised on the nearest edge so the axis, and
+  // therefore every candle, stays where it was.
+  const overlayLines = (overlays ?? [])
+    .filter((o) => o.price >= bottom && o.price <= top)
+    .map((o) => ({ ...o, y: y(o.price) }))
+    .sort((a, b) => a.y - b.y);
+  let previousLabelY = -Infinity;
+  const overlayLabels = overlayLines.map((o) => {
+    let labelY = o.y - 4;
+    // Close lines would stack their labels: move the later one below its own line.
+    if (labelY < previousLabelY + EDGE_ROW_HEIGHT)
+      labelY = Math.max(o.y + 11, previousLabelY + EDGE_ROW_HEIGHT);
+    previousLabelY = labelY;
+    return labelY;
+  });
+  const edgeLimit = Math.floor((chartWidth - 32) / EDGE_CHAR_WIDTH);
+  const aboveRows = edgeRows(
+    "↑",
+    (overlays ?? [])
+      .filter((o) => o.price > top)
+      .sort((a, b) => a.price - b.price)
+      .map((o) => `${o.label} ${usd(o.price)}`),
+    edgeLimit,
+  );
+  const belowRows = edgeRows(
+    "↓",
+    (overlays ?? [])
+      .filter((o) => o.price < bottom)
+      .sort((a, b) => b.price - a.price)
+      .map((o) => `${o.label} ${usd(o.price)}`),
+    edgeLimit,
+  );
   const index =
     selected === null ? bars.length - 1 : Math.min(selected, bars.length - 1);
   const current = bars[index].bar;
@@ -443,6 +504,48 @@ export function MarketChart({
             strokeDasharray="5 5"
           />
         )}
+        {overlayLines.map((o, i) => (
+          <g key={o.id}>
+            <line
+              className="wh-overlay-line"
+              data-overlay={o.id}
+              x1="16"
+              x2={right}
+              y1={o.y}
+              y2={o.y}
+              stroke="var(--wh-overlay)"
+              strokeDasharray="6 3"
+            />
+            <text
+              className="wh-overlay-label"
+              x={right - 4}
+              y={overlayLabels[i]}
+              textAnchor="end"
+            >
+              {o.label} {usd(o.price)}
+            </text>
+          </g>
+        ))}
+        {aboveRows.map((row, i) => (
+          <text
+            key={`above-${i}`}
+            className="wh-overlay-edge"
+            x="16"
+            y={11 + i * EDGE_ROW_HEIGHT}
+          >
+            {row}
+          </text>
+        ))}
+        {belowRows.map((row, i) => (
+          <text
+            key={`below-${i}`}
+            className="wh-overlay-edge"
+            x="16"
+            y={plotBottom + 13 - i * EDGE_ROW_HEIGHT}
+          >
+            {row}
+          </text>
+        ))}
         <line
           x1={x(index)}
           x2={x(index)}
@@ -494,6 +597,11 @@ export function MarketChart({
               {text("legend.sma", { window: analysis.rules.window })}
             </span>
             <span>{text("legend.dashed")}</span>
+            {overlays?.length ? (
+              <span className="wh-overlay-legend">
+                {text("legend.onchain")}
+              </span>
+            ) : null}
           </>
         )}
         <span>{text("legend.closedOnly")}</span>

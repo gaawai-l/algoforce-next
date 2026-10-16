@@ -233,6 +233,9 @@ export const money = (value: string | null | undefined, missing = "Unavailable")
         maximumFractionDigits: 2,
         minimumFractionDigits: 2,
       });
+// Whole-dollar price for chart labels and the cost-line list.
+export const usd = (value: number) =>
+  `$${value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 export const stamp = (value: string | null | undefined, missing = "Unavailable") =>
   value
     ? new Date(value).toISOString().replace("T", " ").slice(0, 19) + " UTC"

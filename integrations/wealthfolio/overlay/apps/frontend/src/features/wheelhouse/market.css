@@ -1093,3 +1093,51 @@
 .wh-regime-error {
   color: var(--wh-rose);
 }
+
+/* On-chain cost lines on Key levels: context lines, never part of the price scale. */
+.wh-market {
+  --wh-overlay: #d3dcea;
+}
+.wh-overlay-label,
+.wh-overlay-edge {
+  font:
+    11px "JetBrains Mono",
+    monospace;
+  fill: var(--wh-overlay);
+  paint-order: stroke;
+  stroke: #0b111b;
+  stroke-width: 3px;
+}
+.wh-overlay-edge {
+  fill: var(--wh-muted);
+}
+.wh-overlay-legend {
+  color: var(--wh-overlay);
+}
+.wh-inspector .wh-onchain > h3:first-child {
+  margin-top: 0;
+}
+.wh-onchain-warn {
+  color: #efc18d;
+}
+.wh-onchain-cycle {
+  scroll-margin-top: 12px;
+}
+.wh-onchain details {
+  border-top: 1px solid var(--wh-edge);
+  margin-block: 12px 0;
+  padding-top: 4px;
+}
+.wh-onchain summary {
+  font-size: 13px;
+  font-weight: 600;
+}
+.wh-onchain .wh-facts {
+  margin-block: 8px;
+}
+@media (max-width: 600px) {
+  .wh-overlay-label,
+  .wh-overlay-edge {
+    font-size: 10px;
+  }
+}

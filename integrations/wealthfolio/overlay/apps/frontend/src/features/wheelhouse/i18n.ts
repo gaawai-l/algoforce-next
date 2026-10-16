@@ -359,6 +359,39 @@ const en = {
   "cycle.open": "Show the cycle in Key levels",
   "cycle.reason.brk_unavailable": "on-chain data source unavailable",
   "cycle.reason.seriesMissing": "missing series {{name}}",
+  "cycle.reason.urpd_missing": "URPD distribution unavailable",
+  "cycle.title": "Cycle",
+  "cycle.loading": "Loading cycle…",
+  "cycle.stateLabel": "State",
+  "cycle.sinceLabel": "Since",
+  "cycle.dayCount": "{{date}} · day {{day}}",
+  "cycle.component.depth": "Depth (W vs TMM)",
+  "cycle.component.spread": "Spread (STH vs TMM)",
+  "cycle.component.pvs": "PvS (W vs STH)",
+  "cycle.componentValue": "{{value}} / ±{{deadband}} · {{support}}",
+  "cycle.supports": "supports",
+  "cycle.opposes": "does not support",
+  "cycle.componentsNote":
+    "W: 1d–1w cost · TMM: true market mean · STH: short-term cost. Values are 100·ln(first ÷ second); a state flips only when each flipped component clears its dead zone.",
+  "levels.btcOnly": "On-chain cost lines are available for BTC only.",
+  "levels.latestOnly":
+    "On-chain cost lines show the latest reading only. Switch to the latest view to see them.",
+  "levels.linesTitle": "Cost model lines",
+  "levels.loading": "Loading on-chain cost lines…",
+  "levels.unavailable": "On-chain cost lines unavailable",
+  "levels.line.true_mean": "True mean",
+  "levels.line.short_term": "Short-term",
+  "levels.line.average": "Average",
+  "levels.line.long_term": "Long-term",
+  "levels.line.median": "Median",
+  "levels.overlayStale": "{{name}} (stale)",
+  "levels.source": "Source",
+  "levels.sourceLine":
+    "Bitcoin Research Kit · bitview.space · BRK {{version}} · as of {{date}}",
+  "levels.sourceNote":
+    "On-chain prices are oracle estimates, not Bybit quotes. STH (<150d) means short-term holders: coins last moved less than 150 days ago.",
+  "levels.refreshing": "Refreshing on-chain data…",
+  "legend.onchain": "Light dashed: on-chain cost lines (oracle prices)",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -709,6 +742,38 @@ const zh: Record<MessageKey, string> = {
   "cycle.open": "在关键位中查看周期",
   "cycle.reason.brk_unavailable": "链上数据源不可用",
   "cycle.reason.seriesMissing": "缺少序列 {{name}}",
+  "cycle.reason.urpd_missing": "缺少 URPD 筹码分布",
+  "cycle.title": "周期",
+  "cycle.loading": "正在加载周期…",
+  "cycle.stateLabel": "状态",
+  "cycle.sinceLabel": "起始",
+  "cycle.dayCount": "{{date}} · 第 {{day}} 天",
+  "cycle.component.depth": "深度（W 对 TMM）",
+  "cycle.component.spread": "价差（STH 对 TMM）",
+  "cycle.component.pvs": "PvS（W 对 STH）",
+  "cycle.componentValue": "{{value}} / ±{{deadband}} · {{support}}",
+  "cycle.supports": "支持",
+  "cycle.opposes": "不支持",
+  "cycle.componentsNote":
+    "W：1 天至 1 周成本 · TMM：真实市场均价 · STH：短期持有者成本。数值为 100·ln(前者 ÷ 后者)；只有每个翻转的分量都越过死区，状态才会切换。",
+  "levels.btcOnly": "链上成本线仅支持 BTC。",
+  "levels.latestOnly": "链上成本线只显示最新读数。切换到最新视图即可查看。",
+  "levels.linesTitle": "成本模型线",
+  "levels.loading": "正在加载链上成本线…",
+  "levels.unavailable": "链上成本线不可用",
+  "levels.line.true_mean": "真实均价",
+  "levels.line.short_term": "短期成本",
+  "levels.line.average": "平均成本",
+  "levels.line.long_term": "长期成本",
+  "levels.line.median": "中位成本",
+  "levels.overlayStale": "{{name}}（已过期）",
+  "levels.source": "数据来源",
+  "levels.sourceLine":
+    "Bitcoin Research Kit · bitview.space · BRK {{version}} · 截至 {{date}}",
+  "levels.sourceNote":
+    "链上价格为预言机估算值，不是 Bybit 报价。STH (<150d) 指短期持有者：币龄不足 150 天的筹码。",
+  "levels.refreshing": "正在刷新链上数据…",
+  "legend.onchain": "浅色虚线：链上成本线（预言机价格）",
 };
 
 export const messages = { en, zh };
