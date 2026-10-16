@@ -47,7 +47,7 @@ class LossPoint(Model):
     sth: float
 
 
-class Point(Model):
+class PressurePoint(Model):
     at: AwareDatetime
     value: float
 
@@ -55,9 +55,9 @@ class Point(Model):
 class Pressure(Model):
     last_at: AwareDatetime
     loss: list[LossPoint]
-    share: list[Point]
-    supply: list[Point]
-    price: list[Point]
+    share: list[PressurePoint]
+    supply: list[PressurePoint]
+    price: list[PressurePoint]
     loss_levels: Levels
     share_levels: Levels
     supply_levels: Levels
@@ -193,9 +193,9 @@ def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pre
     return Pressure(
         last_at=kept[-1].at,
         loss=loss,
-        share=[Point(at=at, value=value) for at, value in share],
-        supply=[Point(at=at, value=value) for at, value in supply],
-        price=[Point(at=r.at, value=r.price) for r in kept],
+        share=[PressurePoint(at=at, value=value) for at, value in share],
+        supply=[PressurePoint(at=at, value=value) for at, value in supply],
+        price=[PressurePoint(at=r.at, value=r.price) for r in kept],
         loss_levels=_levels(loss_totals),
         share_levels=_levels(share),
         supply_levels=_levels(supply),

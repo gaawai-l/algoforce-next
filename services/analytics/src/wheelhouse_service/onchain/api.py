@@ -11,14 +11,29 @@ from fastapi import APIRouter, FastAPI
 from pydantic import AwareDatetime
 
 from ..market import Model
-from .brk import BrkClient
+from .brk import DAY1_SERIES, HOUR1_SERIES, BrkClient
 from .cycle import Cycle
 from .levels import LINE_SERIES, ModelLine
-from .models import CycleView, DatasetStatus, LevelsView, OnchainStatus, day1_state
+from .models import (
+    CycleView,
+    DatasetStatus,
+    HourState,
+    LevelsView,
+    OnchainStatus,
+    SellerPressureView,
+    day1_state,
+    hour1_state,
+)
+from .pressure import HOUR, Pressure
 from .store import OnchainStore
 from .sync import CYCLE_SERIES, OnchainSync
 
+# `price_close` is in both indexes: the daily code stays as it was, the hourly one says `hour1`.
+DAY1_REASONS = (*(f"series_missing:{name}" for name in DAY1_SERIES), "brk_unavailable")
 URPD_REASONS = ("urpd_missing", "brk_unavailable")
+PRESSURE_REASONS = (*(f"series_missing:hour1:{name}" for name in HOUR1_SERIES), "brk_unavailable")
+# The most points of each series that the seller pressure view sends: the widest span on offer.
+PRESSURE_POINTS = 2160
 CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unavailable")
 LEVELS_REASONS = (
     *(f"series_missing:{name}" for name in LINE_SERIES.values()),
@@ -98,6 +113,10 @@ def create_router(
         derived = db().derived("levels")
         return None if derived is None else StoredLevels.model_validate_json(derived[0])
 
+    def stored_pressure() -> tuple[Pressure, datetime] | None:
+        derived = db().derived("pressure")
+        return None if derived is None else (Pressure.model_validate_json(derived[0]), derived[1])
+
     @router.get("/status", response_model=OnchainStatus)
     def status() -> OnchainStatus:
         now = clock()
@@ -105,6 +124,7 @@ def create_router(
         reasons = stored_reasons(state)
         current_cycle = stored_cycle()
         current_levels = stored_levels()
+        current_pressure = stored_pressure()
 
         days = [current_cycle.as_of] if current_cycle else []
         if current_levels:
@@ -112,15 +132,22 @@ def create_router(
         urpd_date = current_levels.urpd_date if current_levels else None
 
         def dataset(
-            name: Literal["day1", "urpd"], last: date | None, shown: list[str], fallback: str
+            name: Literal["day1", "urpd", "hour1"],
+            data_state: HourState,
+            last_at: datetime | None,
+            shown: list[str],
+            fallback: str,
         ) -> DatasetStatus:
             return DatasetStatus(
                 name=name,
-                data_state=day1_state(last, now),
-                last_at=None if last is None else day_start(last),
+                data_state=data_state,
+                last_at=last_at,
                 # An absent dataset always says why, even before any sync has recorded a reason.
-                reasons=shown or ([fallback] if last is None else []),
+                reasons=shown or ([fallback] if last_at is None else []),
             )
+
+        day1_last = max(days, default=None)
+        hour1_last = current_pressure[0].last_at if current_pressure else None
 
         return OnchainStatus(
             brk_version=state["brk_version"],
@@ -130,15 +157,24 @@ def create_router(
             datasets=[
                 dataset(
                     "day1",
-                    max(days, default=None),
-                    [reason for reason in reasons if reason != "urpd_missing"],
+                    day1_state(day1_last, now),
+                    None if day1_last is None else day_start(day1_last),
+                    only(reasons, DAY1_REASONS),
                     "brk_unavailable",
                 ),
                 dataset(
                     "urpd",
-                    urpd_date,
+                    day1_state(urpd_date, now),
+                    None if urpd_date is None else day_start(urpd_date),
                     only(reasons, URPD_REASONS),
                     "urpd_missing",
+                ),
+                dataset(
+                    "hour1",
+                    hour1_state(hour1_last, now),
+                    hour1_last,
+                    only(reasons, PRESSURE_REASONS),
+                    "brk_unavailable",
                 ),
             ],
         )
@@ -199,6 +235,49 @@ def create_router(
             reasons=reasons,
             refreshing=refreshing,
             forming_at=forming_at(result.as_of, now),
+            brk_version=state["brk_version"],
+        )
+
+    @router.get("/seller-pressure", response_model=SellerPressureView)
+    def seller_pressure() -> SellerPressureView:
+        now = clock()
+        state = db().state()
+        reasons = only(stored_reasons(state), PRESSURE_REASONS)
+        refreshing = state["refreshing"] == "true"
+        stored = stored_pressure()
+        if stored is None:
+            return SellerPressureView(
+                data_state="unavailable",
+                reasons=reasons or ["brk_unavailable"],
+                refreshing=refreshing,
+                forming_at=None,
+                last_at=None,
+                loss=[],
+                share=[],
+                supply=[],
+                price=[],
+                loss_levels=None,
+                share_levels=None,
+                supply_levels=None,
+                xgap=None,
+                brk_version=state["brk_version"],
+            )
+        result, computed_at = stored
+        return SellerPressureView(
+            data_state=hour1_state(result.last_at, now),
+            reasons=reasons,
+            refreshing=refreshing,
+            # The last row was still open when this was computed, however long ago that was.
+            forming_at=result.last_at if computed_at < result.last_at + HOUR else None,
+            last_at=result.last_at,
+            loss=result.loss[-PRESSURE_POINTS:],
+            share=result.share[-PRESSURE_POINTS:],
+            supply=result.supply[-PRESSURE_POINTS:],
+            price=result.price[-PRESSURE_POINTS:],
+            loss_levels=result.loss_levels,
+            share_levels=result.share_levels,
+            supply_levels=result.supply_levels,
+            xgap=result.xgap,
             brk_version=state["brk_version"],
         )
 

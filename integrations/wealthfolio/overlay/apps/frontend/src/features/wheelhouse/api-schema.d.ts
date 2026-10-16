@@ -463,6 +463,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/onchain/seller-pressure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Seller Pressure */
+        get: operations["seller_pressure_api_wheelhouse_v1_onchain_seller_pressure_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -704,12 +721,12 @@ export interface components {
              * Name
              * @enum {string}
              */
-            name: "day1" | "urpd";
+            name: "day1" | "urpd" | "hour1";
             /**
              * Data State
              * @enum {string}
              */
-            data_state: "fresh" | "stale" | "unavailable";
+            data_state: "fresh" | "delayed" | "stale" | "unavailable";
             /** Last At */
             last_at: string | null;
             /** Reasons */
@@ -1315,6 +1332,18 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /**
+         * Levels
+         * @description P95 and P75 of one chart over the last 720 clock hours, and how many values they use.
+         */
+        Levels: {
+            /** P95 */
+            p95: number | null;
+            /** P75 */
+            p75: number | null;
+            /** N */
+            n: number;
+        };
         /** LevelsView */
         LevelsView: {
             /**
@@ -1338,6 +1367,18 @@ export interface components {
             lines: components["schemas"]["ModelLine"][];
             /** Brk Version */
             brk_version: string | null;
+        };
+        /** LossPoint */
+        LossPoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Lth */
+            lth: number;
+            /** Sth */
+            sth: number;
         };
         /** Lot */
         Lot: {
@@ -1570,6 +1611,16 @@ export interface components {
              */
             observed_at: string;
         };
+        /** PressurePoint */
+        PressurePoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Value */
+            value: number;
+        };
         /** PrevCountdown */
         PrevCountdown: {
             /**
@@ -1788,6 +1839,37 @@ export interface components {
             step: number;
             /** Setup9 At */
             setup9_at: string | null;
+        };
+        /** SellerPressureView */
+        SellerPressureView: {
+            /**
+             * Data State
+             * @enum {string}
+             */
+            data_state: "fresh" | "delayed" | "stale" | "unavailable";
+            /** Reasons */
+            reasons: string[];
+            /** Refreshing */
+            refreshing: boolean;
+            /** Forming At */
+            forming_at: string | null;
+            /** Last At */
+            last_at: string | null;
+            /** Loss */
+            loss: components["schemas"]["LossPoint"][];
+            /** Share */
+            share: components["schemas"]["PressurePoint"][];
+            /** Supply */
+            supply: components["schemas"]["PressurePoint"][];
+            /** Price */
+            price: components["schemas"]["PressurePoint"][];
+            loss_levels: components["schemas"]["Levels"] | null;
+            share_levels: components["schemas"]["Levels"] | null;
+            supply_levels: components["schemas"]["Levels"] | null;
+            /** Xgap */
+            xgap: number | null;
+            /** Brk Version */
+            brk_version: string | null;
         };
         /** ServiceStatus */
         ServiceStatus: {
@@ -2982,6 +3064,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LevelsView"];
+                };
+            };
+        };
+    };
+    seller_pressure_api_wheelhouse_v1_onchain_seller_pressure_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SellerPressureView"];
                 };
             };
         };
