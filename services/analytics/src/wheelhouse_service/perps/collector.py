@@ -189,8 +189,18 @@ class Collector:
         return self._last_proof
 
     def step(self, now: float) -> None:
-        """Connect when due, read one frame, keep the heartbeat, rotate, then commit when due."""
+        """Connect when due, read one frame, keep the heartbeat, rotate, then commit when due.
+
+        A frame is credited at the `now` of the step that reads it, so frames must not queue
+        unread for longer than the margin: a suspension between steps or a stalled commit ends
+        the connection at the proof held before it."""
         previous, self._last_step = self._last_step, now
+        if self._ws is not None:
+            # Connected, `run` steps again at once; a step reads for at most RECV_TIMEOUT and its
+            # commit takes at most MARGIN. The gap counts from the handshake if that came later.
+            since = max(previous, self._opened_at)
+            if now - since > RECV_TIMEOUT + MARGIN:
+                self._fail(since, "suspended")
         ws = self._ws
         if ws is None:
             if now >= self._retry_at:
@@ -202,11 +212,13 @@ class Collector:
             if self._ws is ws:
                 self._check_age(now)
         if now >= self._next_flush:
+            ws = self._ws  # perhaps opened in this step
+            started = self._clock()
             self._flush(now)
-        if ws is not None and self._ws is ws and self._clock() - now > MARGIN:
-            # The step stalled (a slow commit): frames queued meanwhile would be credited late,
-            # so the connection ends at the proof held before the stall.
-            self._fail(now, "stalled")
+            if ws is not None and self._ws is ws and self._clock() - started > MARGIN:
+                # The commit stalled (a slow lock): frames queued meanwhile would be credited
+                # late, so the connection ends at the proof held before the stall.
+                self._fail(now, "stalled")
 
     def run(self) -> None:
         """Thread entry: step until `stop`, then end the connection and close its interval."""
@@ -294,7 +306,7 @@ class Collector:
             # frame and a new one starts after it.
             live.proof = held
             self._ended.append(live)
-            self._begin(self._clock())
+            self._begin(self._clock(), split=True)
 
     def _handle(self, msg: dict[str, Any], now: float) -> bool:
         """Buffer the frame's events; True when some were dropped."""
@@ -353,10 +365,15 @@ class Collector:
             self._failures = 0
             self._close(now, "rotated", retry_at=now)
 
-    def _begin(self, start: float) -> None:
+    def _begin(self, start: float, *, split: bool = False) -> None:
+        """Start an interval: the connection's first, or one after a split (a hole for lost
+        events), which is counted rather than logged each time."""
         self._live = _Interval(start=start, proof=start, safe=start)
         self._next_end = start + END_EVERY
-        self._log("covering")
+        if split:
+            self._warn("coverage_split")
+        else:
+            self._log("covering")
 
     def _prove(self, at: float) -> None:
         self._last_proof = at if self._last_proof is None else max(self._last_proof, at)
@@ -430,7 +447,7 @@ class Collector:
             live.proof = live.safe
             self._ended.append(live)
             # The events received from here on are kept: the hole spans the dropped ones.
-            self._begin(self._clock())
+            self._begin(self._clock(), split=True)
 
     def _warn(self, code: str, n: int = 1) -> None:
         """Count a problem; log it the first time and each time its count doubles."""
