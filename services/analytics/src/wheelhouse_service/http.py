@@ -38,6 +38,8 @@ from .market import (
     Workspace,
     default_source,
 )
+from .onchain.api import create_router as onchain_router
+from .onchain.brk import BrkClient
 from .portfolio.api import create_router as portfolio_router
 from .repository import Repository
 from .runtime import Runtime
@@ -52,6 +54,7 @@ def create_app(
     *,
     start_worker: bool = True,
     start_broker_worker: bool | None = None,
+    brk_client: BrkClient | None = None,
 ) -> FastAPI:
     repository: Repository | None = None
 
@@ -170,6 +173,7 @@ def create_app(
                 "durable_jobs",
                 "scheduled_refresh",
                 "market_context",
+                "onchain",
             ],
         )
 
@@ -300,10 +304,14 @@ def create_app(
     def storage() -> StorageStats:
         return repo().stats()
 
+    data_dir = database.parent if database else Settings.from_env().data_dir
     app.include_router(
         portfolio_router(
-            (database.parent if database else Settings.from_env().data_dir) / "portfolio.sqlite",
+            data_dir / "portfolio.sqlite",
             start_worker=start_worker if start_broker_worker is None else start_broker_worker,
         )
+    )
+    app.include_router(
+        onchain_router(data_dir / "onchain.sqlite", brk_client, start_worker=start_worker)
     )
     return app

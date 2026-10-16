@@ -1077,6 +1077,69 @@
           }
         }
       }
+    },
+    "/api/wheelhouse/v1/onchain/status": {
+      "get": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Status",
+        "operationId": "status_api_wheelhouse_v1_onchain_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnchainStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/onchain/cycle": {
+      "get": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Cycle",
+        "operationId": "cycle_api_wheelhouse_v1_onchain_cycle_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CycleView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/onchain/levels": {
+      "get": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Levels",
+        "operationId": "levels_api_wheelhouse_v1_onchain_levels_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LevelsView"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1438,6 +1501,40 @@
         ],
         "title": "Batch"
       },
+      "Component": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "depth",
+              "pvs",
+              "spread"
+            ],
+            "title": "Name"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "deadband": {
+            "type": "number",
+            "title": "Deadband"
+          },
+          "supports": {
+            "type": "boolean",
+            "title": "Supports"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "value",
+          "deadband",
+          "supports"
+        ],
+        "title": "Component"
+      },
       "Cycle": {
         "properties": {
           "cycle_id": {
@@ -1634,6 +1731,191 @@
           "issues"
         ],
         "title": "CycleResult"
+      },
+      "CycleView": {
+        "properties": {
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "refreshing": {
+            "type": "boolean",
+            "title": "Refreshing"
+          },
+          "forming_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forming At"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "advance",
+                  "breakout",
+                  "pressure",
+                  "repair",
+                  "breakdown",
+                  "capitulation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/Component"
+            },
+            "type": "array",
+            "title": "Components"
+          },
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/Episode"
+            },
+            "type": "array",
+            "title": "Episodes"
+          },
+          "changes": {
+            "type": "integer",
+            "title": "Changes"
+          },
+          "brk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brk Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data_state",
+          "reasons",
+          "refreshing",
+          "forming_at",
+          "as_of",
+          "state",
+          "since",
+          "day",
+          "components",
+          "episodes",
+          "changes",
+          "brk_version"
+        ],
+        "title": "CycleView"
+      },
+      "DatasetStatus": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "day1",
+              "urpd"
+            ],
+            "title": "Name"
+          },
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last At"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "data_state",
+          "last_at",
+          "reasons"
+        ],
+        "title": "DatasetStatus"
       },
       "DemarkConfig-Input": {
         "properties": {
@@ -2433,6 +2715,45 @@
           "close"
         ],
         "title": "DemarkSummary"
+      },
+      "Episode": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "advance",
+              "breakout",
+              "pressure",
+              "repair",
+              "breakdown",
+              "capitulation"
+            ],
+            "title": "State"
+          },
+          "start": {
+            "type": "string",
+            "format": "date",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date",
+            "title": "End"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "start",
+          "end",
+          "days"
+        ],
+        "title": "Episode"
       },
       "Exposure": {
         "properties": {
@@ -3304,6 +3625,109 @@
         ],
         "title": "LedgerEvent"
       },
+      "LevelsView": {
+        "properties": {
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "refreshing": {
+            "type": "boolean",
+            "title": "Refreshing"
+          },
+          "forming_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forming At"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "urpd_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urpd Date"
+          },
+          "onchain_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Onchain Close"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ModelLine"
+            },
+            "type": "array",
+            "title": "Lines"
+          },
+          "brk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brk Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data_state",
+          "reasons",
+          "refreshing",
+          "forming_at",
+          "as_of",
+          "urpd_date",
+          "onchain_close",
+          "lines",
+          "brk_version"
+        ],
+        "title": "LevelsView"
+      },
       "Lot": {
         "properties": {
           "code": {
@@ -3413,6 +3837,32 @@
           "swing"
         ],
         "title": "MarketContext"
+      },
+      "ModelLine": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "true_mean",
+              "short_term",
+              "average",
+              "long_term",
+              "median"
+            ],
+            "title": "Name"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "price"
+        ],
+        "title": "ModelLine"
       },
       "NewCycle": {
         "properties": {
@@ -3575,6 +4025,65 @@
           "purpose"
         ],
         "title": "NextCondition"
+      },
+      "OnchainStatus": {
+        "properties": {
+          "brk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brk Version"
+          },
+          "refreshing": {
+            "type": "boolean",
+            "title": "Refreshing"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetStatus"
+            },
+            "type": "array",
+            "title": "Datasets"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "brk_version",
+          "refreshing",
+          "last_success_at",
+          "last_error",
+          "datasets"
+        ],
+        "title": "OnchainStatus"
       },
       "Point": {
         "properties": {
