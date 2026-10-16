@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { demarkConfigSchema, demarkResultSchema } from "./demark-contract";
+import { cycleViewSchema, levelsViewSchema } from "./onchain-contract";
 import { marketContextSchema } from "./regime-contract";
 import type { components } from "./api-schema";
 
@@ -197,6 +198,10 @@ export const getMarketContext = (
     marketContextSchema,
     { signal },
   );
+export const getOnchainCycle = (signal?: AbortSignal) =>
+  query("/onchain/cycle", cycleViewSchema, { signal });
+export const getOnchainLevels = (signal?: AbortSignal) =>
+  query("/onchain/levels", levelsViewSchema, { signal });
 export const getJob = (id: string, signal?: AbortSignal) =>
   query(`/jobs/${encodeURIComponent(id)}`, jobSchema, { signal });
 export const getJobEvents = (id: string, signal?: AbortSignal) =>

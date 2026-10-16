@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getServiceStatus } from "./client";
+import { getOnchainCycle, getOnchainLevels, getServiceStatus } from "./client";
+import { cycleSample, levelsSample } from "./onchain-contract";
 
 const validResponse = {
   service: "wheelhouse-python",
@@ -147,5 +148,38 @@ describe("DeMark v1 response compatibility", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify(broken))),
     );
     await expect(getWorkspace(stream)).rejects.toThrow("incompatible");
+  });
+});
+
+describe("on-chain client", () => {
+  it("reads the cycle and levels from the read-only on-chain endpoints", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation((url: string) =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify(url.endsWith("/cycle") ? cycleSample : levelsSample),
+          ),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await getOnchainCycle()).state).toBe("breakout");
+    expect((await getOnchainLevels()).lines).toHaveLength(5);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/wheelhouse/v1/onchain/cycle",
+      "/api/wheelhouse/v1/onchain/levels",
+    ]);
+  });
+
+  it("rejects an on-chain payload outside the contract", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ ...cycleSample, state: "bull" })),
+        ),
+    );
+    await expect(getOnchainCycle()).rejects.toThrow("incompatible");
   });
 });
