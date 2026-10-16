@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getOnchainCycle, getOnchainLevels, getServiceStatus } from "./client";
-import { cycleSample, levelsSample } from "./onchain-contract";
+import {
+  getOnchainCycle,
+  getOnchainLevels,
+  getSellerPressure,
+  getServiceStatus,
+} from "./client";
+import { cycleSample, levelsSample, pressureSample } from "./onchain-contract";
 
 const validResponse = {
   service: "wheelhouse-python",
@@ -169,6 +174,33 @@ describe("on-chain client", () => {
       "/api/wheelhouse/v1/onchain/cycle",
       "/api/wheelhouse/v1/onchain/levels",
     ]);
+  });
+
+  it("reads the seller pressure from the read-only endpoint", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(pressureSample())));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await getSellerPressure();
+    expect(view.loss).toHaveLength(2200);
+    expect(view.data_state).toBe("fresh");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/wheelhouse/v1/onchain/seller-pressure",
+    ]);
+  });
+
+  it("rejects a seller pressure payload outside the contract", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ ...pressureSample(), data_state: "live" }),
+          ),
+        ),
+    );
+    await expect(getSellerPressure()).rejects.toThrow("incompatible");
   });
 
   it("rejects an on-chain payload outside the contract", async () => {
