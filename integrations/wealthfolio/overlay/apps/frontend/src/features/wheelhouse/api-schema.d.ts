@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/market-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Market Context */
+        get: operations["market_context_api_wheelhouse_v1_market_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/workspace": {
         parameters: {
             query?: never;
@@ -242,6 +259,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/portfolio/sync-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sync Job */
+        get: operations["sync_job_api_wheelhouse_v1_portfolio_sync_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/portfolio/sync-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sync Status */
+        get: operations["sync_status_api_wheelhouse_v1_portfolio_sync_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/portfolio/demo": {
         parameters: {
             query?: never;
@@ -361,40 +412,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/wheelhouse/v1/portfolio/sync-jobs/{job_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Sync Job */
-        get: operations["sync_job_api_wheelhouse_v1_portfolio_sync_jobs__job_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/wheelhouse/v1/portfolio/sync-status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Sync Status */
-        get: operations["sync_status_api_wheelhouse_v1_portfolio_sync_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -451,6 +468,24 @@ export interface components {
              * @constant
              */
             signal_status: "not_implemented";
+            demark: components["schemas"]["DemarkResult"] | null;
+        };
+        /** Annotation */
+        Annotation: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "demo" | "moomoo";
+            /** Account Id */
+            account_id: string;
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+            instrument?: components["schemas"]["Instrument-Input"] | null;
+            quote?: components["schemas"]["Quote-Input"] | null;
+            fx?: components["schemas"]["FxRate"] | null;
         };
         /** Bar */
         Bar: {
@@ -477,6 +512,23 @@ export interface components {
             /** Is Closed */
             is_closed: boolean;
         };
+        /** BarRef */
+        BarRef: {
+            /** Revision Id */
+            revision_id: string;
+            /**
+             * Open Time
+             * Format: date-time
+             */
+            open_time: string;
+            /**
+             * Close Time
+             * Format: date-time
+             */
+            close_time: string;
+            /** Close */
+            close: string;
+        };
         /** Batch */
         Batch: {
             stream: components["schemas"]["Stream-Output"];
@@ -492,10 +544,476 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** Cycle */
+        Cycle: {
+            /** Cycle Id */
+            cycle_id: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "demo" | "moomoo";
+            /** Account Id */
+            account_id: string;
+            /** Underlying */
+            underlying: string;
+            /** Currency */
+            currency: string;
+            /** Name */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** CycleResult */
+        CycleResult: {
+            cycle: components["schemas"]["Cycle"];
+            /**
+             * Method
+             * @default FIFO; option premiums realized separately; assignment shares at strike
+             */
+            method: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "empty" | "open" | "closed" | "incomplete";
+            /** Premium Received */
+            premium_received: string | null;
+            /** Premium Paid */
+            premium_paid: string | null;
+            /** Gross Cash Movement */
+            gross_cash_movement: string | null;
+            /** Known Fees */
+            known_fees: string;
+            /** Net Cash Movement */
+            net_cash_movement: string | null;
+            /** Realized Gross */
+            realized_gross: string | null;
+            /** Realized Net */
+            realized_net: string | null;
+            /** Unrealized */
+            unrealized: string | null;
+            /** Lots */
+            lots: components["schemas"]["Lot"][];
+            /** Events */
+            events: components["schemas"]["LedgerEvent-Output"][];
+            /** Issues */
+            issues: string[];
+        };
+        /** DemarkConfig */
+        "DemarkConfig-Input": {
+            /**
+             * Variant
+             * @default sequential
+             * @constant
+             */
+            variant: "sequential";
+            /**
+             * Ruleset Version
+             * @default wheelhouse-sequential-1
+             * @enum {string}
+             */
+            ruleset_version: "wheelhouse-sequential-1" | "wheelhouse-sequential-2";
+            /**
+             * Price Flip Required
+             * @default true
+             */
+            price_flip_required: boolean;
+            /**
+             * Perfection Policy
+             * @default strict
+             * @enum {string}
+             */
+            perfection_policy: "strict" | "strict_at_nine";
+            /**
+             * Same Side Policy
+             * @default parallel
+             * @enum {string}
+             */
+            same_side_policy: "parallel" | "retain_active";
+            /**
+             * Qualifier 8 Vs 5
+             * @default false
+             * @constant
+             */
+            qualifier_8_vs_5: false;
+            /**
+             * Risk Formula
+             * @default countdown_span_true_extreme_earliest
+             * @constant
+             */
+            risk_formula: "countdown_span_true_extreme_earliest";
+            /**
+             * Tdst Breach
+             * @default true_extreme
+             * @enum {string}
+             */
+            tdst_breach: "true_extreme" | "close";
+            /**
+             * Risk Breach
+             * @default close
+             * @enum {string}
+             */
+            risk_breach: "close" | "true_extreme";
+            /**
+             * Recycling
+             * @default range_and_22
+             * @enum {string}
+             */
+            recycling: "range_and_22" | "none";
+            /** Validity Bars */
+            validity_bars?: number | null;
+        };
+        /** DemarkConfig */
+        "DemarkConfig-Output": {
+            /**
+             * Variant
+             * @default sequential
+             * @constant
+             */
+            variant: "sequential";
+            /**
+             * Ruleset Version
+             * @default wheelhouse-sequential-1
+             * @enum {string}
+             */
+            ruleset_version: "wheelhouse-sequential-1" | "wheelhouse-sequential-2";
+            /**
+             * Price Flip Required
+             * @default true
+             */
+            price_flip_required: boolean;
+            /**
+             * Perfection Policy
+             * @default strict
+             * @enum {string}
+             */
+            perfection_policy: "strict" | "strict_at_nine";
+            /**
+             * Same Side Policy
+             * @default parallel
+             * @enum {string}
+             */
+            same_side_policy: "parallel" | "retain_active";
+            /**
+             * Qualifier 8 Vs 5
+             * @default false
+             * @constant
+             */
+            qualifier_8_vs_5: false;
+            /**
+             * Risk Formula
+             * @default countdown_span_true_extreme_earliest
+             * @constant
+             */
+            risk_formula: "countdown_span_true_extreme_earliest";
+            /**
+             * Tdst Breach
+             * @default true_extreme
+             * @enum {string}
+             */
+            tdst_breach: "true_extreme" | "close";
+            /**
+             * Risk Breach
+             * @default close
+             * @enum {string}
+             */
+            risk_breach: "close" | "true_extreme";
+            /**
+             * Recycling
+             * @default range_and_22
+             * @enum {string}
+             */
+            recycling: "range_and_22" | "none";
+            /** Validity Bars */
+            validity_bars: number | null;
+        };
+        /** DemarkEvent */
+        DemarkEvent: {
+            /** Sequence Id */
+            sequence_id: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "setup_count" | "setup_completed" | "setup_interrupted" | "perfected" | "countdown_count" | "deferred13" | "qualified13" | "cancelled" | "recycled" | "invalidated" | "expired" | "continuity_lost";
+            bar: components["schemas"]["BarRef"];
+            /** Count */
+            count: number | null;
+            /** Reason */
+            reason: string;
+        };
+        /** DemarkResult */
+        DemarkResult: {
+            config: components["schemas"]["DemarkConfig-Output"];
+            /** Input Hash */
+            input_hash: string;
+            /** History Start */
+            history_start: string | null;
+            /** History End */
+            history_end: string | null;
+            /**
+             * History Status
+             * @enum {string}
+             */
+            history_status: "window_only" | "gapped" | "empty";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "warming_up" | "unavailable";
+            /**
+             * Warmup Required
+             * @default 6
+             */
+            warmup_required: number;
+            /** Sequences */
+            sequences: components["schemas"]["DemarkSequence"][];
+            /** Events */
+            events: components["schemas"]["DemarkEvent"][];
+            /** Qualified13 Count */
+            qualified13_count: number;
+            /** Issues */
+            issues: string[];
+        };
+        /** DemarkSequence */
+        DemarkSequence: {
+            /** Sequence Id */
+            sequence_id: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Setup Count */
+            setup_count: number;
+            /**
+             * Setup Status
+             * @enum {string}
+             */
+            setup_status: "forming" | "completed" | "interrupted";
+            /** Setup Bars */
+            setup_bars: components["schemas"]["BarRef"][];
+            /** Setup Perfected */
+            setup_perfected: boolean | null;
+            /** Perfected At */
+            perfected_at: string | null;
+            /**
+             * Countdown Count
+             * @default 0
+             */
+            countdown_count: number;
+            /**
+             * Countdown Status
+             * @default inactive
+             * @enum {string}
+             */
+            countdown_status: "inactive" | "active" | "count13_unqualified" | "qualified13" | "cancelled" | "recycled";
+            /** Countdown Bars */
+            countdown_bars: components["schemas"]["BarRef"][];
+            countdown_bar8: components["schemas"]["BarRef"] | null;
+            /** Qualification Threshold */
+            qualification_threshold: string | null;
+            /** Qualified At */
+            qualified_at: string | null;
+            /** Confirmation Close */
+            confirmation_close: string | null;
+            /** Tdst */
+            tdst: string | null;
+            tdst_source: components["schemas"]["BarRef"] | null;
+            /** Tdst Breached At */
+            tdst_breached_at: string | null;
+            /** Risk Level */
+            risk_level: string | null;
+            risk_source: components["schemas"]["BarRef"] | null;
+            /**
+             * Risk Status
+             * @default not_available
+             * @enum {string}
+             */
+            risk_status: "not_available" | "valid" | "invalidated" | "expired" | "unknown";
+            /** Risk Ended At */
+            risk_ended_at: string | null;
+            /**
+             * Continuity
+             * @default observed
+             * @enum {string}
+             */
+            continuity: "observed" | "lost";
+            /** Bars Since Setup9 */
+            bars_since_setup9: number | null;
+            /** Bars Since Qualified13 */
+            bars_since_qualified13: number | null;
+            /** Elapsed Since Setup9 Seconds */
+            elapsed_since_setup9_seconds: number | null;
+            /** Elapsed Since Qualified13 Seconds */
+            elapsed_since_qualified13_seconds: number | null;
+            /** Next Conditions */
+            next_conditions: components["schemas"]["NextCondition"][];
+        };
+        /** DemarkSummary */
+        DemarkSummary: {
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "up" | "down";
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "setup" | "countdown";
+            /** Step */
+            step: number;
+            /**
+             * Target
+             * @enum {integer}
+             */
+            target: 9 | 13;
+            /** Setup Step */
+            setup_step: number;
+            /** Countdown Step */
+            countdown_step: number;
+            /** Rounds */
+            rounds: components["schemas"]["Round"][];
+            last_signal: components["schemas"]["SignalRef"] | null;
+            prev: components["schemas"]["PrevCountdown"] | null;
+            second: components["schemas"]["SecondSetup"] | null;
+            /** Bars Since Qualified13 */
+            bars_since_qualified13: number | null;
+            setup_run: components["schemas"]["SetupRun"];
+            risk: components["schemas"]["SummaryRisk"];
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Close */
+            close: string;
+        };
+        /** Exposure */
+        Exposure: {
+            /** Underlying */
+            underlying: string;
+            /** Currency */
+            currency: string;
+            /** Share Delta */
+            share_delta: string | null;
+            /** Share Gamma */
+            share_gamma: string | null;
+            /** Theta Daily */
+            theta_daily: string | null;
+            /** Vega Point */
+            vega_point: string | null;
+            /** Dollar Delta Base */
+            dollar_delta_base: string | null;
+            /** Issues */
+            issues: string[];
+        };
+        /** FeeCorrection */
+        FeeCorrection: {
+            /** Event Id */
+            event_id: string;
+            /** Fee */
+            fee: string;
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+        };
+        /** FillReconciliation */
+        FillReconciliation: {
+            /** Event Id */
+            event_id: string;
+            /** Record Id */
+            record_id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Fee */
+            fee?: string | null;
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+        };
+        /** FxRate */
+        FxRate: {
+            /** Currency */
+            currency: string;
+            /** To Base */
+            to_base: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Source */
+            source: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** Instrument */
+        "Instrument-Input": {
+            /** Code */
+            code: string;
+            /** Underlying */
+            underlying: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "stock" | "call" | "put";
+            /** Currency */
+            currency: string;
+            /** Multiplier */
+            multiplier: string;
+            /** Strike */
+            strike?: string | null;
+            /** Expiry */
+            expiry?: string | null;
+            /** Source */
+            source: string;
+        };
+        /** Instrument */
+        "Instrument-Output": {
+            /** Code */
+            code: string;
+            /** Underlying */
+            underlying: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "stock" | "call" | "put";
+            /** Currency */
+            currency: string;
+            /** Multiplier */
+            multiplier: string;
+            /** Strike */
+            strike: string | null;
+            /** Expiry */
+            expiry: string | null;
+            /** Source */
+            source: string;
         };
         /** Integrations */
         Integrations: {
@@ -593,6 +1111,192 @@ export interface components {
             /** Knowledge At */
             knowledge_at: string | null;
         };
+        /** LedgerEvent */
+        "LedgerEvent-Input": {
+            /** Event Id */
+            event_id: string;
+            /** Cycle Id */
+            cycle_id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "buy_open" | "sell_open" | "buy_close" | "sell_close" | "expire" | "assign" | "exercise" | "cash_settle";
+            instrument: components["schemas"]["Instrument-Input"];
+            /** Quantity */
+            quantity: string;
+            /** Price */
+            price: string;
+            /** Fee */
+            fee?: string | null;
+            /** Source Record Id */
+            source_record_id?: string | null;
+            /** Settlement Record Id */
+            settlement_record_id?: string | null;
+            /** Roll Group */
+            roll_group?: string | null;
+            /** Evidence Issues */
+            evidence_issues?: string[];
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+        };
+        /** LedgerEvent */
+        "LedgerEvent-Output": {
+            /** Event Id */
+            event_id: string;
+            /** Cycle Id */
+            cycle_id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "buy_open" | "sell_open" | "buy_close" | "sell_close" | "expire" | "assign" | "exercise" | "cash_settle";
+            instrument: components["schemas"]["Instrument-Output"];
+            /** Quantity */
+            quantity: string;
+            /** Price */
+            price: string;
+            /** Fee */
+            fee: string | null;
+            /** Source Record Id */
+            source_record_id: string | null;
+            /** Settlement Record Id */
+            settlement_record_id: string | null;
+            /** Roll Group */
+            roll_group: string | null;
+            /** Evidence Issues */
+            evidence_issues: string[];
+            /** Author */
+            author: string;
+            /** Reason */
+            reason: string;
+        };
+        /** Lot */
+        Lot: {
+            /** Code */
+            code: string;
+            /** Quantity */
+            quantity: string;
+            /** Entry Price */
+            entry_price: string;
+            /** Opening Event Id */
+            opening_event_id: string;
+        };
+        /** MarketContext */
+        MarketContext: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "fixture" | "binance" | "bybit";
+            /**
+             * Symbol
+             * @enum {string}
+             */
+            symbol: "BTCUSDT" | "ETHUSDT" | "MUUSDT";
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /**
+             * Market At
+             * Format: date-time
+             */
+            market_at: string;
+            /**
+             * Knowledge At
+             * Format: date-time
+             */
+            knowledge_at: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "as_known" | "retrospective";
+            config: components["schemas"]["DemarkConfig-Output"];
+            /** Window */
+            window: number;
+            /** Timeframes */
+            timeframes: components["schemas"]["TimeframeContext"][];
+            intraday: components["schemas"]["RegimeState"];
+            swing: components["schemas"]["RegimeState"];
+        };
+        /** NewCycle */
+        NewCycle: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "demo" | "moomoo";
+            /** Account Id */
+            account_id: string;
+            /** Underlying */
+            underlying: string;
+            /** Currency */
+            currency: string;
+            /** Name */
+            name: string;
+        };
+        /** NewTrend */
+        NewTrend: {
+            /** Present */
+            present: boolean;
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "up" | "down";
+            /** Step */
+            step: number;
+            /** Confirmed */
+            confirmed: boolean;
+            /** Seconds */
+            seconds: number | null;
+        };
+        /** NextBarNeeds */
+        NextBarNeeds: {
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "above" | "below";
+            /** Price */
+            price: string;
+        };
+        /** NextCondition */
+        NextCondition: {
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "close" | "low" | "high";
+            /**
+             * Operator
+             * @enum {string}
+             */
+            operator: "<" | ">" | "<=" | ">=";
+            /** Threshold */
+            threshold: string;
+            reference: components["schemas"]["BarRef"];
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "setup" | "countdown" | "qualification13";
+        };
         /** Point */
         Point: {
             /**
@@ -609,6 +1313,231 @@ export interface components {
             /** Prior Low */
             prior_low: string | null;
         };
+        /** PortfolioCapture */
+        PortfolioCapture: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "demo" | "moomoo";
+            /** Account Id */
+            account_id: string;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Snapshot Observed At */
+            snapshot_observed_at: string | null;
+            /**
+             * Base Currency
+             * @default USD
+             */
+            base_currency: string;
+            /** Positions */
+            positions: components["schemas"]["Position"][];
+            /** Instruments */
+            instruments: components["schemas"]["Instrument-Output"][];
+            /** Quotes */
+            quotes: components["schemas"]["Quote-Output"][];
+            /** Fx */
+            fx: components["schemas"]["FxRate"][];
+            /** Raw */
+            raw: {
+                [key: string]: unknown;
+            };
+            /** Errors */
+            errors: {
+                [key: string]: string;
+            };
+            /** History Start */
+            history_start: string | null;
+            /** History End */
+            history_end: string | null;
+        };
+        /** PortfolioWorkspace */
+        PortfolioWorkspace: {
+            capture: components["schemas"]["PortfolioCapture"] | null;
+            /** Cycles */
+            cycles: components["schemas"]["CycleResult"][];
+            risk: components["schemas"]["RiskResult"] | null;
+            /** Records */
+            records: {
+                [key: string]: unknown;
+            }[];
+            /** Audit */
+            audit: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "stale" | "unavailable" | "simulated";
+            /** Issues */
+            issues: string[];
+        };
+        /** Position */
+        Position: {
+            /** Code */
+            code: string;
+            /** Quantity */
+            quantity: string;
+            /** Mark */
+            mark: string | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+        };
+        /** PrevCountdown */
+        PrevCountdown: {
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Countdown */
+            countdown: number;
+            /** Qualified */
+            qualified: boolean;
+            /** Bars Ago */
+            bars_ago: number;
+        };
+        /** Quote */
+        "Quote-Input": {
+            /** Code */
+            code: string;
+            /** Spot */
+            spot: string;
+            /** Delta */
+            delta?: string | null;
+            /** Gamma */
+            gamma?: string | null;
+            /** Theta */
+            theta?: string | null;
+            /** Vega */
+            vega?: string | null;
+            /**
+             * Units
+             * @enum {string}
+             */
+            units: "per_share" | "per_contract";
+            /**
+             * Theta Basis
+             * @enum {string}
+             */
+            theta_basis: "day" | "year";
+            /**
+             * Vega Basis
+             * @enum {string}
+             */
+            vega_basis: "percentage_point" | "unit_volatility";
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Source */
+            source: string;
+        };
+        /** Quote */
+        "Quote-Output": {
+            /** Code */
+            code: string;
+            /** Spot */
+            spot: string;
+            /** Delta */
+            delta: string | null;
+            /** Gamma */
+            gamma: string | null;
+            /** Theta */
+            theta: string | null;
+            /** Vega */
+            vega: string | null;
+            /**
+             * Units
+             * @enum {string}
+             */
+            units: "per_share" | "per_contract";
+            /**
+             * Theta Basis
+             * @enum {string}
+             */
+            theta_basis: "day" | "year";
+            /**
+             * Vega Basis
+             * @enum {string}
+             */
+            vega_basis: "percentage_point" | "unit_volatility";
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Source */
+            source: string;
+        };
+        /** RegimeState */
+        RegimeState: {
+            /**
+             * Anchor
+             * @enum {string}
+             */
+            anchor: "5m" | "15m" | "1h" | "4h" | "1d";
+            /**
+             * Value
+             * @enum {string}
+             */
+            value: "decay" | "rev" | "pump" | "none" | "unavailable";
+        };
+        /** RiskResult */
+        RiskResult: {
+            /** Base Currency */
+            base_currency: string;
+            /**
+             * Evaluated At
+             * Format: date-time
+             */
+            evaluated_at: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "complete" | "partial" | "unavailable";
+            /** Exposures */
+            exposures: components["schemas"]["Exposure"][];
+            /** Dollar Delta */
+            dollar_delta: string | null;
+            /** Theta Daily */
+            theta_daily: string | null;
+            /** Vega Point */
+            vega_point: string | null;
+            /** Issues */
+            issues: string[];
+        };
+        /** Round */
+        Round: {
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "up" | "down";
+            /** Setup */
+            setup: number;
+            /** Countdown */
+            countdown: number;
+            /** Setup9 At */
+            setup9_at: string | null;
+            /** Qualified13 At */
+            qualified13_at: string | null;
+        };
         /** Rules */
         "Rules-Input": {
             /**
@@ -622,6 +1551,7 @@ export interface components {
              * @default 20
              */
             window: number;
+            demark?: components["schemas"]["DemarkConfig-Input"] | null;
         };
         /** Rules */
         "Rules-Output": {
@@ -636,6 +1566,7 @@ export interface components {
              * @default 20
              */
             window: number;
+            demark: components["schemas"]["DemarkConfig-Output"] | null;
         };
         /** Schedule */
         Schedule: {
@@ -661,6 +1592,23 @@ export interface components {
             rules: components["schemas"]["Rules-Output"];
             /** Enabled */
             enabled: boolean;
+        };
+        /** SecondSetup */
+        SecondSetup: {
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "up" | "down";
+            /** Step */
+            step: number;
+            /** Setup9 At */
+            setup9_at: string | null;
         };
         /** ServiceStatus */
         ServiceStatus: {
@@ -696,6 +1644,66 @@ export interface components {
             integrations: components["schemas"]["Integrations"];
             /** Capabilities */
             capabilities: string[];
+        };
+        /** SetupRun */
+        SetupRun: {
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Count */
+            count: number;
+            /** Active */
+            active: boolean;
+            /** Completed */
+            completed: boolean;
+        };
+        /** Signal */
+        Signal: {
+            /**
+             * N
+             * @enum {integer}
+             */
+            n: 1 | 2;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Active */
+            active: boolean;
+            /** Price */
+            price: string | null;
+            /** Base Level */
+            base_level: number | null;
+            /** Intraday Level */
+            intraday_level: number | null;
+            /** Swing Level */
+            swing_level: number | null;
+        };
+        /** SignalRef */
+        SignalRef: {
+            /**
+             * Kind
+             * @enum {integer}
+             */
+            kind: 9 | 13;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
         };
         /** SnapshotSummary */
         SnapshotSummary: {
@@ -754,12 +1762,12 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "fixture" | "binance";
+            source: "fixture" | "binance" | "bybit";
             /**
              * Symbol
              * @enum {string}
              */
-            symbol: "BTCUSDT" | "ETHUSDT";
+            symbol: "BTCUSDT" | "ETHUSDT" | "MUUSDT";
             /**
              * Timeframe
              * @enum {string}
@@ -767,10 +1775,10 @@ export interface components {
             timeframe: "5m" | "15m" | "1h" | "4h" | "1d";
             /**
              * Venue
-             * @default binance-spot
-             * @constant
+             * @default binance-usdm-perpetual
+             * @enum {string}
              */
-            venue: "binance-spot";
+            venue: "binance-spot" | "binance-usdm-perpetual" | "bybit-spot";
             /**
              * Market Session
              * @default 24/7
@@ -794,7 +1802,7 @@ export interface components {
              * @default BTC
              * @enum {string}
              */
-            base_currency: "BTC" | "ETH";
+            base_currency: "BTC" | "ETH" | "MU";
             /**
              * Price Encoding
              * @default decimal_string_18_places
@@ -808,12 +1816,12 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "fixture" | "binance";
+            source: "fixture" | "binance" | "bybit";
             /**
              * Symbol
              * @enum {string}
              */
-            symbol: "BTCUSDT" | "ETHUSDT";
+            symbol: "BTCUSDT" | "ETHUSDT" | "MUUSDT";
             /**
              * Timeframe
              * @enum {string}
@@ -821,10 +1829,10 @@ export interface components {
             timeframe: "5m" | "15m" | "1h" | "4h" | "1d";
             /**
              * Venue
-             * @default binance-spot
-             * @constant
+             * @default binance-usdm-perpetual
+             * @enum {string}
              */
-            venue: "binance-spot";
+            venue: "binance-spot" | "binance-usdm-perpetual" | "bybit-spot";
             /**
              * Market Session
              * @default 24/7
@@ -848,7 +1856,7 @@ export interface components {
              * @default BTC
              * @enum {string}
              */
-            base_currency: "BTC" | "ETH";
+            base_currency: "BTC" | "ETH" | "MU";
             /**
              * Price Encoding
              * @default decimal_string_18_places
@@ -856,509 +1864,25 @@ export interface components {
              */
             price_encoding: "decimal_string_18_places";
         };
-        /** ValidationError */
-        ValidationError: {
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
-        };
-        /** Workspace */
-        Workspace: {
-            stream: components["schemas"]["Stream-Output"];
-            /**
-             * Checked At
-             * Format: date-time
-             */
-            checked_at: string;
-            /**
-             * Current State
-             * @enum {string}
-             */
-            current_state: "fresh" | "delayed" | "stale" | "unavailable" | "simulated";
-            snapshot: components["schemas"]["Analysis"] | null;
-            latest_job: components["schemas"]["Job"] | null;
-            refresh_job: components["schemas"]["Job"] | null;
-            schedule: components["schemas"]["Schedule"] | null;
-        };
-        /** SyncRequest */
-        SyncRequest: {
-            /** Account Id */
-            account_id: string;
-            /**
-             * Start
-             * Format: date
-             */
-            start: string;
-            /**
-             * End
-             * Format: date
-             */
-            end: string;
-        };
-        /** PortfolioCapture */
-        PortfolioCapture: {
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "demo" | "moomoo";
-            /** Account Id */
-            account_id: string;
-            /**
-             * Captured At
-             * Format: date-time
-             */
-            captured_at: string;
-            /** Snapshot Observed At */
-            snapshot_observed_at: string | null;
-            /**
-             * Base Currency
-             * @default USD
-             */
-            base_currency: string;
-            /** Positions */
-            positions: components["schemas"]["Position"][];
-            /** Instruments */
-            instruments: components["schemas"]["Instrument-Output"][];
-            /** Quotes */
-            quotes: components["schemas"]["Quote-Output"][];
-            /** Fx */
-            fx: components["schemas"]["FxRate"][];
-            /** Raw */
-            raw: {
-                [key: string]: unknown;
-            };
-            /** Errors */
-            errors: {
-                [key: string]: string;
-            };
-            /** History Start */
-            history_start: string | null;
-            /** History End */
-            history_end: string | null;
-        };
-        /** Position */
-        Position: {
-            /** Code */
-            code: string;
-            /** Quantity */
-            quantity: string;
-            /** Mark */
-            mark: string | null;
-            /**
-             * Observed At
-             * Format: date-time
-             */
-            observed_at: string;
-        };
-        /** Instrument */
-        "Instrument-Output": {
-            /** Code */
-            code: string;
-            /** Underlying */
-            underlying: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "stock" | "call" | "put";
-            /** Currency */
-            currency: string;
-            /** Multiplier */
-            multiplier: string;
-            /** Strike */
-            strike: string | null;
-            /** Expiry */
-            expiry: string | null;
-            /** Source */
-            source: string;
-        };
-        /** Quote */
-        "Quote-Output": {
-            /** Code */
-            code: string;
-            /** Spot */
-            spot: string;
-            /** Delta */
-            delta: string | null;
-            /** Gamma */
-            gamma: string | null;
-            /** Theta */
-            theta: string | null;
-            /** Vega */
-            vega: string | null;
-            /**
-             * Units
-             * @enum {string}
-             */
-            units: "per_share" | "per_contract";
-            /**
-             * Theta Basis
-             * @enum {string}
-             */
-            theta_basis: "day" | "year";
-            /**
-             * Vega Basis
-             * @enum {string}
-             */
-            vega_basis: "percentage_point" | "unit_volatility";
-            /**
-             * Observed At
-             * Format: date-time
-             */
-            observed_at: string;
-            /** Source */
-            source: string;
-        };
-        /** FxRate */
-        FxRate: {
-            /** Currency */
-            currency: string;
-            /** To Base */
-            to_base: string;
-            /**
-             * Observed At
-             * Format: date-time
-             */
-            observed_at: string;
-            /** Source */
-            source: string;
-        };
-        /** PortfolioWorkspace */
-        PortfolioWorkspace: {
-            capture: components["schemas"]["PortfolioCapture"] | null;
-            /** Cycles */
-            cycles: components["schemas"]["CycleResult"][];
-            risk: components["schemas"]["RiskResult"] | null;
-            /** Records */
-            records: {
-                [key: string]: unknown;
-            }[];
-            /** Audit */
-            audit: {
-                [key: string]: unknown;
-            }[];
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "available" | "stale" | "unavailable" | "simulated";
-            /** Issues */
-            issues: string[];
-        };
-        /** CycleResult */
-        CycleResult: {
-            cycle: components["schemas"]["Cycle"];
-            /**
-             * Method
-             * @default FIFO; option premiums realized separately; assignment shares at strike
-             */
-            method: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "empty" | "open" | "closed" | "incomplete";
-            /** Premium Received */
-            premium_received: string | null;
-            /** Premium Paid */
-            premium_paid: string | null;
-            /** Gross Cash Movement */
-            gross_cash_movement: string | null;
-            /** Known Fees */
-            known_fees: string;
-            /** Net Cash Movement */
-            net_cash_movement: string | null;
-            /** Realized Gross */
-            realized_gross: string | null;
-            /** Realized Net */
-            realized_net: string | null;
-            /** Unrealized */
-            unrealized: string | null;
-            /** Lots */
-            lots: components["schemas"]["Lot"][];
-            /** Events */
-            events: components["schemas"]["LedgerEvent-Output"][];
-            /** Issues */
-            issues: string[];
-        };
-        /** Cycle */
-        Cycle: {
-            /** Cycle Id */
-            cycle_id: string;
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "demo" | "moomoo";
-            /** Account Id */
-            account_id: string;
-            /** Underlying */
-            underlying: string;
-            /** Currency */
-            currency: string;
-            /** Name */
-            name: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-        };
-        /** Lot */
-        Lot: {
-            /** Code */
-            code: string;
-            /** Quantity */
-            quantity: string;
-            /** Entry Price */
-            entry_price: string;
-            /** Opening Event Id */
-            opening_event_id: string;
-        };
-        /** LedgerEvent */
-        "LedgerEvent-Output": {
-            /** Event Id */
-            event_id: string;
-            /** Cycle Id */
-            cycle_id: string;
-            /**
-             * At
-             * Format: date-time
-             */
-            at: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "buy_open" | "sell_open" | "buy_close" | "sell_close" | "expire" | "assign" | "exercise" | "cash_settle";
-            instrument: components["schemas"]["Instrument-Output"];
-            /** Quantity */
-            quantity: string;
-            /** Price */
-            price: string;
-            /** Fee */
-            fee: string | null;
-            /** Source Record Id */
-            source_record_id: string | null;
-            /** Settlement Record Id */
-            settlement_record_id: string | null;
-            /** Roll Group */
-            roll_group: string | null;
-            /** Evidence Issues */
-            evidence_issues: string[];
-            /** Author */
-            author: string;
-            /** Reason */
-            reason: string;
-        };
-        /** RiskResult */
-        RiskResult: {
-            /** Base Currency */
-            base_currency: string;
-            /**
-             * Evaluated At
-             * Format: date-time
-             */
-            evaluated_at: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "complete" | "partial" | "unavailable";
-            /** Exposures */
-            exposures: components["schemas"]["Exposure"][];
-            /** Dollar Delta */
-            dollar_delta: string | null;
-            /** Theta Daily */
-            theta_daily: string | null;
-            /** Vega Point */
-            vega_point: string | null;
-            /** Issues */
-            issues: string[];
-        };
-        /** Exposure */
-        Exposure: {
-            /** Underlying */
-            underlying: string;
-            /** Currency */
-            currency: string;
-            /** Share Delta */
-            share_delta: string | null;
-            /** Share Gamma */
-            share_gamma: string | null;
-            /** Theta Daily */
-            theta_daily: string | null;
-            /** Vega Point */
-            vega_point: string | null;
-            /** Dollar Delta Base */
-            dollar_delta_base: string | null;
-            /** Issues */
-            issues: string[];
-        };
-        /** NewCycle */
-        NewCycle: {
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "demo" | "moomoo";
-            /** Account Id */
-            account_id: string;
-            /** Underlying */
-            underlying: string;
-            /** Currency */
-            currency: string;
-            /** Name */
-            name: string;
-        };
-        /** LedgerEvent */
-        "LedgerEvent-Input": {
-            /** Event Id */
-            event_id: string;
-            /** Cycle Id */
-            cycle_id: string;
-            /**
-             * At
-             * Format: date-time
-             */
-            at: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "buy_open" | "sell_open" | "buy_close" | "sell_close" | "expire" | "assign" | "exercise" | "cash_settle";
-            instrument: components["schemas"]["Instrument-Input"];
-            /** Quantity */
-            quantity: string;
-            /** Price */
-            price: string;
-            /** Fee */
-            fee?: string | null;
-            /** Source Record Id */
-            source_record_id?: string | null;
-            /** Settlement Record Id */
-            settlement_record_id?: string | null;
-            /** Roll Group */
-            roll_group?: string | null;
-            /** Evidence Issues */
-            evidence_issues?: string[];
-            /** Author */
-            author: string;
-            /** Reason */
-            reason: string;
-        };
-        /** Instrument */
-        "Instrument-Input": {
-            /** Code */
-            code: string;
-            /** Underlying */
-            underlying: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "stock" | "call" | "put";
-            /** Currency */
-            currency: string;
-            /** Multiplier */
-            multiplier: string;
-            /** Strike */
-            strike?: string | null;
-            /** Expiry */
-            expiry?: string | null;
-            /** Source */
-            source: string;
-        };
-        /** Annotation */
-        Annotation: {
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "demo" | "moomoo";
-            /** Account Id */
-            account_id: string;
-            /** Author */
-            author: string;
-            /** Reason */
-            reason: string;
-            instrument?: components["schemas"]["Instrument-Input"] | null;
-            quote?: components["schemas"]["Quote-Input"] | null;
-            fx?: components["schemas"]["FxRate"] | null;
-        };
-        /** Quote */
-        "Quote-Input": {
-            /** Code */
-            code: string;
-            /** Spot */
-            spot: string;
-            /** Delta */
-            delta?: string | null;
-            /** Gamma */
-            gamma?: string | null;
-            /** Theta */
-            theta?: string | null;
-            /** Vega */
-            vega?: string | null;
-            /**
-             * Units
-             * @enum {string}
-             */
-            units: "per_share" | "per_contract";
-            /**
-             * Theta Basis
-             * @enum {string}
-             */
-            theta_basis: "day" | "year";
-            /**
-             * Vega Basis
-             * @enum {string}
-             */
-            vega_basis: "percentage_point" | "unit_volatility";
-            /**
-             * Observed At
-             * Format: date-time
-             */
-            observed_at: string;
-            /** Source */
-            source: string;
-        };
-        /** FeeCorrection */
-        FeeCorrection: {
-            /** Event Id */
-            event_id: string;
-            /** Fee */
-            fee: string;
-            /** Author */
-            author: string;
-            /** Reason */
-            reason: string;
-        };
-        /** FillReconciliation */
-        FillReconciliation: {
-            /** Event Id */
-            event_id: string;
-            /** Record Id */
-            record_id: string;
-            /**
-             * At
-             * Format: date-time
-             */
-            at: string;
-            /** Fee */
-            fee?: string | null;
-            /** Author */
-            author: string;
-            /** Reason */
-            reason: string;
+        /** SummaryRisk */
+        SummaryRisk: {
+            /** Risk9 */
+            risk9: string | null;
+            /** Risk9 At */
+            risk9_at: string | null;
+            /** Setup Close */
+            setup_close: string | null;
+            /** Risk Level */
+            risk_level: string | null;
+            /** Risk13 At */
+            risk13_at: string | null;
+            /** Provisional */
+            provisional: boolean;
+            /** Close13 */
+            close13: string | null;
+            /** Tdst */
+            tdst: string | null;
+            next_bar_needs: components["schemas"]["NextBarNeeds"] | null;
         };
         /** SyncJob */
         SyncJob: {
@@ -1396,6 +1920,102 @@ export interface components {
             next_due: string;
             /** Error */
             error: string | null;
+        };
+        /** SyncRequest */
+        SyncRequest: {
+            /** Account Id */
+            account_id: string;
+            /**
+             * Start
+             * Format: date
+             */
+            start: string;
+            /**
+             * End
+             * Format: date
+             */
+            end: string;
+        };
+        /** TimeframeContext */
+        TimeframeContext: {
+            /**
+             * Timeframe
+             * @enum {string}
+             */
+            timeframe: "5m" | "15m" | "1h" | "4h" | "1d";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "fresh" | "delayed" | "stale" | "unavailable" | "simulated";
+            /** Bars Used */
+            bars_used: number;
+            /** History Complete */
+            history_complete: boolean;
+            /** History Gapped */
+            history_gapped: boolean;
+            /** Last Closed At */
+            last_closed_at: string | null;
+            summary: components["schemas"]["DemarkSummary"] | null;
+            state: components["schemas"]["TimeframeState"] | null;
+            /** Signals */
+            signals: components["schemas"]["Signal"][];
+            new_trend: components["schemas"]["NewTrend"] | null;
+        };
+        /** TimeframeState */
+        TimeframeState: {
+            /**
+             * S9
+             * @enum {string}
+             */
+            s9: "up" | "down" | "none";
+            /** S13 */
+            s13: boolean;
+            /** Carry13 */
+            carry13: boolean;
+            /** Countdown */
+            countdown: number;
+            /** Setup9 At */
+            setup9_at: string | null;
+            /** Qualified13 At */
+            qualified13_at: string | null;
+            /** Setup9 Seconds Ago */
+            setup9_seconds_ago: number | null;
+            /** Qualified13 Seconds Ago */
+            qualified13_seconds_ago: number | null;
+            /** Beyond Risk9 */
+            beyond_risk9: boolean | null;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
+        /** Workspace */
+        Workspace: {
+            stream: components["schemas"]["Stream-Output"];
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /**
+             * Current State
+             * @enum {string}
+             */
+            current_state: "fresh" | "delayed" | "stale" | "unavailable" | "simulated";
+            snapshot: components["schemas"]["Analysis"] | null;
+            latest_job: components["schemas"]["Job"] | null;
+            refresh_job: components["schemas"]["Job"] | null;
+            schedule: components["schemas"]["Schedule"] | null;
         };
     };
     responses: never;
@@ -1523,10 +2143,44 @@ export interface operations {
             };
         };
     };
+    market_context_api_wheelhouse_v1_market_context_get: {
+        parameters: {
+            query?: {
+                source?: ("fixture" | "binance" | "bybit") | null;
+                symbol?: string;
+                market_at?: string | null;
+                knowledge_at?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     workspace_api_wheelhouse_v1_workspace_get: {
         parameters: {
             query?: {
-                source?: "fixture" | "binance";
+                source?: ("fixture" | "binance" | "bybit") | null;
                 symbol?: string;
                 timeframe?: "5m" | "15m" | "1h" | "4h" | "1d";
             };
@@ -1559,7 +2213,7 @@ export interface operations {
     snapshots_api_wheelhouse_v1_snapshots_get: {
         parameters: {
             query?: {
-                source?: "fixture" | "binance";
+                source?: ("fixture" | "binance" | "bybit") | null;
                 symbol?: string;
                 timeframe?: "5m" | "15m" | "1h" | "4h" | "1d";
                 limit?: number;
@@ -1806,6 +2460,68 @@ export interface operations {
             };
         };
     };
+    sync_job_api_wheelhouse_v1_portfolio_sync_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_status_api_wheelhouse_v1_portfolio_sync_status_get: {
+        parameters: {
+            query: {
+                account_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncJob"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     demo_api_wheelhouse_v1_portfolio_demo_post: {
         parameters: {
             query?: never;
@@ -2018,68 +2734,6 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sync_job_api_wheelhouse_v1_portfolio_sync_jobs__job_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SyncJob"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sync_status_api_wheelhouse_v1_portfolio_sync_status_get: {
-        parameters: {
-            query: {
-                account_id: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SyncJob"] | null;
                 };
             };
             /** @description Validation Error */

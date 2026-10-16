@@ -51,7 +51,10 @@ class Runtime:
                 assert request.market_at is not None and request.knowledge_at is not None
                 market_at, knowledge_at = request.market_at, request.knowledge_at
             dataset = self.repository.read(
-                request.stream, market_at=market_at, knowledge_at=knowledge_at
+                request.stream,
+                market_at=market_at,
+                knowledge_at=knowledge_at,
+                limit=None if request.rules.demark is not None else 1000,
             )
             result = calculate(dataset, request.rules)
             self.repository.complete(claim, result, now=clock())

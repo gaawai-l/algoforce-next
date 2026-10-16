@@ -33,3 +33,6 @@ node_modules/
 .ruff_cache/
 .hypothesis/
 *.tsbuildinfo
+
+# Brainstorming companion mockups and SDD scratch
+.superpowers/

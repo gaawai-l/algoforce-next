@@ -7,8 +7,16 @@ from typing import Any, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .indicators.demark.models import DemarkConfig, DemarkResult
+
 Timeframe = Literal["5m", "15m", "1h", "4h", "1d"]
-Source = Literal["fixture", "binance"]
+Source = Literal["fixture", "binance", "bybit"]
+
+
+def default_source(symbol: str) -> Source:
+    return "bybit" if symbol == "BTCUSDT" else "binance"
+
+
 DURATIONS: dict[str, int] = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
 
 
@@ -33,22 +41,34 @@ class Model(BaseModel):
 
 class Stream(Model):
     source: Source
-    symbol: Literal["BTCUSDT", "ETHUSDT"]
+    symbol: Literal["BTCUSDT", "ETHUSDT", "MUUSDT"]
     timeframe: Timeframe
-    venue: Literal["binance-spot"] = "binance-spot"
+    venue: Literal["binance-spot", "binance-usdm-perpetual", "bybit-spot"] = (
+        "binance-usdm-perpetual"
+    )
     market_session: Literal["24/7"] = "24/7"
     timezone: Literal["UTC"] = "UTC"
     quote_currency: Literal["USDT"] = "USDT"
-    base_currency: Literal["BTC", "ETH"] = "BTC"
+    base_currency: Literal["BTC", "ETH", "MU"] = "BTC"
     price_encoding: Literal["decimal_string_18_places"] = "decimal_string_18_places"
 
     @model_validator(mode="before")
     @classmethod
     def base_from_symbol(cls, values: Any) -> Any:
-        if isinstance(values, dict) and "base_currency" not in values:
+        if isinstance(values, dict):
             return {
                 **values,
-                "base_currency": "ETH" if values.get("symbol") == "ETHUSDT" else "BTC",
+                "base_currency": values.get(
+                    "base_currency", str(values.get("symbol", "BTCUSDT")).removesuffix("USDT")
+                ),
+                "venue": values.get(
+                    "venue",
+                    "binance-spot"
+                    if values.get("source") == "fixture"
+                    else "bybit-spot"
+                    if values.get("source") == "bybit"
+                    else "binance-usdm-perpetual",
+                ),
             }
         return values
 
@@ -56,6 +76,8 @@ class Stream(Model):
     def matching_currency(self) -> Self:
         if self.base_currency != self.symbol.removesuffix("USDT"):
             raise ValueError("Base currency must match instrument identity")
+        if (self.source == "bybit") != (self.venue == "bybit-spot"):
+            raise ValueError("Bybit source and venue must match")
         return self
 
     @property
@@ -157,6 +179,7 @@ class StorageStats(Model):
 class Rules(Model):
     engine_version: Literal["baseline-v1"] = "baseline-v1"
     window: int = Field(default=20, ge=2, le=200)
+    demark: DemarkConfig | None = None
 
 
 class Point(Model):
@@ -186,6 +209,7 @@ class Analysis(Model):
     bars: list[StoredBar]
     points: list[Point]
     signal_status: Literal["not_implemented"] = "not_implemented"
+    demark: DemarkResult | None = None
 
 
 class JobRequest(Model):

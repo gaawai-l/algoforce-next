@@ -507,37 +507,20 @@ The exact composite weighting was not exposed. Wheelhouse may display provider-s
 
 ### 9.3 Business regime labels
 
-The inspected AlphaBTC interface compressed raw DeMark state into three business labels. Wheelhouse maps them deterministically:
+The business labels follow AlphaBTC's verified client rules (2026-09-28), not the earlier
+Wheelhouse-defined conditions. Anchor 1h for intraday and 4h for swing:
 
-#### Reversal Fade
+| Anchor 9 | Anchor 13 | Label |
+|---|---|---|
+| up confirmed | no | Breakout decay (突破减弱) |
+| up confirmed | yes | Reversal fade (反转阴跌) |
+| down confirmed | no | Reversal fade (反转阴跌) |
+| down confirmed | yes | Selloff exhausted (阴跌爆拉) |
+| not confirmed | — | none |
 
-Meaning: Setup 9 has warned of exhaustion, but qualified 13 has not confirmed a reversal.
-
-```text
-setup_count == 9
-and qualified13 == false
-and trend has begun to lose continuation quality
-```
-
-#### Breakout Decay
-
-Meaning: an upward or downward breakout has completed Setup 9 and Countdown is progressing, so trend continuation remains possible but exhaustion risk is increasing.
-
-```text
-setup_count == 9
-and countdown_status == active
-and countdown_count between 1 and 12
-```
-
-#### Compression Reversal
-
-Meaning: a prior directional move has reached qualified 13 and the opposite direction has begun to form.
-
-```text
-countdown_status == qualified13
-and risk_level_valid == true
-and opposite_setup_count >= 1
-```
+Missing or stale anchor data is `unavailable` (AlphaBTC shows "Breakout decay"; Wheelhouse
+does not). Details: docs/features/demark-regime/SPEC.md and
+research/alphabtc-regime-cycle-source-2026-09-28.md §2.
 
 The product UI should use clear English labels and show the raw state beneath them. Business labels must never replace raw Setup and Countdown data.
 

@@ -11,11 +11,27 @@ WORKDIR /build/host
 RUN npm install -g pnpm@10.33.4 && pnpm install --frozen-lockfile
 RUN pnpm build:types && pnpm build
 
+FROM node:24-bookworm-slim AS wallet-build
+WORKDIR /app
+COPY services/wallet-auth/package*.json ./
+RUN npm ci --ignore-scripts
+COPY services/wallet-auth/ ./
+ARG VITE_WALLETCONNECT_PROJECT_ID
+RUN npm run build
+
+FROM node:24-bookworm-slim AS wallet-auth
+WORKDIR /app
+COPY --from=wallet-build /app/package*.json ./
+RUN npm ci --omit=dev --ignore-scripts && mkdir -p /data && chown node:node /data
+COPY services/wallet-auth/src/auth.mjs services/wallet-auth/src/server.mjs ./src/
+USER node
+EXPOSE 8790
+CMD ["node", "src/server.mjs"]
+
 FROM nginx:1.28-alpine AS web
 COPY --from=frontend /build/host/dist /usr/share/nginx/html
+COPY --from=wallet-build /app/dist /usr/share/nginx/html/login
 COPY deploy/test/nginx.conf /etc/nginx/conf.d/default.conf
-COPY deploy/test/web-entrypoint.sh /docker-entrypoint.d/40-test-auth.sh
-RUN chmod +x /docker-entrypoint.d/40-test-auth.sh
 EXPOSE 80
 
 FROM python:3.14-slim AS analytics

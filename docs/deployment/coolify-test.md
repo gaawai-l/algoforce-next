@@ -15,7 +15,7 @@
 
 本地验收：两镜像构建成功；匿名访问页面及两API为401，正确凭据访问200，跨源请求403、broker sync403；通过容器完整执行fixture DeMark320根任务，重启Python容器后旧快照仍可读取。单元测试验证broker worker不会启动，market worker正常启动。部署审查发现的worker开关与Python依赖锁问题已修复并由Standards/Spec两轴复核关闭。
 
-远端部署结果和最终URL以实际Coolify运行与外网验证后补充。
+以下记录首次部署与外网验收结果；后续发布按[发布流程](RELEASING.md)执行并记录对应版本。
 
 ## Coolify兼容修正
 
@@ -29,4 +29,8 @@
 
 测试库初始化为英文、暗色、USD、UTC，未添加真实账户。访问说明（含密码）仅位于本机 `.local/test-deploy/ACCESS.md`，不提交仓库。验收截图 `.local/test-deploy/coolify-running.png`。平台整体状态的“no healthcheck”指官方Wealthfolio服务未定义Compose健康探针；已通过实际HTTP检查验证两后端及入口。
 
-后续发布：继续开发在原分支进行；完成评审后生成新的test分支提交，在同一Coolify应用手动Deploy。当前不自动部署未审阅的main变更。测试域名由服务器的sslip规则生成，后续可绑定自定义DNS，不影响应用架构。
+后续发布见[发布流程](RELEASING.md)。测试域名由服务器的sslip规则生成，后续可绑定自定义DNS，不影响应用架构。
+
+## 当前认证（2026-09-28）
+
+Basic Auth 已按用户要求移除，现使用 RainbowKit/Base 白名单钱包签名和30天登录会话。实际部署 `61e9136`，deployment `irg5wqgtgx6lzhspiivt698c`；详见[钱包发布记录](releases/2026-09-28-wallet-login.md)。上文密码认证验收保留为历史记录。

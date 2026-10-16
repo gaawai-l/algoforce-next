@@ -155,9 +155,14 @@ class Repository:
         return Batch.model_validate_json(row[0])
 
     def read(
-        self, stream: Stream, *, market_at: datetime, knowledge_at: datetime, limit: int = 1000
+        self,
+        stream: Stream,
+        *,
+        market_at: datetime,
+        knowledge_at: datetime,
+        limit: int | None = 1000,
     ) -> Dataset:
-        if not 1 <= limit <= 10000:
+        if limit is not None and not 1 <= limit <= 10000:
             raise ValueError("Dataset limit must be 1..10000")
         with self.connection() as db:
             rows = db.execute(
@@ -167,7 +172,12 @@ class Repository:
                   FROM bar_revisions WHERE stream_key=? AND fetched_at<=? AND open_time<?
                 ) SELECT * FROM ranked WHERE rank=1 ORDER BY open_time DESC LIMIT ?
                 """,
-                (stream.key, timestamp(knowledge_at), timestamp(market_at), limit),
+                (
+                    stream.key,
+                    timestamp(knowledge_at),
+                    timestamp(market_at),
+                    -1 if limit is None else limit,
+                ),
             ).fetchall()
             fetched = db.execute(
                 "SELECT MAX(fetched_at) FROM batches WHERE stream_key=? AND fetched_at<=?",

@@ -156,6 +156,101 @@
         }
       }
     },
+    "/api/wheelhouse/v1/market-context": {
+      "get": {
+        "summary": "Market Context",
+        "operationId": "market_context_api_wheelhouse_v1_market_context_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "fixture",
+                    "binance",
+                    "bybit"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BTCUSDT",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "market_at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market At"
+            }
+          },
+          {
+            "name": "knowledge_at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Knowledge At"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketContext"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/workspace": {
       "get": {
         "summary": "Workspace",
@@ -166,12 +261,19 @@
             "in": "query",
             "required": false,
             "schema": {
-              "enum": [
-                "fixture",
-                "binance"
+              "anyOf": [
+                {
+                  "enum": [
+                    "fixture",
+                    "binance",
+                    "bybit"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "type": "string",
-              "default": "fixture",
               "title": "Source"
             }
           },
@@ -237,12 +339,19 @@
             "in": "query",
             "required": false,
             "schema": {
-              "enum": [
-                "fixture",
-                "binance"
+              "anyOf": [
+                {
+                  "enum": [
+                    "fixture",
+                    "binance",
+                    "bybit"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "type": "string",
-              "default": "fixture",
               "title": "Source"
             }
           },
@@ -577,6 +686,99 @@
         }
       }
     },
+    "/api/wheelhouse/v1/portfolio/sync-jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Sync Job",
+        "operationId": "sync_job_api_wheelhouse_v1_portfolio_sync_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/portfolio/sync-status": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Sync Status",
+        "operationId": "sync_status_api_wheelhouse_v1_portfolio_sync_status_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SyncJob"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Sync Status Api Wheelhouse V1 Portfolio Sync Status Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/portfolio/demo": {
       "post": {
         "tags": [
@@ -875,99 +1077,6 @@
           }
         }
       }
-    },
-    "/api/wheelhouse/v1/portfolio/sync-jobs/{job_id}": {
-      "get": {
-        "tags": [
-          "portfolio"
-        ],
-        "summary": "Sync Job",
-        "operationId": "sync_job_api_wheelhouse_v1_portfolio_sync_jobs__job_id__get",
-        "parameters": [
-          {
-            "name": "job_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Job Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SyncJob"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/wheelhouse/v1/portfolio/sync-status": {
-      "get": {
-        "tags": [
-          "portfolio"
-        ],
-        "summary": "Sync Status",
-        "operationId": "sync_status_api_wheelhouse_v1_portfolio_sync_status_get",
-        "parameters": [
-          {
-            "name": "account_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^[0-9]+$",
-              "title": "Account Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SyncJob"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Sync Status Api Wheelhouse V1 Portfolio Sync Status Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -1099,6 +1208,16 @@
             "const": "not_implemented",
             "title": "Signal Status",
             "default": "not_implemented"
+          },
+          "demark": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemarkResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -1121,9 +1240,79 @@
           "issues",
           "bars",
           "points",
-          "signal_status"
+          "signal_status",
+          "demark"
         ],
         "title": "Analysis"
+      },
+      "Annotation": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "demo",
+              "moomoo"
+            ],
+            "title": "Source"
+          },
+          "account_id": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Account Id"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Author"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "instrument": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Instrument-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quote-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fx": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FxRate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "account_id",
+          "author",
+          "reason"
+        ],
+        "title": "Annotation"
       },
       "Bar": {
         "properties": {
@@ -1183,6 +1372,37 @@
         ],
         "title": "Bar"
       },
+      "BarRef": {
+        "properties": {
+          "revision_id": {
+            "type": "string",
+            "title": "Revision Id"
+          },
+          "open_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Open Time"
+          },
+          "close_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Close Time"
+          },
+          "close": {
+            "type": "string",
+            "title": "Close"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision_id",
+          "open_time",
+          "close_time",
+          "close"
+        ],
+        "title": "BarRef"
+      },
       "Batch": {
         "properties": {
           "stream": {
@@ -1218,6 +1438,1203 @@
         ],
         "title": "Batch"
       },
+      "Cycle": {
+        "properties": {
+          "cycle_id": {
+            "type": "string",
+            "title": "Cycle Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "demo",
+              "moomoo"
+            ],
+            "title": "Source"
+          },
+          "account_id": {
+            "type": "string",
+            "title": "Account Id"
+          },
+          "underlying": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Underlying"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cycle_id",
+          "source",
+          "account_id",
+          "underlying",
+          "currency",
+          "name",
+          "created_at"
+        ],
+        "title": "Cycle"
+      },
+      "CycleResult": {
+        "properties": {
+          "cycle": {
+            "$ref": "#/components/schemas/Cycle"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "default": "FIFO; option premiums realized separately; assignment shares at strike"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "empty",
+              "open",
+              "closed",
+              "incomplete"
+            ],
+            "title": "State"
+          },
+          "premium_received": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premium Received"
+          },
+          "premium_paid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premium Paid"
+          },
+          "gross_cash_movement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross Cash Movement"
+          },
+          "known_fees": {
+            "type": "string",
+            "title": "Known Fees"
+          },
+          "net_cash_movement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Cash Movement"
+          },
+          "realized_gross": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Gross"
+          },
+          "realized_net": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Net"
+          },
+          "unrealized": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrealized"
+          },
+          "lots": {
+            "items": {
+              "$ref": "#/components/schemas/Lot"
+            },
+            "type": "array",
+            "title": "Lots"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerEvent-Output"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cycle",
+          "method",
+          "state",
+          "premium_received",
+          "premium_paid",
+          "gross_cash_movement",
+          "known_fees",
+          "net_cash_movement",
+          "realized_gross",
+          "realized_net",
+          "unrealized",
+          "lots",
+          "events",
+          "issues"
+        ],
+        "title": "CycleResult"
+      },
+      "DemarkConfig-Input": {
+        "properties": {
+          "variant": {
+            "type": "string",
+            "const": "sequential",
+            "title": "Variant",
+            "default": "sequential"
+          },
+          "ruleset_version": {
+            "type": "string",
+            "enum": [
+              "wheelhouse-sequential-1",
+              "wheelhouse-sequential-2"
+            ],
+            "title": "Ruleset Version",
+            "default": "wheelhouse-sequential-1"
+          },
+          "price_flip_required": {
+            "type": "boolean",
+            "title": "Price Flip Required",
+            "default": true
+          },
+          "perfection_policy": {
+            "type": "string",
+            "enum": [
+              "strict",
+              "strict_at_nine"
+            ],
+            "title": "Perfection Policy",
+            "default": "strict"
+          },
+          "same_side_policy": {
+            "type": "string",
+            "enum": [
+              "parallel",
+              "retain_active"
+            ],
+            "title": "Same Side Policy",
+            "default": "parallel"
+          },
+          "qualifier_8_vs_5": {
+            "type": "boolean",
+            "const": false,
+            "title": "Qualifier 8 Vs 5",
+            "default": false
+          },
+          "risk_formula": {
+            "type": "string",
+            "const": "countdown_span_true_extreme_earliest",
+            "title": "Risk Formula",
+            "default": "countdown_span_true_extreme_earliest"
+          },
+          "tdst_breach": {
+            "type": "string",
+            "enum": [
+              "true_extreme",
+              "close"
+            ],
+            "title": "Tdst Breach",
+            "default": "true_extreme"
+          },
+          "risk_breach": {
+            "type": "string",
+            "enum": [
+              "close",
+              "true_extreme"
+            ],
+            "title": "Risk Breach",
+            "default": "close"
+          },
+          "recycling": {
+            "type": "string",
+            "enum": [
+              "range_and_22",
+              "none"
+            ],
+            "title": "Recycling",
+            "default": "range_and_22"
+          },
+          "validity_bars": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validity Bars"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DemarkConfig"
+      },
+      "DemarkConfig-Output": {
+        "properties": {
+          "variant": {
+            "type": "string",
+            "const": "sequential",
+            "title": "Variant",
+            "default": "sequential"
+          },
+          "ruleset_version": {
+            "type": "string",
+            "enum": [
+              "wheelhouse-sequential-1",
+              "wheelhouse-sequential-2"
+            ],
+            "title": "Ruleset Version",
+            "default": "wheelhouse-sequential-1"
+          },
+          "price_flip_required": {
+            "type": "boolean",
+            "title": "Price Flip Required",
+            "default": true
+          },
+          "perfection_policy": {
+            "type": "string",
+            "enum": [
+              "strict",
+              "strict_at_nine"
+            ],
+            "title": "Perfection Policy",
+            "default": "strict"
+          },
+          "same_side_policy": {
+            "type": "string",
+            "enum": [
+              "parallel",
+              "retain_active"
+            ],
+            "title": "Same Side Policy",
+            "default": "parallel"
+          },
+          "qualifier_8_vs_5": {
+            "type": "boolean",
+            "const": false,
+            "title": "Qualifier 8 Vs 5",
+            "default": false
+          },
+          "risk_formula": {
+            "type": "string",
+            "const": "countdown_span_true_extreme_earliest",
+            "title": "Risk Formula",
+            "default": "countdown_span_true_extreme_earliest"
+          },
+          "tdst_breach": {
+            "type": "string",
+            "enum": [
+              "true_extreme",
+              "close"
+            ],
+            "title": "Tdst Breach",
+            "default": "true_extreme"
+          },
+          "risk_breach": {
+            "type": "string",
+            "enum": [
+              "close",
+              "true_extreme"
+            ],
+            "title": "Risk Breach",
+            "default": "close"
+          },
+          "recycling": {
+            "type": "string",
+            "enum": [
+              "range_and_22",
+              "none"
+            ],
+            "title": "Recycling",
+            "default": "range_and_22"
+          },
+          "validity_bars": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validity Bars"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "variant",
+          "ruleset_version",
+          "price_flip_required",
+          "perfection_policy",
+          "same_side_policy",
+          "qualifier_8_vs_5",
+          "risk_formula",
+          "tdst_breach",
+          "risk_breach",
+          "recycling",
+          "validity_bars"
+        ],
+        "title": "DemarkConfig"
+      },
+      "DemarkEvent": {
+        "properties": {
+          "sequence_id": {
+            "type": "string",
+            "title": "Sequence Id"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "setup_count",
+              "setup_completed",
+              "setup_interrupted",
+              "perfected",
+              "countdown_count",
+              "deferred13",
+              "qualified13",
+              "cancelled",
+              "recycled",
+              "invalidated",
+              "expired",
+              "continuity_lost"
+            ],
+            "title": "Kind"
+          },
+          "bar": {
+            "$ref": "#/components/schemas/BarRef"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sequence_id",
+          "side",
+          "kind",
+          "bar",
+          "count",
+          "reason"
+        ],
+        "title": "DemarkEvent"
+      },
+      "DemarkResult": {
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/DemarkConfig-Output"
+          },
+          "input_hash": {
+            "type": "string",
+            "title": "Input Hash"
+          },
+          "history_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History Start"
+          },
+          "history_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History End"
+          },
+          "history_status": {
+            "type": "string",
+            "enum": [
+              "window_only",
+              "gapped",
+              "empty"
+            ],
+            "title": "History Status"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "warming_up",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "warmup_required": {
+            "type": "integer",
+            "title": "Warmup Required",
+            "default": 6
+          },
+          "sequences": {
+            "items": {
+              "$ref": "#/components/schemas/DemarkSequence"
+            },
+            "type": "array",
+            "title": "Sequences"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DemarkEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "qualified13_count": {
+            "type": "integer",
+            "title": "Qualified13 Count"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "config",
+          "input_hash",
+          "history_start",
+          "history_end",
+          "history_status",
+          "status",
+          "warmup_required",
+          "sequences",
+          "events",
+          "qualified13_count",
+          "issues"
+        ],
+        "title": "DemarkResult"
+      },
+      "DemarkSequence": {
+        "properties": {
+          "sequence_id": {
+            "type": "string",
+            "title": "Sequence Id"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "setup_count": {
+            "type": "integer",
+            "title": "Setup Count"
+          },
+          "setup_status": {
+            "type": "string",
+            "enum": [
+              "forming",
+              "completed",
+              "interrupted"
+            ],
+            "title": "Setup Status"
+          },
+          "setup_bars": {
+            "items": {
+              "$ref": "#/components/schemas/BarRef"
+            },
+            "type": "array",
+            "title": "Setup Bars"
+          },
+          "setup_perfected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup Perfected"
+          },
+          "perfected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Perfected At"
+          },
+          "countdown_count": {
+            "type": "integer",
+            "title": "Countdown Count",
+            "default": 0
+          },
+          "countdown_status": {
+            "type": "string",
+            "enum": [
+              "inactive",
+              "active",
+              "count13_unqualified",
+              "qualified13",
+              "cancelled",
+              "recycled"
+            ],
+            "title": "Countdown Status",
+            "default": "inactive"
+          },
+          "countdown_bars": {
+            "items": {
+              "$ref": "#/components/schemas/BarRef"
+            },
+            "type": "array",
+            "title": "Countdown Bars"
+          },
+          "countdown_bar8": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BarRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "qualification_threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualification Threshold"
+          },
+          "qualified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualified At"
+          },
+          "confirmation_close": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Close"
+          },
+          "tdst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tdst"
+          },
+          "tdst_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BarRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tdst_breached_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tdst Breached At"
+          },
+          "risk_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Level"
+          },
+          "risk_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BarRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "risk_status": {
+            "type": "string",
+            "enum": [
+              "not_available",
+              "valid",
+              "invalidated",
+              "expired",
+              "unknown"
+            ],
+            "title": "Risk Status",
+            "default": "not_available"
+          },
+          "risk_ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Ended At"
+          },
+          "continuity": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "lost"
+            ],
+            "title": "Continuity",
+            "default": "observed"
+          },
+          "bars_since_setup9": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bars Since Setup9"
+          },
+          "bars_since_qualified13": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bars Since Qualified13"
+          },
+          "elapsed_since_setup9_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Since Setup9 Seconds"
+          },
+          "elapsed_since_qualified13_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Since Qualified13 Seconds"
+          },
+          "next_conditions": {
+            "items": {
+              "$ref": "#/components/schemas/NextCondition"
+            },
+            "type": "array",
+            "title": "Next Conditions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sequence_id",
+          "side",
+          "setup_count",
+          "setup_status",
+          "setup_bars",
+          "setup_perfected",
+          "perfected_at",
+          "countdown_count",
+          "countdown_status",
+          "countdown_bars",
+          "countdown_bar8",
+          "qualification_threshold",
+          "qualified_at",
+          "confirmation_close",
+          "tdst",
+          "tdst_source",
+          "tdst_breached_at",
+          "risk_level",
+          "risk_source",
+          "risk_status",
+          "risk_ended_at",
+          "continuity",
+          "bars_since_setup9",
+          "bars_since_qualified13",
+          "elapsed_since_setup9_seconds",
+          "elapsed_since_qualified13_seconds",
+          "next_conditions"
+        ],
+        "title": "DemarkSequence"
+      },
+      "DemarkSummary": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "trend": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Trend"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "setup",
+              "countdown"
+            ],
+            "title": "Phase"
+          },
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "target": {
+            "type": "integer",
+            "enum": [
+              9,
+              13
+            ],
+            "title": "Target"
+          },
+          "setup_step": {
+            "type": "integer",
+            "title": "Setup Step"
+          },
+          "countdown_step": {
+            "type": "integer",
+            "title": "Countdown Step"
+          },
+          "rounds": {
+            "items": {
+              "$ref": "#/components/schemas/Round"
+            },
+            "type": "array",
+            "title": "Rounds"
+          },
+          "last_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SignalRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prev": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrevCountdown"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "second": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecondSetup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bars_since_qualified13": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bars Since Qualified13"
+          },
+          "setup_run": {
+            "$ref": "#/components/schemas/SetupRun"
+          },
+          "risk": {
+            "$ref": "#/components/schemas/SummaryRisk"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "close": {
+            "type": "string",
+            "title": "Close"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "side",
+          "trend",
+          "phase",
+          "step",
+          "target",
+          "setup_step",
+          "countdown_step",
+          "rounds",
+          "last_signal",
+          "prev",
+          "second",
+          "bars_since_qualified13",
+          "setup_run",
+          "risk",
+          "as_of",
+          "close"
+        ],
+        "title": "DemarkSummary"
+      },
+      "Exposure": {
+        "properties": {
+          "underlying": {
+            "type": "string",
+            "title": "Underlying"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "share_delta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Delta"
+          },
+          "share_gamma": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Gamma"
+          },
+          "theta_daily": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta Daily"
+          },
+          "vega_point": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vega Point"
+          },
+          "dollar_delta_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dollar Delta Base"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "underlying",
+          "currency",
+          "share_delta",
+          "share_gamma",
+          "theta_daily",
+          "vega_point",
+          "dollar_delta_base",
+          "issues"
+        ],
+        "title": "Exposure"
+      },
+      "FeeCorrection": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "fee": {
+            "type": "string",
+            "title": "Fee"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Author"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "event_id",
+          "fee",
+          "author",
+          "reason"
+        ],
+        "title": "FeeCorrection"
+      },
+      "FillReconciliation": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "fee": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Author"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "event_id",
+          "record_id",
+          "at",
+          "author",
+          "reason"
+        ],
+        "title": "FillReconciliation"
+      },
+      "FxRate": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency"
+          },
+          "to_base": {
+            "type": "string",
+            "title": "To Base"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "currency",
+          "to_base",
+          "observed_at",
+          "source"
+        ],
+        "title": "FxRate"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1230,6 +2647,156 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "Instrument-Input": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "underlying": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Underlying"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "stock",
+              "call",
+              "put"
+            ],
+            "title": "Kind"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency"
+          },
+          "multiplier": {
+            "type": "string",
+            "title": "Multiplier"
+          },
+          "strike": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strike"
+          },
+          "expiry": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "underlying",
+          "kind",
+          "currency",
+          "multiplier",
+          "source"
+        ],
+        "title": "Instrument"
+      },
+      "Instrument-Output": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "underlying": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Underlying"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "stock",
+              "call",
+              "put"
+            ],
+            "title": "Kind"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency"
+          },
+          "multiplier": {
+            "type": "string",
+            "title": "Multiplier"
+          },
+          "strike": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strike"
+          },
+          "expiry": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "underlying",
+          "kind",
+          "currency",
+          "multiplier",
+          "strike",
+          "expiry",
+          "source"
+        ],
+        "title": "Instrument"
       },
       "Integrations": {
         "properties": {
@@ -1490,1322 +3057,126 @@
         ],
         "title": "JobRequest"
       },
-      "Point": {
+      "LedgerEvent-Input": {
         "properties": {
+          "event_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Event Id"
+          },
+          "cycle_id": {
+            "type": "string",
+            "title": "Cycle Id"
+          },
           "at": {
             "type": "string",
             "format": "date-time",
             "title": "At"
           },
-          "revision_id": {
-            "type": "string",
-            "title": "Revision Id"
-          },
-          "sma": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sma"
-          },
-          "prior_high": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prior High"
-          },
-          "prior_low": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prior Low"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "at",
-          "revision_id",
-          "sma",
-          "prior_high",
-          "prior_low"
-        ],
-        "title": "Point"
-      },
-      "Rules-Input": {
-        "properties": {
-          "engine_version": {
-            "type": "string",
-            "const": "baseline-v1",
-            "title": "Engine Version",
-            "default": "baseline-v1"
-          },
-          "window": {
-            "type": "integer",
-            "maximum": 200.0,
-            "minimum": 2.0,
-            "title": "Window",
-            "default": 20
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "Rules"
-      },
-      "Rules-Output": {
-        "properties": {
-          "engine_version": {
-            "type": "string",
-            "const": "baseline-v1",
-            "title": "Engine Version",
-            "default": "baseline-v1"
-          },
-          "window": {
-            "type": "integer",
-            "maximum": 200.0,
-            "minimum": 2.0,
-            "title": "Window",
-            "default": 20
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "engine_version",
-          "window"
-        ],
-        "title": "Rules"
-      },
-      "Schedule": {
-        "properties": {
-          "schedule_id": {
-            "type": "string",
-            "title": "Schedule Id"
-          },
-          "request": {
-            "$ref": "#/components/schemas/ScheduleRequest-Output"
-          },
-          "next_due": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Next Due"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "schedule_id",
-          "request",
-          "next_due"
-        ],
-        "title": "Schedule"
-      },
-      "ScheduleRequest-Input": {
-        "properties": {
-          "stream": {
-            "$ref": "#/components/schemas/Stream-Input"
-          },
-          "rules": {
-            "$ref": "#/components/schemas/Rules-Input"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "stream",
-          "enabled"
-        ],
-        "title": "ScheduleRequest"
-      },
-      "ScheduleRequest-Output": {
-        "properties": {
-          "stream": {
-            "$ref": "#/components/schemas/Stream-Output"
-          },
-          "rules": {
-            "$ref": "#/components/schemas/Rules-Output"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "stream",
-          "rules",
-          "enabled"
-        ],
-        "title": "ScheduleRequest"
-      },
-      "ServiceStatus": {
-        "properties": {
-          "service": {
-            "type": "string",
-            "const": "wheelhouse-python",
-            "title": "Service"
-          },
-          "status": {
-            "type": "string",
-            "const": "ready",
-            "title": "Status"
-          },
-          "contract_version": {
-            "type": "string",
-            "const": "1",
-            "title": "Contract Version"
-          },
-          "service_version": {
-            "type": "string",
-            "title": "Service Version"
-          },
-          "python_version": {
-            "type": "string",
-            "title": "Python Version"
-          },
-          "checked_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Checked At"
-          },
-          "read_only": {
-            "type": "boolean",
-            "const": true,
-            "title": "Read Only"
-          },
-          "integrations": {
-            "$ref": "#/components/schemas/Integrations"
-          },
-          "capabilities": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Capabilities"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "service",
-          "status",
-          "contract_version",
-          "service_version",
-          "python_version",
-          "checked_at",
-          "read_only",
-          "integrations",
-          "capabilities"
-        ],
-        "title": "ServiceStatus"
-      },
-      "SnapshotSummary": {
-        "properties": {
-          "snapshot_id": {
-            "type": "string",
-            "title": "Snapshot Id"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "market_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Market At"
-          },
-          "knowledge_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Knowledge At"
-          },
-          "rules": {
-            "$ref": "#/components/schemas/Rules-Output"
-          },
-          "data_state": {
-            "type": "string",
-            "title": "Data State"
-          },
-          "mode": {
-            "type": "string",
-            "title": "Mode"
-          },
-          "bar_count": {
-            "type": "integer",
-            "title": "Bar Count"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "snapshot_id",
-          "created_at",
-          "market_at",
-          "knowledge_at",
-          "rules",
-          "data_state",
-          "mode",
-          "bar_count"
-        ],
-        "title": "SnapshotSummary"
-      },
-      "StorageStats": {
-        "properties": {
-          "schema_version": {
-            "type": "integer",
-            "title": "Schema Version"
-          },
-          "batches": {
-            "type": "integer",
-            "title": "Batches"
-          },
-          "revisions": {
-            "type": "integer",
-            "title": "Revisions"
-          },
-          "snapshots": {
-            "type": "integer",
-            "title": "Snapshots"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "schema_version",
-          "batches",
-          "revisions",
-          "snapshots"
-        ],
-        "title": "StorageStats"
-      },
-      "StoredBar": {
-        "properties": {
-          "revision_id": {
-            "type": "string",
-            "title": "Revision Id"
-          },
-          "revision": {
-            "type": "integer",
-            "title": "Revision"
-          },
-          "fetched_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Fetched At"
-          },
-          "bar": {
-            "$ref": "#/components/schemas/Bar"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "revision_id",
-          "revision",
-          "fetched_at",
-          "bar"
-        ],
-        "title": "StoredBar"
-      },
-      "Stream-Input": {
-        "properties": {
-          "source": {
-            "type": "string",
-            "enum": [
-              "fixture",
-              "binance"
-            ],
-            "title": "Source"
-          },
-          "symbol": {
-            "type": "string",
-            "enum": [
-              "BTCUSDT",
-              "ETHUSDT"
-            ],
-            "title": "Symbol"
-          },
-          "timeframe": {
-            "type": "string",
-            "enum": [
-              "5m",
-              "15m",
-              "1h",
-              "4h",
-              "1d"
-            ],
-            "title": "Timeframe"
-          },
-          "venue": {
-            "type": "string",
-            "const": "binance-spot",
-            "title": "Venue",
-            "default": "binance-spot"
-          },
-          "market_session": {
-            "type": "string",
-            "const": "24/7",
-            "title": "Market Session",
-            "default": "24/7"
-          },
-          "timezone": {
-            "type": "string",
-            "const": "UTC",
-            "title": "Timezone",
-            "default": "UTC"
-          },
-          "quote_currency": {
-            "type": "string",
-            "const": "USDT",
-            "title": "Quote Currency",
-            "default": "USDT"
-          },
-          "base_currency": {
-            "type": "string",
-            "enum": [
-              "BTC",
-              "ETH"
-            ],
-            "title": "Base Currency",
-            "default": "BTC"
-          },
-          "price_encoding": {
-            "type": "string",
-            "const": "decimal_string_18_places",
-            "title": "Price Encoding",
-            "default": "decimal_string_18_places"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "source",
-          "symbol",
-          "timeframe"
-        ],
-        "title": "Stream"
-      },
-      "Stream-Output": {
-        "properties": {
-          "source": {
-            "type": "string",
-            "enum": [
-              "fixture",
-              "binance"
-            ],
-            "title": "Source"
-          },
-          "symbol": {
-            "type": "string",
-            "enum": [
-              "BTCUSDT",
-              "ETHUSDT"
-            ],
-            "title": "Symbol"
-          },
-          "timeframe": {
-            "type": "string",
-            "enum": [
-              "5m",
-              "15m",
-              "1h",
-              "4h",
-              "1d"
-            ],
-            "title": "Timeframe"
-          },
-          "venue": {
-            "type": "string",
-            "const": "binance-spot",
-            "title": "Venue",
-            "default": "binance-spot"
-          },
-          "market_session": {
-            "type": "string",
-            "const": "24/7",
-            "title": "Market Session",
-            "default": "24/7"
-          },
-          "timezone": {
-            "type": "string",
-            "const": "UTC",
-            "title": "Timezone",
-            "default": "UTC"
-          },
-          "quote_currency": {
-            "type": "string",
-            "const": "USDT",
-            "title": "Quote Currency",
-            "default": "USDT"
-          },
-          "base_currency": {
-            "type": "string",
-            "enum": [
-              "BTC",
-              "ETH"
-            ],
-            "title": "Base Currency",
-            "default": "BTC"
-          },
-          "price_encoding": {
-            "type": "string",
-            "const": "decimal_string_18_places",
-            "title": "Price Encoding",
-            "default": "decimal_string_18_places"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "source",
-          "symbol",
-          "timeframe",
-          "venue",
-          "market_session",
-          "timezone",
-          "quote_currency",
-          "base_currency",
-          "price_encoding"
-        ],
-        "title": "Stream"
-      },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
-          }
-        },
-        "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError"
-      },
-      "Workspace": {
-        "properties": {
-          "stream": {
-            "$ref": "#/components/schemas/Stream-Output"
-          },
-          "checked_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Checked At"
-          },
-          "current_state": {
-            "type": "string",
-            "enum": [
-              "fresh",
-              "delayed",
-              "stale",
-              "unavailable",
-              "simulated"
-            ],
-            "title": "Current State"
-          },
-          "snapshot": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Analysis"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "latest_job": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Job"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "refresh_job": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Job"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "schedule": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Schedule"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "stream",
-          "checked_at",
-          "current_state",
-          "snapshot",
-          "latest_job",
-          "refresh_job",
-          "schedule"
-        ],
-        "title": "Workspace"
-      },
-      "SyncRequest": {
-        "properties": {
-          "account_id": {
-            "type": "string",
-            "pattern": "^[0-9]+$",
-            "title": "Account Id"
-          },
-          "start": {
-            "type": "string",
-            "format": "date",
-            "title": "Start"
-          },
-          "end": {
-            "type": "string",
-            "format": "date",
-            "title": "End"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "account_id",
-          "start",
-          "end"
-        ],
-        "title": "SyncRequest"
-      },
-      "PortfolioCapture": {
-        "properties": {
-          "source": {
-            "type": "string",
-            "enum": [
-              "demo",
-              "moomoo"
-            ],
-            "title": "Source"
-          },
-          "account_id": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Account Id"
-          },
-          "captured_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Captured At"
-          },
-          "snapshot_observed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Observed At"
-          },
-          "base_currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Base Currency",
-            "default": "USD"
-          },
-          "positions": {
-            "items": {
-              "$ref": "#/components/schemas/Position"
-            },
-            "type": "array",
-            "title": "Positions"
-          },
-          "instruments": {
-            "items": {
-              "$ref": "#/components/schemas/Instrument-Output"
-            },
-            "type": "array",
-            "title": "Instruments"
-          },
-          "quotes": {
-            "items": {
-              "$ref": "#/components/schemas/Quote-Output"
-            },
-            "type": "array",
-            "title": "Quotes"
-          },
-          "fx": {
-            "items": {
-              "$ref": "#/components/schemas/FxRate"
-            },
-            "type": "array",
-            "title": "Fx"
-          },
-          "raw": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Raw"
-          },
-          "errors": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Errors"
-          },
-          "history_start": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "History Start"
-          },
-          "history_end": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "History End"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "source",
-          "account_id",
-          "captured_at",
-          "snapshot_observed_at",
-          "base_currency",
-          "positions",
-          "instruments",
-          "quotes",
-          "fx",
-          "raw",
-          "errors",
-          "history_start",
-          "history_end"
-        ],
-        "title": "PortfolioCapture"
-      },
-      "Position": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "title": "Code"
-          },
-          "quantity": {
-            "type": "string",
-            "title": "Quantity"
-          },
-          "mark": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mark"
-          },
-          "observed_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Observed At"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "code",
-          "quantity",
-          "mark",
-          "observed_at"
-        ],
-        "title": "Position"
-      },
-      "Instrument-Output": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Code"
-          },
-          "underlying": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Underlying"
-          },
           "kind": {
             "type": "string",
             "enum": [
-              "stock",
-              "call",
-              "put"
+              "buy_open",
+              "sell_open",
+              "buy_close",
+              "sell_close",
+              "expire",
+              "assign",
+              "exercise",
+              "cash_settle"
             ],
             "title": "Kind"
           },
-          "currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Currency"
-          },
-          "multiplier": {
-            "type": "string",
-            "title": "Multiplier"
-          },
-          "strike": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strike"
-          },
-          "expiry": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expiry"
-          },
-          "source": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Source"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "code",
-          "underlying",
-          "kind",
-          "currency",
-          "multiplier",
-          "strike",
-          "expiry",
-          "source"
-        ],
-        "title": "Instrument"
-      },
-      "Quote-Output": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "title": "Code"
-          },
-          "spot": {
-            "type": "string",
-            "title": "Spot"
-          },
-          "delta": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Delta"
-          },
-          "gamma": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Gamma"
-          },
-          "theta": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theta"
-          },
-          "vega": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vega"
-          },
-          "units": {
-            "type": "string",
-            "enum": [
-              "per_share",
-              "per_contract"
-            ],
-            "title": "Units"
-          },
-          "theta_basis": {
-            "type": "string",
-            "enum": [
-              "day",
-              "year"
-            ],
-            "title": "Theta Basis"
-          },
-          "vega_basis": {
-            "type": "string",
-            "enum": [
-              "percentage_point",
-              "unit_volatility"
-            ],
-            "title": "Vega Basis"
-          },
-          "observed_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Observed At"
-          },
-          "source": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Source"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "code",
-          "spot",
-          "delta",
-          "gamma",
-          "theta",
-          "vega",
-          "units",
-          "theta_basis",
-          "vega_basis",
-          "observed_at",
-          "source"
-        ],
-        "title": "Quote"
-      },
-      "FxRate": {
-        "properties": {
-          "currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Currency"
-          },
-          "to_base": {
-            "type": "string",
-            "title": "To Base"
-          },
-          "observed_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Observed At"
-          },
-          "source": {
-            "type": "string",
-            "title": "Source"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "currency",
-          "to_base",
-          "observed_at",
-          "source"
-        ],
-        "title": "FxRate"
-      },
-      "PortfolioWorkspace": {
-        "properties": {
-          "capture": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PortfolioCapture"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "cycles": {
-            "items": {
-              "$ref": "#/components/schemas/CycleResult"
-            },
-            "type": "array",
-            "title": "Cycles"
-          },
-          "risk": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RiskResult"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "records": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Records"
-          },
-          "audit": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Audit"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "available",
-              "stale",
-              "unavailable",
-              "simulated"
-            ],
-            "title": "State"
-          },
-          "issues": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Issues"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "capture",
-          "cycles",
-          "risk",
-          "records",
-          "audit",
-          "state",
-          "issues"
-        ],
-        "title": "PortfolioWorkspace"
-      },
-      "CycleResult": {
-        "properties": {
-          "cycle": {
-            "$ref": "#/components/schemas/Cycle"
-          },
-          "method": {
-            "type": "string",
-            "title": "Method",
-            "default": "FIFO; option premiums realized separately; assignment shares at strike"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "empty",
-              "open",
-              "closed",
-              "incomplete"
-            ],
-            "title": "State"
-          },
-          "premium_received": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Premium Received"
-          },
-          "premium_paid": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Premium Paid"
-          },
-          "gross_cash_movement": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Gross Cash Movement"
-          },
-          "known_fees": {
-            "type": "string",
-            "title": "Known Fees"
-          },
-          "net_cash_movement": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Net Cash Movement"
-          },
-          "realized_gross": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Realized Gross"
-          },
-          "realized_net": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Realized Net"
-          },
-          "unrealized": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unrealized"
-          },
-          "lots": {
-            "items": {
-              "$ref": "#/components/schemas/Lot"
-            },
-            "type": "array",
-            "title": "Lots"
-          },
-          "events": {
-            "items": {
-              "$ref": "#/components/schemas/LedgerEvent-Output"
-            },
-            "type": "array",
-            "title": "Events"
-          },
-          "issues": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Issues"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "cycle",
-          "method",
-          "state",
-          "premium_received",
-          "premium_paid",
-          "gross_cash_movement",
-          "known_fees",
-          "net_cash_movement",
-          "realized_gross",
-          "realized_net",
-          "unrealized",
-          "lots",
-          "events",
-          "issues"
-        ],
-        "title": "CycleResult"
-      },
-      "Cycle": {
-        "properties": {
-          "cycle_id": {
-            "type": "string",
-            "title": "Cycle Id"
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "demo",
-              "moomoo"
-            ],
-            "title": "Source"
-          },
-          "account_id": {
-            "type": "string",
-            "title": "Account Id"
-          },
-          "underlying": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Underlying"
-          },
-          "currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Currency"
-          },
-          "name": {
-            "type": "string",
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Name"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "cycle_id",
-          "source",
-          "account_id",
-          "underlying",
-          "currency",
-          "name",
-          "created_at"
-        ],
-        "title": "Cycle"
-      },
-      "Lot": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "title": "Code"
+          "instrument": {
+            "$ref": "#/components/schemas/Instrument-Input"
           },
           "quantity": {
             "type": "string",
             "title": "Quantity"
           },
-          "entry_price": {
+          "price": {
             "type": "string",
-            "title": "Entry Price"
+            "title": "Price"
           },
-          "opening_event_id": {
+          "fee": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee"
+          },
+          "source_record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Id"
+          },
+          "settlement_record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlement Record Id"
+          },
+          "roll_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roll Group"
+          },
+          "evidence_issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Issues"
+          },
+          "author": {
             "type": "string",
-            "title": "Opening Event Id"
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Author"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "code",
+          "event_id",
+          "cycle_id",
+          "at",
+          "kind",
+          "instrument",
           "quantity",
-          "entry_price",
-          "opening_event_id"
+          "price",
+          "author",
+          "reason"
         ],
-        "title": "Lot"
+        "title": "LedgerEvent"
       },
       "LedgerEvent-Output": {
         "properties": {
@@ -2933,174 +3304,115 @@
         ],
         "title": "LedgerEvent"
       },
-      "RiskResult": {
+      "Lot": {
         "properties": {
-          "base_currency": {
+          "code": {
             "type": "string",
-            "title": "Base Currency"
+            "title": "Code"
           },
-          "evaluated_at": {
+          "quantity": {
             "type": "string",
-            "format": "date-time",
-            "title": "Evaluated At"
+            "title": "Quantity"
           },
-          "state": {
+          "entry_price": {
+            "type": "string",
+            "title": "Entry Price"
+          },
+          "opening_event_id": {
+            "type": "string",
+            "title": "Opening Event Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "quantity",
+          "entry_price",
+          "opening_event_id"
+        ],
+        "title": "Lot"
+      },
+      "MarketContext": {
+        "properties": {
+          "source": {
             "type": "string",
             "enum": [
-              "complete",
-              "partial",
-              "unavailable"
+              "fixture",
+              "binance",
+              "bybit"
             ],
-            "title": "State"
+            "title": "Source"
           },
-          "exposures": {
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "BTCUSDT",
+              "ETHUSDT",
+              "MUUSDT"
+            ],
+            "title": "Symbol"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "market_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Market At"
+          },
+          "knowledge_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Knowledge At"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "as_known",
+              "retrospective"
+            ],
+            "title": "Mode"
+          },
+          "config": {
+            "$ref": "#/components/schemas/DemarkConfig-Output"
+          },
+          "window": {
+            "type": "integer",
+            "title": "Window"
+          },
+          "timeframes": {
             "items": {
-              "$ref": "#/components/schemas/Exposure"
+              "$ref": "#/components/schemas/TimeframeContext"
             },
             "type": "array",
-            "title": "Exposures"
+            "title": "Timeframes"
           },
-          "dollar_delta": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dollar Delta"
+          "intraday": {
+            "$ref": "#/components/schemas/RegimeState"
           },
-          "theta_daily": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theta Daily"
-          },
-          "vega_point": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vega Point"
-          },
-          "issues": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Issues"
+          "swing": {
+            "$ref": "#/components/schemas/RegimeState"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "base_currency",
-          "evaluated_at",
-          "state",
-          "exposures",
-          "dollar_delta",
-          "theta_daily",
-          "vega_point",
-          "issues"
+          "source",
+          "symbol",
+          "checked_at",
+          "market_at",
+          "knowledge_at",
+          "mode",
+          "config",
+          "window",
+          "timeframes",
+          "intraday",
+          "swing"
         ],
-        "title": "RiskResult"
-      },
-      "Exposure": {
-        "properties": {
-          "underlying": {
-            "type": "string",
-            "title": "Underlying"
-          },
-          "currency": {
-            "type": "string",
-            "title": "Currency"
-          },
-          "share_delta": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Share Delta"
-          },
-          "share_gamma": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Share Gamma"
-          },
-          "theta_daily": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theta Daily"
-          },
-          "vega_point": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vega Point"
-          },
-          "dollar_delta_base": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dollar Delta Base"
-          },
-          "issues": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Issues"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "underlying",
-          "currency",
-          "share_delta",
-          "share_gamma",
-          "theta_daily",
-          "vega_point",
-          "dollar_delta_base",
-          "issues"
-        ],
-        "title": "Exposure"
+        "title": "MarketContext"
       },
       "NewCycle": {
         "properties": {
@@ -3147,49 +3459,135 @@
         ],
         "title": "NewCycle"
       },
-      "LedgerEvent-Input": {
+      "NewTrend": {
         "properties": {
-          "event_id": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Event Id"
+          "present": {
+            "type": "boolean",
+            "title": "Present"
           },
-          "cycle_id": {
+          "trend": {
             "type": "string",
-            "title": "Cycle Id"
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Trend"
           },
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "title": "Confirmed"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "present",
+          "trend",
+          "step",
+          "confirmed",
+          "seconds"
+        ],
+        "title": "NewTrend"
+      },
+      "NextBarNeeds": {
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "above",
+              "below"
+            ],
+            "title": "Direction"
+          },
+          "price": {
+            "type": "string",
+            "title": "Price"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "direction",
+          "price"
+        ],
+        "title": "NextBarNeeds"
+      },
+      "NextCondition": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "enum": [
+              "close",
+              "low",
+              "high"
+            ],
+            "title": "Field"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "<",
+              ">",
+              "<=",
+              ">="
+            ],
+            "title": "Operator"
+          },
+          "threshold": {
+            "type": "string",
+            "title": "Threshold"
+          },
+          "reference": {
+            "$ref": "#/components/schemas/BarRef"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "setup",
+              "countdown",
+              "qualification13"
+            ],
+            "title": "Purpose"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "field",
+          "operator",
+          "threshold",
+          "reference",
+          "purpose"
+        ],
+        "title": "NextCondition"
+      },
+      "Point": {
+        "properties": {
           "at": {
             "type": "string",
             "format": "date-time",
             "title": "At"
           },
-          "kind": {
+          "revision_id": {
             "type": "string",
-            "enum": [
-              "buy_open",
-              "sell_open",
-              "buy_close",
-              "sell_close",
-              "expire",
-              "assign",
-              "exercise",
-              "cash_settle"
-            ],
-            "title": "Kind"
+            "title": "Revision Id"
           },
-          "instrument": {
-            "$ref": "#/components/schemas/Instrument-Input"
-          },
-          "quantity": {
-            "type": "string",
-            "title": "Quantity"
-          },
-          "price": {
-            "type": "string",
-            "title": "Price"
-          },
-          "fee": {
+          "sma": {
             "anyOf": [
               {
                 "type": "string"
@@ -3198,9 +3596,9 @@
                 "type": "null"
               }
             ],
-            "title": "Fee"
+            "title": "Sma"
           },
-          "source_record_id": {
+          "prior_high": {
             "anyOf": [
               {
                 "type": "string"
@@ -3209,9 +3607,9 @@
                 "type": "null"
               }
             ],
-            "title": "Source Record Id"
+            "title": "Prior High"
           },
-          "settlement_record_id": {
+          "prior_low": {
             "anyOf": [
               {
                 "type": "string"
@@ -3220,129 +3618,21 @@
                 "type": "null"
               }
             ],
-            "title": "Settlement Record Id"
-          },
-          "roll_group": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Roll Group"
-          },
-          "evidence_issues": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Evidence Issues"
-          },
-          "author": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Author"
-          },
-          "reason": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Reason"
+            "title": "Prior Low"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "event_id",
-          "cycle_id",
           "at",
-          "kind",
-          "instrument",
-          "quantity",
-          "price",
-          "author",
-          "reason"
+          "revision_id",
+          "sma",
+          "prior_high",
+          "prior_low"
         ],
-        "title": "LedgerEvent"
+        "title": "Point"
       },
-      "Instrument-Input": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Code"
-          },
-          "underlying": {
-            "type": "string",
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Underlying"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "stock",
-              "call",
-              "put"
-            ],
-            "title": "Kind"
-          },
-          "currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Currency"
-          },
-          "multiplier": {
-            "type": "string",
-            "title": "Multiplier"
-          },
-          "strike": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strike"
-          },
-          "expiry": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expiry"
-          },
-          "source": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Source"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "code",
-          "underlying",
-          "kind",
-          "currency",
-          "multiplier",
-          "source"
-        ],
-        "title": "Instrument"
-      },
-      "Annotation": {
+      "PortfolioCapture": {
         "properties": {
           "source": {
             "type": "string",
@@ -3358,47 +3648,92 @@
             "minLength": 1,
             "title": "Account Id"
           },
-          "author": {
+          "captured_at": {
             "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Author"
+            "format": "date-time",
+            "title": "Captured At"
           },
-          "reason": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Reason"
-          },
-          "instrument": {
+          "snapshot_observed_at": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Instrument-Input"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Snapshot Observed At"
           },
-          "quote": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Quote-Input"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "base_currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Base Currency",
+            "default": "USD"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/Position"
+            },
+            "type": "array",
+            "title": "Positions"
+          },
+          "instruments": {
+            "items": {
+              "$ref": "#/components/schemas/Instrument-Output"
+            },
+            "type": "array",
+            "title": "Instruments"
+          },
+          "quotes": {
+            "items": {
+              "$ref": "#/components/schemas/Quote-Output"
+            },
+            "type": "array",
+            "title": "Quotes"
           },
           "fx": {
+            "items": {
+              "$ref": "#/components/schemas/FxRate"
+            },
+            "type": "array",
+            "title": "Fx"
+          },
+          "raw": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Raw"
+          },
+          "errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Errors"
+          },
+          "history_start": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/FxRate"
+                "type": "string",
+                "format": "date"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "History Start"
+          },
+          "history_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History End"
           }
         },
         "additionalProperties": false,
@@ -3406,10 +3741,165 @@
         "required": [
           "source",
           "account_id",
-          "author",
-          "reason"
+          "captured_at",
+          "snapshot_observed_at",
+          "base_currency",
+          "positions",
+          "instruments",
+          "quotes",
+          "fx",
+          "raw",
+          "errors",
+          "history_start",
+          "history_end"
         ],
-        "title": "Annotation"
+        "title": "PortfolioCapture"
+      },
+      "PortfolioWorkspace": {
+        "properties": {
+          "capture": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PortfolioCapture"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cycles": {
+            "items": {
+              "$ref": "#/components/schemas/CycleResult"
+            },
+            "type": "array",
+            "title": "Cycles"
+          },
+          "risk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RiskResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "records": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Records"
+          },
+          "audit": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Audit"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "stale",
+              "unavailable",
+              "simulated"
+            ],
+            "title": "State"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "capture",
+          "cycles",
+          "risk",
+          "records",
+          "audit",
+          "state",
+          "issues"
+        ],
+        "title": "PortfolioWorkspace"
+      },
+      "Position": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "quantity": {
+            "type": "string",
+            "title": "Quantity"
+          },
+          "mark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mark"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "quantity",
+          "mark",
+          "observed_at"
+        ],
+        "title": "Position"
+      },
+      "PrevCountdown": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "countdown": {
+            "type": "integer",
+            "title": "Countdown"
+          },
+          "qualified": {
+            "type": "boolean",
+            "title": "Qualified"
+          },
+          "bars_ago": {
+            "type": "integer",
+            "title": "Bars Ago"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "side",
+          "countdown",
+          "qualified",
+          "bars_ago"
+        ],
+        "title": "PrevCountdown"
       },
       "Quote-Input": {
         "properties": {
@@ -3514,55 +4004,17 @@
         ],
         "title": "Quote"
       },
-      "FeeCorrection": {
+      "Quote-Output": {
         "properties": {
-          "event_id": {
+          "code": {
             "type": "string",
-            "title": "Event Id"
+            "title": "Code"
           },
-          "fee": {
+          "spot": {
             "type": "string",
-            "title": "Fee"
+            "title": "Spot"
           },
-          "author": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Author"
-          },
-          "reason": {
-            "type": "string",
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Reason"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "event_id",
-          "fee",
-          "author",
-          "reason"
-        ],
-        "title": "FeeCorrection"
-      },
-      "FillReconciliation": {
-        "properties": {
-          "event_id": {
-            "type": "string",
-            "title": "Event Id"
-          },
-          "record_id": {
-            "type": "string",
-            "title": "Record Id"
-          },
-          "at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "At"
-          },
-          "fee": {
+          "delta": {
             "anyOf": [
               {
                 "type": "string"
@@ -3571,31 +4023,1057 @@
                 "type": "null"
               }
             ],
-            "title": "Fee"
+            "title": "Delta"
           },
-          "author": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Author"
+          "gamma": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gamma"
           },
-          "reason": {
+          "theta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta"
+          },
+          "vega": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vega"
+          },
+          "units": {
             "type": "string",
-            "maxLength": 500,
+            "enum": [
+              "per_share",
+              "per_contract"
+            ],
+            "title": "Units"
+          },
+          "theta_basis": {
+            "type": "string",
+            "enum": [
+              "day",
+              "year"
+            ],
+            "title": "Theta Basis"
+          },
+          "vega_basis": {
+            "type": "string",
+            "enum": [
+              "percentage_point",
+              "unit_volatility"
+            ],
+            "title": "Vega Basis"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 200,
             "minLength": 1,
-            "title": "Reason"
+            "title": "Source"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "event_id",
-          "record_id",
-          "at",
-          "author",
-          "reason"
+          "code",
+          "spot",
+          "delta",
+          "gamma",
+          "theta",
+          "vega",
+          "units",
+          "theta_basis",
+          "vega_basis",
+          "observed_at",
+          "source"
         ],
-        "title": "FillReconciliation"
+        "title": "Quote"
+      },
+      "RegimeState": {
+        "properties": {
+          "anchor": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Anchor"
+          },
+          "value": {
+            "type": "string",
+            "enum": [
+              "decay",
+              "rev",
+              "pump",
+              "none",
+              "unavailable"
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "anchor",
+          "value"
+        ],
+        "title": "RegimeState"
+      },
+      "RiskResult": {
+        "properties": {
+          "base_currency": {
+            "type": "string",
+            "title": "Base Currency"
+          },
+          "evaluated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Evaluated At"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "unavailable"
+            ],
+            "title": "State"
+          },
+          "exposures": {
+            "items": {
+              "$ref": "#/components/schemas/Exposure"
+            },
+            "type": "array",
+            "title": "Exposures"
+          },
+          "dollar_delta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dollar Delta"
+          },
+          "theta_daily": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta Daily"
+          },
+          "vega_point": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vega Point"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "base_currency",
+          "evaluated_at",
+          "state",
+          "exposures",
+          "dollar_delta",
+          "theta_daily",
+          "vega_point",
+          "issues"
+        ],
+        "title": "RiskResult"
+      },
+      "Round": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "trend": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Trend"
+          },
+          "setup": {
+            "type": "integer",
+            "title": "Setup"
+          },
+          "countdown": {
+            "type": "integer",
+            "title": "Countdown"
+          },
+          "setup9_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup9 At"
+          },
+          "qualified13_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualified13 At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "side",
+          "trend",
+          "setup",
+          "countdown",
+          "setup9_at",
+          "qualified13_at"
+        ],
+        "title": "Round"
+      },
+      "Rules-Input": {
+        "properties": {
+          "engine_version": {
+            "type": "string",
+            "const": "baseline-v1",
+            "title": "Engine Version",
+            "default": "baseline-v1"
+          },
+          "window": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 2.0,
+            "title": "Window",
+            "default": 20
+          },
+          "demark": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemarkConfig-Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Rules"
+      },
+      "Rules-Output": {
+        "properties": {
+          "engine_version": {
+            "type": "string",
+            "const": "baseline-v1",
+            "title": "Engine Version",
+            "default": "baseline-v1"
+          },
+          "window": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 2.0,
+            "title": "Window",
+            "default": 20
+          },
+          "demark": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemarkConfig-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "engine_version",
+          "window",
+          "demark"
+        ],
+        "title": "Rules"
+      },
+      "Schedule": {
+        "properties": {
+          "schedule_id": {
+            "type": "string",
+            "title": "Schedule Id"
+          },
+          "request": {
+            "$ref": "#/components/schemas/ScheduleRequest-Output"
+          },
+          "next_due": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next Due"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schedule_id",
+          "request",
+          "next_due"
+        ],
+        "title": "Schedule"
+      },
+      "ScheduleRequest-Input": {
+        "properties": {
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Input"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/Rules-Input"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "enabled"
+        ],
+        "title": "ScheduleRequest"
+      },
+      "ScheduleRequest-Output": {
+        "properties": {
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Output"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/Rules-Output"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "rules",
+          "enabled"
+        ],
+        "title": "ScheduleRequest"
+      },
+      "SecondSetup": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "trend": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Trend"
+          },
+          "step": {
+            "type": "integer",
+            "title": "Step"
+          },
+          "setup9_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup9 At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "side",
+          "trend",
+          "step",
+          "setup9_at"
+        ],
+        "title": "SecondSetup"
+      },
+      "ServiceStatus": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "const": "wheelhouse-python",
+            "title": "Service"
+          },
+          "status": {
+            "type": "string",
+            "const": "ready",
+            "title": "Status"
+          },
+          "contract_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Contract Version"
+          },
+          "service_version": {
+            "type": "string",
+            "title": "Service Version"
+          },
+          "python_version": {
+            "type": "string",
+            "title": "Python Version"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true,
+            "title": "Read Only"
+          },
+          "integrations": {
+            "$ref": "#/components/schemas/Integrations"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "service",
+          "status",
+          "contract_version",
+          "service_version",
+          "python_version",
+          "checked_at",
+          "read_only",
+          "integrations",
+          "capabilities"
+        ],
+        "title": "ServiceStatus"
+      },
+      "SetupRun": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "completed": {
+            "type": "boolean",
+            "title": "Completed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "start",
+          "side",
+          "count",
+          "active",
+          "completed"
+        ],
+        "title": "SetupRun"
+      },
+      "Signal": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "N"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "base_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Level"
+          },
+          "intraday_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intraday Level"
+          },
+          "swing_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Swing Level"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "n",
+          "side",
+          "active",
+          "price",
+          "base_level",
+          "intraday_level",
+          "swing_level"
+        ],
+        "title": "Signal"
+      },
+      "SignalRef": {
+        "properties": {
+          "kind": {
+            "type": "integer",
+            "enum": [
+              9,
+              13
+            ],
+            "title": "Kind"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "at",
+          "side"
+        ],
+        "title": "SignalRef"
+      },
+      "SnapshotSummary": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "market_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Market At"
+          },
+          "knowledge_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Knowledge At"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/Rules-Output"
+          },
+          "data_state": {
+            "type": "string",
+            "title": "Data State"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "bar_count": {
+            "type": "integer",
+            "title": "Bar Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "created_at",
+          "market_at",
+          "knowledge_at",
+          "rules",
+          "data_state",
+          "mode",
+          "bar_count"
+        ],
+        "title": "SnapshotSummary"
+      },
+      "StorageStats": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "batches": {
+            "type": "integer",
+            "title": "Batches"
+          },
+          "revisions": {
+            "type": "integer",
+            "title": "Revisions"
+          },
+          "snapshots": {
+            "type": "integer",
+            "title": "Snapshots"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schema_version",
+          "batches",
+          "revisions",
+          "snapshots"
+        ],
+        "title": "StorageStats"
+      },
+      "StoredBar": {
+        "properties": {
+          "revision_id": {
+            "type": "string",
+            "title": "Revision Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "bar": {
+            "$ref": "#/components/schemas/Bar"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision_id",
+          "revision",
+          "fetched_at",
+          "bar"
+        ],
+        "title": "StoredBar"
+      },
+      "Stream-Input": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "binance",
+              "bybit"
+            ],
+            "title": "Source"
+          },
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "BTCUSDT",
+              "ETHUSDT",
+              "MUUSDT"
+            ],
+            "title": "Symbol"
+          },
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe"
+          },
+          "venue": {
+            "type": "string",
+            "enum": [
+              "binance-spot",
+              "binance-usdm-perpetual",
+              "bybit-spot"
+            ],
+            "title": "Venue",
+            "default": "binance-usdm-perpetual"
+          },
+          "market_session": {
+            "type": "string",
+            "const": "24/7",
+            "title": "Market Session",
+            "default": "24/7"
+          },
+          "timezone": {
+            "type": "string",
+            "const": "UTC",
+            "title": "Timezone",
+            "default": "UTC"
+          },
+          "quote_currency": {
+            "type": "string",
+            "const": "USDT",
+            "title": "Quote Currency",
+            "default": "USDT"
+          },
+          "base_currency": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "MU"
+            ],
+            "title": "Base Currency",
+            "default": "BTC"
+          },
+          "price_encoding": {
+            "type": "string",
+            "const": "decimal_string_18_places",
+            "title": "Price Encoding",
+            "default": "decimal_string_18_places"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "symbol",
+          "timeframe"
+        ],
+        "title": "Stream"
+      },
+      "Stream-Output": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "binance",
+              "bybit"
+            ],
+            "title": "Source"
+          },
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "BTCUSDT",
+              "ETHUSDT",
+              "MUUSDT"
+            ],
+            "title": "Symbol"
+          },
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe"
+          },
+          "venue": {
+            "type": "string",
+            "enum": [
+              "binance-spot",
+              "binance-usdm-perpetual",
+              "bybit-spot"
+            ],
+            "title": "Venue",
+            "default": "binance-usdm-perpetual"
+          },
+          "market_session": {
+            "type": "string",
+            "const": "24/7",
+            "title": "Market Session",
+            "default": "24/7"
+          },
+          "timezone": {
+            "type": "string",
+            "const": "UTC",
+            "title": "Timezone",
+            "default": "UTC"
+          },
+          "quote_currency": {
+            "type": "string",
+            "const": "USDT",
+            "title": "Quote Currency",
+            "default": "USDT"
+          },
+          "base_currency": {
+            "type": "string",
+            "enum": [
+              "BTC",
+              "ETH",
+              "MU"
+            ],
+            "title": "Base Currency",
+            "default": "BTC"
+          },
+          "price_encoding": {
+            "type": "string",
+            "const": "decimal_string_18_places",
+            "title": "Price Encoding",
+            "default": "decimal_string_18_places"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "symbol",
+          "timeframe",
+          "venue",
+          "market_session",
+          "timezone",
+          "quote_currency",
+          "base_currency",
+          "price_encoding"
+        ],
+        "title": "Stream"
+      },
+      "SummaryRisk": {
+        "properties": {
+          "risk9": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk9"
+          },
+          "risk9_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk9 At"
+          },
+          "setup_close": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup Close"
+          },
+          "risk_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Level"
+          },
+          "risk13_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk13 At"
+          },
+          "provisional": {
+            "type": "boolean",
+            "title": "Provisional"
+          },
+          "close13": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close13"
+          },
+          "tdst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tdst"
+          },
+          "next_bar_needs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NextBarNeeds"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "risk9",
+          "risk9_at",
+          "setup_close",
+          "risk_level",
+          "risk13_at",
+          "provisional",
+          "close13",
+          "tdst",
+          "next_bar_needs"
+        ],
+        "title": "SummaryRisk"
       },
       "SyncJob": {
         "properties": {
@@ -3681,6 +5159,346 @@
           "error"
         ],
         "title": "SyncJob"
+      },
+      "SyncRequest": {
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "title": "Account Id"
+          },
+          "start": {
+            "type": "string",
+            "format": "date",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date",
+            "title": "End"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "account_id",
+          "start",
+          "end"
+        ],
+        "title": "SyncRequest"
+      },
+      "TimeframeContext": {
+        "properties": {
+          "timeframe": {
+            "type": "string",
+            "enum": [
+              "5m",
+              "15m",
+              "1h",
+              "4h",
+              "1d"
+            ],
+            "title": "Timeframe"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale",
+              "unavailable",
+              "simulated"
+            ],
+            "title": "Status"
+          },
+          "bars_used": {
+            "type": "integer",
+            "title": "Bars Used"
+          },
+          "history_complete": {
+            "type": "boolean",
+            "title": "History Complete"
+          },
+          "history_gapped": {
+            "type": "boolean",
+            "title": "History Gapped"
+          },
+          "last_closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Closed At"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemarkSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimeframeState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/Signal"
+            },
+            "type": "array",
+            "title": "Signals"
+          },
+          "new_trend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NewTrend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "timeframe",
+          "status",
+          "bars_used",
+          "history_complete",
+          "history_gapped",
+          "last_closed_at",
+          "summary",
+          "state",
+          "signals",
+          "new_trend"
+        ],
+        "title": "TimeframeContext"
+      },
+      "TimeframeState": {
+        "properties": {
+          "s9": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "none"
+            ],
+            "title": "S9"
+          },
+          "s13": {
+            "type": "boolean",
+            "title": "S13"
+          },
+          "carry13": {
+            "type": "boolean",
+            "title": "Carry13"
+          },
+          "countdown": {
+            "type": "integer",
+            "title": "Countdown"
+          },
+          "setup9_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup9 At"
+          },
+          "qualified13_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualified13 At"
+          },
+          "setup9_seconds_ago": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setup9 Seconds Ago"
+          },
+          "qualified13_seconds_ago": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualified13 Seconds Ago"
+          },
+          "beyond_risk9": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beyond Risk9"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "s9",
+          "s13",
+          "carry13",
+          "countdown",
+          "setup9_at",
+          "qualified13_at",
+          "setup9_seconds_ago",
+          "qualified13_seconds_ago",
+          "beyond_risk9"
+        ],
+        "title": "TimeframeState"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Workspace": {
+        "properties": {
+          "stream": {
+            "$ref": "#/components/schemas/Stream-Output"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "current_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale",
+              "unavailable",
+              "simulated"
+            ],
+            "title": "Current State"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Analysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest_job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Job"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refresh_job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Job"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "checked_at",
+          "current_state",
+          "snapshot",
+          "latest_job",
+          "refresh_job",
+          "schedule"
+        ],
+        "title": "Workspace"
       }
     }
   }

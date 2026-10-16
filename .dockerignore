@@ -10,6 +10,8 @@
 !integrations/wealthfolio/overlay/
 !integrations/wealthfolio/overlay/**
 !services/
+!services/wallet-auth/
+!services/wallet-auth/**
 !services/analytics/
 !services/analytics/pyproject.toml
 !services/analytics/requirements.lock
@@ -19,3 +21,5 @@
 **/*.pyc
 **/*.sqlite*
 **/.env*
+**/node_modules/**
+**/dist/**

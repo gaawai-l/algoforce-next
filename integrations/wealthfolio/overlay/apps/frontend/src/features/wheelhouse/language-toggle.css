@@ -1,0 +1,28 @@
+.wh-lang {
+  display: inline-flex;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.wh-lang button {
+  min-height: 32px;
+  min-width: 52px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  padding: 4px 10px;
+  font: 600 12px/1 Inter, sans-serif;
+  cursor: pointer;
+}
+.wh-lang button + button {
+  border-left: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+}
+.wh-lang button[aria-pressed="true"] {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: #5df8d5;
+}
+.wh-lang button:focus-visible {
+  outline: 2px solid #5df8d5;
+  outline-offset: -2px;
+}

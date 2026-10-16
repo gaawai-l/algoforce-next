@@ -1,69 +1,68 @@
 # AlgoForceNext
 
-## Purpose and current state
+## 语言（最高优先级）
 
-Build a personal, read-only investment workspace for a moomoo Singapore account: stock and option portfolio tracking, Wheel strategy accounting, portfolio Greeks, and market analysis. The prototype brand is **Wheelhouse**.
+- 与用户对话：中文。
+- 代码、标识符、代码注释、commit message：英文。
+- 实现计划、spec（需求、设计、验收规范）及其他项目文档：中文；代码片段、标识符、API 名称保留英文。
+- 产品 UI 沿用已确认的英文界面，不改变上述规则。
 
-This workspace currently contains research and disposable HTML/CSS/JavaScript prototypes. It is not a deployed product or a Wealthfolio checkout. Wealthfolio is the preferred reuse candidate, but an addon, fork, or separate companion app has not been selected. Prefer extending existing software and data libraries over rebuilding them; validate integration seams before committing to an architecture.
+## 项目背景与边界
 
-## Working agreements
+Sirius（天狼星）是当前开发代号，面向 moomoo 新加坡账户的个人只读投资工作台，涵盖股票与期权持仓、Wheel 策略记账、组合 Greeks 和市场分析。
 
-- Communicate with the user in Chinese. Write product UI, code, and code comments in English.
-- Carry authorized local work through implementation and relevant verification. Resolve routine choices using established context; ask only when missing information materially changes scope, correctness, or an external commitment.
-- Treat the latest explicit user direction as authoritative over earlier prototypes and skill suggestions, subject to system and developer instructions. A design correction should apply across the shared app shell, not just the visible page.
-- Use relevant installed skills when their triggers match. Do not invoke Superpowers skills. If a skill would block authorized work, identify the exact instruction and explain why it applies rather than inventing an approval requirement.
-- Preserve files and directories. Do not delete them or use destructive deletion commands. If removal is necessary, ask the user to do it manually. Preserve superseded prototypes as clearly labeled references.
-- Report the concrete result, verification performed, and remaining limitations. Separate implemented behavior, observed external capabilities, and unverified assumptions.
+当前实现基于 Wealthfolio 前端 overlay 与 Python analytics 服务，已部署独立 Coolify test 环境。历史 HTML/CSS/JavaScript 原型（`prototypes/`）仅作参考；正式实现以 `integrations/wealthfolio`、`services/analytics` 和项目脚本为准。
 
-## Brokerage boundary
+- 账户能力限于只读分析，不实现下单、改单、撤单、交易解锁或自动执行。
+- 真实账单、持仓、截图与凭据不进入公开产物、演示数据或日志；账户连接不代表允许向无关外部服务发送金融数据。
+- 明确区分模拟数据、真实数据和未实现的集成；缺失或过期数据不能伪装为零值或实时数据，也不用 mock/fake 数据做运行时兜底。
+- 保留文件和目录；需要移除时请用户手动删除。
+- `.env` 与密钥不提交；只在用户要求时才 commit / push，在 main 上先开分支。
 
-- Account access is **read-only analytics**. Do not implement or expose order placement, modification, cancellation, trade unlocking, or automated execution as part of this project.
-- Target the user's Singapore entity, `SecurityFirm.FUTUSG`, independently of the traded market. Select the actual account by `acc_id`; `REAL` means real account data, not permission to trade.
-- Prefer official moomoo OpenD and SDK query interfaces. The user signs in through official OpenD; local readers connect to the loopback gateway. Keep login credentials out of the app, chat, repository, and logs. Do not request or store a trading password for a read-only workflow.
-- Keep account collection separate from UI and analytics. A community MCP is optional and must be inspected for write tools, automatic unlocking, and account-region assumptions before adoption.
-- Read orders, executions, positions, cash flows, and fees as distinct records. Orders are not fills; positions are snapshots. Make repeated imports idempotent and preserve broker identifiers, currencies, timestamps, and source provenance.
-- Validate real account availability, historical coverage, and quote entitlements before claiming a working integration. Missing or stale data must remain visible rather than silently becoming zero or fabricated live values.
-- Keep real statements, holdings, screenshots, and credentials out of public artifacts and demo fixtures. Account connection does not authorize publishing financial data or sending it to unrelated external services.
+## 常用命令
 
-## Financial correctness
-
-- A Wheel cycle links short puts, assignment into stock, covered calls, and eventual closure; rolls retain their transaction history. Allow explicit cycle assignment when grouping is ambiguous.
-- Distinguish premiums received, realized P&L, unrealized P&L, and cash movement. Reconcile fees, assignment, exercise, and expiration without counting premiums twice. State the cost-basis method used.
-- Preserve currency, timezone, contract identity, signed position quantity, and the actual contract multiplier. The prototype's multiplier of 100 is a fixture, not a universal production rule. Use appropriate decimal precision for accounting.
-- Normalize provider Greeks before aggregation: sign, per-share versus per-contract units, multiplier, Theta time basis, and Vega per volatility percentage point. Display source and timestamp; distinguish quoted Greeks from model estimates.
-- Aggregate share-equivalent Delta and Gamma **per underlying**. Portfolio dollar Delta is the sum of each underlying's net Delta × spot price, converted to a common currency. Label beta-weighted exposure separately. Theta is sensitivity, not guaranteed income.
-- Label scenario assumptions and approximation limits. For production indicators, specify the actual calculation variant, input bars, market session, timezone, closed/forming-bar policy, and Fibonacci anchors; avoid look-ahead in historical views.
-
-## UI decisions already made
-
-- Use an English, dark cyberpunk interface: near-black surfaces, cyan primary accents, violet secondary accents, restrained glow, readable data, and visible keyboard focus. Use Orbitron for display headings, Inter for interface copy, and JetBrains Mono for financial values and telemetry.
-- Use **one shared left sidebar** for Overview, Wheel cycles, Risk exposure, and Market intelligence. On small screens, collapse that same navigation. Do not add a competing top-level page navigation.
-- Market intelligence follows the reference workflow: market/symbol selection → **TD Sequential / Key levels / Fibonacci tabs** → timeframe controls → one large chart with the selected method's details. Keep method tabs distinct from application navigation.
-- Do not restore the rejected three-method card grid, parallel charts, or market briefing layout. Use cards only where the information benefits from grouping; they are not the default container for every section.
-- Retain clear distinctions between Setup and Countdown, S/R clusters and their contributing methods/timeframes, and user-selected Fibonacci anchors. Do not present invented confluence scores as probabilities or fabricated summaries as live AI analysis.
-- Prototypes must clearly identify simulated data and unimplemented integrations. Prototype artifacts are design references, not production-ready accounting or indicator engines.
-
-## Workflows and completion
-
-- **Prototype/UI changes:** reuse the shared shell and established styles; inspect the changed screen in a browser, exercise the affected controls, and check a narrow viewport. Deliver a runnable preview and state what remains simulated. A request for design review is complete at a usable, reviewable prototype.
-- **Accounting, import, or risk changes:** use sanitized fixtures and independently check expected results for affected cases, such as partial fills, repeat imports, short options, assignment, fees, nonstandard multipliers, and cross-currency values. Reconcile against broker records when authorized data is available.
-- **Production changes:** inspect the actual stack and task scripts when they exist; run the relevant checks. The current prototype has no package-based test suite. Avoid inventing commands or adding tests that merely duplicate presentation code. Broaden checks only when changes or failures justify it.
-- **Research/integration choices:** follow claims to official docs, source, or releases and record the verification date. README claims, stale roadmaps, and a repository name alone do not establish support. Prefer existing libraries and official data over implementing pricing engines from scratch.
-
-Run the current prototype from this workspace root:
+从仓库根目录运行，以 `Makefile` 与 `scripts/foundation.py` 为准：
 
 ```sh
-python3 -m http.server 8765 --bind 127.0.0.1 --directory prototypes/wheel-dashboard
+make setup    # create the Python environment and install dependencies
+make dev      # run the analytics service and Wealthfolio overlay locally
+make check    # run the project checks
+make contract # re-export the OpenAPI contract and regenerate TypeScript types
+make verify-a5
 ```
 
-Portfolio: `http://127.0.0.1:8765/index.html?variant=A`.
-Market: `http://127.0.0.1:8765/market-prototype.html?tab=td9`.
-Reuse an existing running server when available.
+改动 `services/analytics/src/wheelhouse_service/contracts.py` 后必须运行 `make contract`。Python 测试位于 `services/analytics/tests`。
 
-## Read when relevant
+## 执行与完成
 
-- **Selecting the application base or a Wealthfolio extension:** [dashboard research](research/trading-dashboard-research-2026-09-26.md); use [option-specific candidates](research/options-dashboard-candidates.md) when comparing Wheel tools.
-- **Connecting moomoo or evaluating a broker MCP:** [official access research](research/moomoo-access-research-2026-09-26.md) and [MCP source review](research/moomoo-mcp-candidates.md). Recheck version-sensitive claims before implementation.
-- **Changing portfolio screens or demo calculations:** [prototype README](prototypes/wheel-dashboard/README.md). The active shared navigation is in `app-shell.js` and `app-shell.css` in that directory.
-- **Changing market analysis screens:** [market prototype notes](prototypes/wheel-dashboard/MARKET-PROTOTYPE.md), especially its final confirmed information hierarchy. Earlier variants and `market-layout-explorations.html` are historical references, not accepted designs.
-- **Revising these instructions:** [GPT-6 instruction-writing notes and official sources](research/gpt6-agents-md-guidance-2026-09-26.md). Keep stable project constraints here and task-specific detail in linked documents; do not require all documents to be read for every edit.
+已授权的本地工作持续做到可用、可评审：完成实现、相关验证以及发现问题的修复，无需逐步确认。只有缺失信息实质影响范围、正确性或外部承诺时才询问。先运行验证命令并看到输出，再声明完成。
+
+- **非平凡的基建/架构改动：**先写中文计划，独立复核后再执行。
+- **UI：**复用共享 shell；在浏览器检查改动页面、受影响控件和窄屏，交付可运行预览并说明模拟部分。
+- **记账、导入、风险：**用脱敏样例独立核对预期结果，覆盖本次涉及的金融边界（见金融领域规则）。
+- **正式实现：**验证范围与改动相称；检查通过后仅因新改动、失败或未解决问题追加检查。
+- **调研与选型：**依据官方文档、源码或发布记录，注明核验日期；区分已验证能力与待验证假设。
+- 改动保持外科手术式：只动必须动的，风格跟随现有代码，不顺手重构。
+
+## 已确认的 UI
+
+- 英文暗色赛博朋克：近黑底、青色主强调、紫色次强调、克制辉光、可读数据和清晰键盘焦点。标题用 Orbitron，界面文字用 Inter，金融数值用 JetBrains Mono。
+- Overview、Wheel cycles、Risk exposure、Market intelligence 共用一个左侧栏，小屏折叠同一导航。设计修正应用到共享 shell。
+- Market intelligence：市场/标的 → TD Sequential / Key levels / Fibonacci 方法 tabs → 周期控件 → 一张大图与当前方法详情。方法 tabs 与应用导航分开；三方法卡片网格、并排图表和市场简报布局是已否定的方案。
+
+## 当前市场数据约定
+
+市场页默认 `method=td`。BTCUSDT 固定 Bybit 现货（`/v5/market/kline?category=spot`）；ETHUSDT、MUUSDT 保持 Binance USDⓈ-M USDT 永续（`/fapi/v1/klines`）。各来源/市场使用独立 venue；界面不提供 fixture 或现货切换，不使用假数据回退。主图与跨周期数据自动刷新，保留缺失/过期状态。
+
+## 按任务读取
+
+仅加载当前任务相关资料；以下是入口，不是每次修改前的必读清单。
+
+- **发布 test、修改部署或回滚：**[发布流程](docs/deployment/RELEASING.md)。沿用独立发布分支和 Coolify 服务器构建；仅集成已完成并验证的提交，交付时记录实际部署 SHA 与外网验收结果。开发完成本身不触发发布。
+- **钱包登录、白名单或会话：**[钱包登录需求](docs/deployment/AUTH-REQUIREMENTS.md)、[认证服务说明](services/wallet-auth/README.md)。页面与 API 的授权由服务端强制检查。
+- **券商接入、记账/导入/Greeks/指标计算或展示含义：**[金融领域规则](docs/financial-domain.md)。
+- **连接 moomoo 或评估券商 MCP：**[官方接入研究](research/moomoo-access-research-2026-09-26.md)、[MCP 源码审查](research/moomoo-mcp-candidates.md)；实施前重新核验版本相关结论。
+- **应用底座或 Wealthfolio 扩展方式：**[看板选型研究](research/trading-dashboard-research-2026-09-26.md)、[Python host ADR](docs/adr/0001-wealthfolio-python-host.md)；比较 Wheel 工具读[期权候选](research/options-dashboard-candidates.md)。
+- **analytics 服务：**[服务说明](services/analytics/README.md)、[A2–A5 验收](docs/architecture/a2-a5-acceptance.md)。
+- **市场分析页面与指标：**[市场原型说明](prototypes/wheel-dashboard/MARKET-PROTOTYPE.md)（以末尾已确认层级为准）、[市场引擎](docs/implementation/market-engine.md)。
+- **历史原型：**[原型说明](prototypes/wheel-dashboard/README.md)；共享导航在同目录 `app-shell.js` 与 `app-shell.css`。

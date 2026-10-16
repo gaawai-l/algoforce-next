@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .calculation import data_state
+from .context import MarketContext, build_context
 from .contracts import ErrorBody, Integrations, ServiceStatus
 from .market import (
     DURATIONS,
@@ -35,6 +36,7 @@ from .market import (
     Stream,
     Timeframe,
     Workspace,
+    default_source,
 )
 from .portfolio.api import create_router as portfolio_router
 from .repository import Repository
@@ -163,9 +165,11 @@ def create_app(
                 "service_status",
                 "versioned_market_data",
                 "baseline_analysis",
+                "demark_sequential_basic",
                 "historical_replay",
                 "durable_jobs",
                 "scheduled_refresh",
+                "market_context",
             ],
         )
 
@@ -200,10 +204,10 @@ def create_app(
             ).model_dump(),
         )
 
-    def stream_params(source: Source, symbol: str, timeframe: Timeframe) -> Stream:
-        if symbol not in {"BTCUSDT", "ETHUSDT"}:
+    def stream_params(source: Source | None, symbol: str, timeframe: Timeframe) -> Stream:
+        if symbol not in {"BTCUSDT", "ETHUSDT", "MUUSDT"}:
             raise APIException(422)
-        return Stream(source=source, symbol=symbol, timeframe=timeframe)  # type: ignore[arg-type]
+        return Stream(source=source or default_source(symbol), symbol=symbol, timeframe=timeframe)  # type: ignore[arg-type]
 
     @app.post(f"{PREFIX}/jobs", response_model=Job, status_code=202)
     def submit(
@@ -222,15 +226,40 @@ def create_app(
     def events(job_id: str) -> list[JobEvent]:
         return repo().job_events(job_id)
 
+    @app.get(f"{PREFIX}/market-context", response_model=MarketContext)
+    def market_context(
+        source: Source | None = None,
+        symbol: str = "BTCUSDT",
+        market_at: datetime | None = None,
+        knowledge_at: datetime | None = None,
+    ) -> MarketContext:
+        if symbol not in {"BTCUSDT", "ETHUSDT", "MUUSDT"}:
+            raise APIException(422)
+        if (market_at is None) != (knowledge_at is None):
+            raise APIException(422)
+        now = datetime.now(UTC)
+        market = market_at or now
+        knowledge = knowledge_at or now
+        if market.tzinfo is None or knowledge.tzinfo is None or market > now or knowledge > now:
+            raise APIException(422)
+        return build_context(
+            repo(),
+            source or default_source(symbol),
+            symbol,  # type: ignore[arg-type]
+            market_at=market,
+            knowledge_at=knowledge,
+            checked_at=now,
+        )
+
     @app.get(f"{PREFIX}/workspace", response_model=Workspace)
     def workspace(
-        source: Source = "fixture", symbol: str = "BTCUSDT", timeframe: Timeframe = "1h"
+        source: Source | None = None, symbol: str = "BTCUSDT", timeframe: Timeframe = "1h"
     ) -> Workspace:
         stream = stream_params(source, symbol, timeframe)
         snapshot = repo().live_snapshot(stream)
         at = datetime.now(UTC)
         state = data_state(
-            source,
+            stream.source,
             snapshot.closed_bar_time if snapshot else None,
             at,
             DURATIONS[timeframe],
@@ -248,7 +277,7 @@ def create_app(
 
     @app.get(f"{PREFIX}/snapshots", response_model=list[SnapshotSummary])
     def snapshots(
-        source: Source = "fixture",
+        source: Source | None = None,
         symbol: str = "BTCUSDT",
         timeframe: Timeframe = "1h",
         limit: int = Query(default=30, ge=1, le=100),

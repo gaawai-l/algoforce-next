@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from typing import Literal
 
+from .indicators.demark import evaluate_demark
 from .market import DURATIONS, Analysis, Dataset, Point, Rules, digest, timestamp
 
 DataState = Literal["fresh", "delayed", "stale", "unavailable", "simulated"]
@@ -76,11 +77,14 @@ def calculate(dataset: Dataset, rules: Rules) -> Analysis:
         issues.append("Volume unavailable for one or more bars; no zero substitution")
     if dataset.stream.source == "fixture":
         issues.append("Simulated dataset; not live market data")
+    demark = evaluate_demark(dataset, rules.demark) if rules.demark is not None else None
+    hash_payload = {"demark_input": demark.input_hash} if demark else {}
     input_hash = digest(
         json.dumps(
             {
                 "stream": dataset.stream.model_dump(),
-                "rules": rules.model_dump(),
+                "rules": rules.model_dump(exclude_none=True),
+                **hash_payload,
                 "closed": [b.revision_id for b in dataset.bars],
                 "forming": [b.revision_id for b in dataset.forming],
             },
@@ -110,4 +114,5 @@ def calculate(dataset: Dataset, rules: Rules) -> Analysis:
         issues=issues,
         bars=dataset.bars,
         points=points,
+        demark=demark,
     )
