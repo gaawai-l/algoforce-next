@@ -104,7 +104,7 @@ export const levelsSample: LevelsView = {
   refreshing: false,
   forming_at: "2026-10-16T00:00:00+00:00",
   as_of: "2026-10-16T00:00:00+00:00",
-  urpd_date: "2026-10-15",
+  urpd_date: "2026-10-16",
   onchain_close: 112345.67,
   lines: [
     { name: "true_mean", price: 98100.5 },

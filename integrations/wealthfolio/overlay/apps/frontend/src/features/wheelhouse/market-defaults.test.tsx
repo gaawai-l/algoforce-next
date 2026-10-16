@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   levels: vi.fn(),
   cycle: vi.fn(),
   chart: vi.fn(),
+  text: vi.fn((key: string) => key),
 }));
 // Records the props the page gives the chart, so overlays can be asserted without drawing.
 vi.mock("./market-chart", () => ({
@@ -29,7 +30,7 @@ vi.mock("./demark-details", () => ({ DemarkDetails: () => null }));
 vi.mock("./regime-check", () => ({ RegimeCheck: () => null }));
 vi.mock("./language-toggle", () => ({ LanguageToggle: () => null }));
 vi.mock("./i18n", () => ({
-  useWheelhouseText: () => ({ text: (key: string) => key }),
+  useWheelhouseText: () => ({ text: mocks.text }),
   labeled: (_: unknown, _kind: string, value: string) => value,
   issueText: () => "",
   messages: { en: {}, zh: {} },
@@ -172,6 +173,44 @@ it("marks stale model lines in their chart labels", async () => {
   expect(lastOverlays()?.every((o) => o.label === "levels.overlayStale")).toBe(
     true,
   );
+});
+
+it("marks the median chart label with its date when URPD is older than the as-of day", async () => {
+  openLevels("?symbol=BTCUSDT&method=levels", {
+    levels: { ...levelsSample, urpd_date: "2026-10-15" },
+  });
+  await waitFor(() => expect(lastOverlays()).toHaveLength(5));
+  expect(lastOverlays()?.map((o) => [o.id, o.label])).toEqual([
+    ["true_mean", "levels.line.true_mean"],
+    ["short_term", "levels.line.short_term"],
+    ["average", "levels.line.average"],
+    ["long_term", "levels.line.long_term"],
+    ["median", "levels.line.medianUrpd"],
+  ]);
+  // The date is the URPD day, written as a short day, e.g. "15 Oct".
+  expect(mocks.text).toHaveBeenCalledWith("cycle.date", {
+    day: 15,
+    month: "Oct",
+  });
+  expect(mocks.text).toHaveBeenCalledWith("levels.line.medianUrpd", {
+    date: "cycle.date",
+  });
+});
+
+it("marks a stale median chart label with both its date and the stale note", async () => {
+  openLevels("?symbol=BTCUSDT&method=levels", {
+    levels: { ...levelsSample, data_state: "stale", urpd_date: "2026-10-15" },
+  });
+  await waitFor(() => expect(lastOverlays()).toHaveLength(5));
+  expect(lastOverlays()?.every((o) => o.label === "levels.overlayStale")).toBe(
+    true,
+  );
+  expect(mocks.text).toHaveBeenCalledWith("levels.overlayStale", {
+    name: "levels.line.medianUrpd",
+  });
+  expect(mocks.text).toHaveBeenCalledWith("levels.overlayStale", {
+    name: "levels.line.average",
+  });
 });
 
 it("draws no overlays when the on-chain request fails", async () => {

@@ -5,6 +5,7 @@ import {
   useWheelhouseText,
   type MessageKey,
   type TextFn,
+  type WheelhouseLocale,
 } from "./i18n";
 import type { CycleView, LevelsView } from "./onchain-contract";
 
@@ -51,6 +52,41 @@ const signed = (value: number) => {
 const utcDay = (instant: string) =>
   new Date(instant).toISOString().slice(0, 10);
 
+const dayPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+// A UTC calendar day as "15 Oct" / "10月15日". It is formatted in UTC so it never shifts.
+export function shortDay(text: TextFn, locale: WheelhouseLocale, day: string) {
+  const [, year, month, date] = dayPattern.exec(day) ?? [];
+  if (!year) return day;
+  return text("cycle.date", {
+    day: Number(date),
+    month: new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
+      month: locale === "zh" ? "numeric" : "short",
+      timeZone: "UTC",
+    }).format(Date.UTC(Number(year), Number(month) - 1, Number(date))),
+  });
+}
+
+// The URPD snapshot day when it is older than the day the series are as of; the median is the
+// only line built from URPD, so this is the day that median is really from.
+export function olderUrpdDate(levels: LevelsView) {
+  if (!levels.urpd_date || !levels.as_of) return null;
+  return levels.urpd_date < utcDay(levels.as_of) ? levels.urpd_date : null;
+}
+
+// A line's name; the median carries its URPD date when that is older than the as-of day, so it
+// never looks current.
+export function lineLabel(
+  text: TextFn,
+  locale: WheelhouseLocale,
+  levels: LevelsView,
+  name: LineName,
+) {
+  const urpd = name === "median" ? olderUrpdDate(levels) : null;
+  return urpd
+    ? text("levels.line.medianUrpd", { date: shortDay(text, locale, urpd) })
+    : text(lineNameKey[name]);
+}
+
 function Rows({ rows }: { rows: [string, string][] }) {
   return (
     <dl className="wh-facts">
@@ -76,7 +112,7 @@ export function OnchainLevels({
   levelsError?: string;
   cycleError?: string;
 }) {
-  const { text } = useWheelhouseText();
+  const { locale, text } = useWheelhouseText();
   const missing = text("missing");
   // Read once: the sections start open on wide screens and collapsed on phones.
   const [wide] = useState(
@@ -119,7 +155,7 @@ export function OnchainLevels({
         ) : null}
         <Rows
           rows={lv.lines.map((line) => [
-            text(lineNameKey[line.name]),
+            lineLabel(text, locale, lv, line.name),
             usd(line.price),
           ])}
         />
@@ -188,6 +224,9 @@ export function OnchainLevels({
     <div className="wh-onchain">
       <h3>{text("levels.linesTitle")}</h3>
       {linesBody}
+      {lv?.refreshing || cy?.refreshing ? (
+        <p role="status">{text("levels.refreshing")}</p>
+      ) : null}
       <details
         id="wh-onchain-cycle"
         className="wh-onchain-cycle"
@@ -202,11 +241,15 @@ export function OnchainLevels({
         {lv || cy ? (
           <p>{text("levels.sourceLine", { version, date: asOf })}</p>
         ) : null}
+        {lv ? (
+          <p>
+            {text("levels.urpdLine", {
+              date: lv.urpd_date ? `${lv.urpd_date} UTC` : missing,
+            })}
+          </p>
+        ) : null}
         {forming ? <p className="wh-muted">{text("cycle.forming")}</p> : null}
         <p className="wh-muted">{text("levels.sourceNote")}</p>
-        {lv?.refreshing || cy?.refreshing ? (
-          <p role="status">{text("levels.refreshing")}</p>
-        ) : null}
       </details>
     </div>
   );

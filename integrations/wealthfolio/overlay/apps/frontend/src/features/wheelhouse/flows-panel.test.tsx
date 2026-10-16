@@ -40,7 +40,9 @@ it("shows the seller pressure placeholder by default", () => {
 it("shows the perp states placeholder for flow=perp", () => {
   show("?flow=perp");
   expect(
-    screen.getByText("Not connected — perp data source pending"),
+    screen.getByText(
+      "Not connected — perp data source not chosen yet (Glassnode, Coinalyze or own liquidation collector)",
+    ),
   ).toBeTruthy();
   expect(screen.queryByText(/not implemented yet/)).toBeNull();
   expect(
@@ -75,7 +77,9 @@ it("writes the chosen view to the flow parameter and keeps other parameters", ()
   expect(params.get("method")).toBe("flows");
   expect(params.get("symbol")).toBe("BTCUSDT");
   expect(
-    screen.getByText("Not connected — perp data source pending"),
+    screen.getByText(
+      "Not connected — perp data source not chosen yet (Glassnode, Coinalyze or own liquidation collector)",
+    ),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Seller pressure" }));
   expect(

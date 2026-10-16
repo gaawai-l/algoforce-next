@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getOnchainCycle, type Stream } from "./client";
 import { messages, useWheelhouseText, type MessageKey } from "./i18n";
-
-const dayPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+import { shortDay as formatDay } from "./onchain-levels";
 
 export function CycleBadge({
   symbol,
@@ -27,18 +26,7 @@ export function CycleBadge({
   // Keys built from payload enums; every one of them exists in both catalogs.
   const tk = (key: string, vars?: Parameters<typeof text>[1]) =>
     text(key as MessageKey, vars);
-  // The cycle days are UTC calendar days, so they are formatted in UTC to never shift.
-  const shortDay = (day: string) => {
-    const [, year, month, date] = dayPattern.exec(day) ?? [];
-    if (!year) return day;
-    return text("cycle.date", {
-      day: Number(date),
-      month: new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
-        month: locale === "zh" ? "numeric" : "short",
-        timeZone: "UTC",
-      }).format(Date.UTC(Number(year), Number(month) - 1, Number(date))),
-    });
-  };
+  const shortDay = (day: string) => formatDay(text, locale, day);
   const reasonText = (reason: string) => {
     const series = /^series_missing:(.+)$/.exec(reason);
     if (series) return text("cycle.reason.seriesMissing", { name: series[1] });
@@ -49,18 +37,20 @@ export function CycleBadge({
   };
 
   const data = cycle.data;
-  // A failed request wins over older data: the badge must not look current when it is not.
-  const failure = cycle.error ? String((cycle.error as Error).message) : null;
-  if (!data && !failure) return null;
+  // A failed request wins over older data: the badge must not look current when it is not,
+  // whatever the error says (it may have no message at all).
+  const failed = cycle.isError;
+  const failure = failed ? String((cycle.error as Error).message ?? "") : "";
+  if (!data && !failed) return null;
   if (
-    failure ||
+    failed ||
     !data ||
     data.data_state === "unavailable" ||
     !data.state ||
     data.day == null ||
     !data.as_of
   ) {
-    const reason = failure ?? data?.reasons.map(reasonText).join(" · ");
+    const reason = failed ? failure : data?.reasons.map(reasonText).join(" · ");
     return (
       <button
         type="button"

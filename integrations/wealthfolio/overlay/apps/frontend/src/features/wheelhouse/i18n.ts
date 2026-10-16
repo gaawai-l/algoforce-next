@@ -385,10 +385,12 @@ const en = {
   "levels.line.average": "Average",
   "levels.line.long_term": "Long-term",
   "levels.line.median": "Median",
+  "levels.line.medianUrpd": "Median (URPD {{date}})",
   "levels.overlayStale": "{{name}} (stale)",
   "levels.source": "Source",
   "levels.sourceLine":
     "Bitcoin Research Kit · bitview.space · BRK {{version}} · as of {{date}}",
+  "levels.urpdLine": "URPD {{date}}",
   "levels.sourceNote":
     "On-chain prices are oracle estimates, not Bybit quotes. STH (<150d) means short-term holders: coins last moved less than 150 days ago.",
   "levels.refreshing": "Refreshing on-chain data…",
@@ -397,7 +399,8 @@ const en = {
   "flows.seller": "Seller pressure",
   "flows.perp": "Perp states",
   "flows.sellerPending": "Seller pressure is not implemented yet",
-  "flows.perpPending": "Not connected — perp data source pending",
+  "flows.perpPending":
+    "Not connected — perp data source not chosen yet (Glassnode, Coinalyze or own liquidation collector)",
   "flows.btcOnly": "Flows are BTC only",
 } as const;
 
@@ -774,10 +777,12 @@ const zh: Record<MessageKey, string> = {
   "levels.line.average": "平均成本",
   "levels.line.long_term": "长期成本",
   "levels.line.median": "中位成本",
+  "levels.line.medianUrpd": "中位成本（URPD {{date}}）",
   "levels.overlayStale": "{{name}}（已过期）",
   "levels.source": "数据来源",
   "levels.sourceLine":
     "Bitcoin Research Kit · bitview.space · BRK {{version}} · 截至 {{date}}",
+  "levels.urpdLine": "URPD 筹码分布 {{date}}",
   "levels.sourceNote":
     "链上价格为预言机估算值，不是 Bybit 报价。STH (<150d) 指短期持有者：币龄不足 150 天的筹码。",
   "levels.refreshing": "正在刷新链上数据…",
@@ -786,7 +791,8 @@ const zh: Record<MessageKey, string> = {
   "flows.seller": "卖压",
   "flows.perp": "永续状态",
   "flows.sellerPending": "卖压视图尚未实现",
-  "flows.perpPending": "未连接 — 永续数据源待接入",
+  "flows.perpPending":
+    "未连接 — 永续数据源尚未选定（Glassnode、Coinalyze 或自建清算采集器）",
   "flows.btcOnly": "资金流仅支持 BTC",
 };
 

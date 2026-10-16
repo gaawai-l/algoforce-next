@@ -15,7 +15,7 @@ import { MarketChart, type ChartOverlay } from "./market-chart";
 import { useLiveMarketRefresh } from "./use-initial-market-refresh";
 import { DemarkDetails } from "./demark-details";
 import { CycleBadge } from "./cycle-badge";
-import { OnchainLevels, lineNameKey } from "./onchain-levels";
+import { OnchainLevels, lineLabel } from "./onchain-levels";
 import { FlowsPanel } from "./flows-panel";
 import { RegimeCheck } from "./regime-check";
 import { defaultDemarkConfig } from "./demark-contract";
@@ -56,7 +56,7 @@ function Facts({ entries }: { entries: [string, string][] }) {
 }
 
 export default function MarketPage() {
-  const { text } = useWheelhouseText();
+  const { locale, text } = useWheelhouseText();
   const missing = text("missing");
   const methods = [
     { id: "td" as const, name: text("method.td") },
@@ -333,16 +333,17 @@ export default function MarketPage() {
   const onchainData = onchainLevels.isError ? undefined : onchainLevels.data;
   const overlays: ChartOverlay[] | undefined =
     onchainShown && onchainData && onchainData.data_state !== "unavailable"
-      ? onchainData.lines.map((line) => ({
-          id: line.name,
-          label:
-            onchainData.data_state === "stale"
-              ? text("levels.overlayStale", {
-                  name: text(lineNameKey[line.name]),
-                })
-              : text(lineNameKey[line.name]),
-          price: line.price,
-        }))
+      ? onchainData.lines.map((line) => {
+          const name = lineLabel(text, locale, onchainData, line.name);
+          return {
+            id: line.name,
+            label:
+              onchainData.data_state === "stale"
+                ? text("levels.overlayStale", { name })
+                : name,
+            price: line.price,
+          };
+        })
       : undefined;
   const latestPoint = analysis?.points.at(-1);
   const tdSequences = [...(analysis?.demark?.sequences ?? [])].reverse();

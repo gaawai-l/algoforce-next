@@ -25,7 +25,11 @@ afterEach(() => {
 
 function show(
   view: CycleView | Error,
-  props: { symbol?: "BTCUSDT" | "ETHUSDT" | "MUUSDT"; live?: boolean } = {},
+  props: {
+    symbol?: "BTCUSDT" | "ETHUSDT" | "MUUSDT";
+    live?: boolean;
+    cached?: CycleView;
+  } = {},
   onOpen = vi.fn(),
 ) {
   if (view instanceof Error) mocks.cycle.mockRejectedValue(view);
@@ -33,6 +37,9 @@ function show(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // An earlier successful reading, which a failed refetch leaves in the cache.
+  if (props.cached)
+    client.setQueryData(["wh", "onchain", "cycle"], props.cached);
   render(
     <QueryClientProvider client={client}>
       <CycleBadge
@@ -125,6 +132,28 @@ it("shows the failure when the service cannot be reached", async () => {
   show(new Error("Python service unavailable"));
   expect(await screen.findByText("Cycle unavailable")).toBeTruthy();
   expect(screen.getByText("Python service unavailable")).toBeTruthy();
+});
+
+it("does not show cached data as current when the refetch fails", async () => {
+  show(new Error("Python service unavailable"), { cached: cycleSample });
+  expect(await screen.findByText("Cycle unavailable")).toBeTruthy();
+  expect(screen.queryByText(/Breakout/)).toBeNull();
+  expect(screen.getByText("Python service unavailable")).toBeTruthy();
+});
+
+it("treats a failure with an empty message as a failure, not as current data", async () => {
+  show(new Error(""), { cached: cycleSample });
+  const title = await screen.findByText("Cycle unavailable");
+  expect(title.closest("button")?.classList.contains("wh-cycle--muted")).toBe(
+    true,
+  );
+  expect(screen.queryByText(/Breakout/)).toBeNull();
+  expect(screen.queryByText("includes today (forming)")).toBeNull();
+});
+
+it("shows the unavailable badge for a failure with an empty message and no data", async () => {
+  show(new Error(""));
+  expect(await screen.findByText("Cycle unavailable")).toBeTruthy();
 });
 
 it("calls onOpen when clicked", async () => {

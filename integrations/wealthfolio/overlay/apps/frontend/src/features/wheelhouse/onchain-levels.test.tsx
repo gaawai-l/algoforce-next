@@ -2,7 +2,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CycleView, LevelsView } from "./onchain-contract";
 import { cycleSample, levelsSample } from "./onchain-contract";
-import { OnchainLevels } from "./onchain-levels";
+import { phrase } from "./i18n";
+import { OnchainLevels, olderUrpdDate, shortDay } from "./onchain-levels";
 
 // The shared test setup mocks matchMedia as a narrow screen; each test sets its own width.
 function viewport(wide: boolean) {
@@ -100,19 +101,114 @@ it("makes the Cycle section a scroll target for the header badge", () => {
   expect(cycleSection().tabIndex).toBe(-1);
 });
 
-it("shows the refreshing notice in the Source section", () => {
+it("shows the refreshing notice outside the collapsible sections", () => {
+  viewport(false);
   render(
     <OnchainLevels
       levels={{ ...levelsSample, refreshing: true }}
       cycle={cycleSample}
     />,
   );
-  expect(sourceSection().textContent).toContain("Refreshing on-chain data…");
+  const notice = screen.getByRole("status");
+  expect(notice.textContent).toBe("Refreshing on-chain data…");
+  // Phones collapse Cycle and Source, so the notice must not live inside either of them.
+  expect(sourceSection().open).toBe(false);
+  expect(notice.closest("details")).toBeNull();
+});
+
+it("shows the refreshing notice when only the cycle request reports it", () => {
+  render(
+    <OnchainLevels
+      levels={levelsSample}
+      cycle={{ ...cycleSample, refreshing: true }}
+    />,
+  );
+  expect(screen.getByRole("status").closest("details")).toBeNull();
 });
 
 it("does not show the refreshing notice when nothing is refreshing", () => {
   render(<OnchainLevels levels={levelsSample} cycle={cycleSample} />);
   expect(screen.queryByText("Refreshing on-chain data…")).toBeNull();
+});
+
+it("shows the URPD snapshot date in the Source section", () => {
+  render(<OnchainLevels levels={levelsSample} cycle={cycleSample} />);
+  expect(screen.getByText("URPD 2026-10-16 UTC").closest("details")).toBe(
+    sourceSection(),
+  );
+});
+
+it("leaves the Median line unmarked when URPD is from the as-of day", () => {
+  render(<OnchainLevels levels={levelsSample} cycle={cycleSample} />);
+  expect(screen.getByText("Median").nextSibling?.textContent).toBe("$63,400");
+  expect(document.body.textContent).not.toMatch(/Median \(/);
+});
+
+it("marks the Median line with its URPD date when the snapshot is older than the as-of day", () => {
+  render(
+    <OnchainLevels
+      levels={{ ...levelsSample, urpd_date: "2026-10-15" }}
+      cycle={cycleSample}
+    />,
+  );
+  expect(
+    screen.getByText("Median (URPD 15 Oct)").nextSibling?.textContent,
+  ).toBe("$63,400");
+  expect(screen.queryByText("Median")).toBeNull();
+  // The other lines come from the daily series and carry no URPD mark.
+  expect(screen.getByText("Average").nextSibling?.textContent).toBe("$71,500");
+  expect(screen.getByText("URPD 2026-10-15 UTC")).toBeTruthy();
+});
+
+it("names the missing URPD snapshot in the Source section", () => {
+  render(
+    <OnchainLevels
+      levels={{
+        ...levelsSample,
+        urpd_date: null,
+        onchain_close: null,
+        reasons: ["urpd_missing"],
+        lines: levelsSample.lines.filter((line) => line.name !== "median"),
+      }}
+      cycle={cycleSample}
+    />,
+  );
+  expect(screen.getByText("URPD Unavailable")).toBeTruthy();
+  expect(screen.queryByText(/^Median/)).toBeNull();
+});
+
+it("finds a URPD date only when it is older than the as-of day", () => {
+  expect(olderUrpdDate(levelsSample)).toBeNull();
+  expect(olderUrpdDate({ ...levelsSample, urpd_date: "2026-10-15" })).toBe(
+    "2026-10-15",
+  );
+  expect(
+    olderUrpdDate({ ...levelsSample, urpd_date: "2026-10-17" }),
+  ).toBeNull();
+  expect(olderUrpdDate({ ...levelsSample, urpd_date: null })).toBeNull();
+  expect(olderUrpdDate({ ...levelsSample, as_of: null })).toBeNull();
+  // The as-of instant names a UTC day (here the 17th), whatever its written offset is.
+  expect(
+    olderUrpdDate({
+      ...levelsSample,
+      as_of: "2026-10-16T23:30:00-05:00",
+      urpd_date: "2026-10-16",
+    }),
+  ).toBe("2026-10-16");
+});
+
+it("writes short UTC days in both languages", () => {
+  const en = (
+    key: Parameters<typeof phrase>[1],
+    vars?: Record<string, string | number>,
+  ) => phrase("en", key, vars);
+  const zh = (
+    key: Parameters<typeof phrase>[1],
+    vars?: Record<string, string | number>,
+  ) => phrase("zh", key, vars);
+  expect(shortDay(en, "en", "2026-10-15")).toBe("15 Oct");
+  expect(shortDay(zh, "zh", "2026-10-15")).toBe("10月15日");
+  expect(shortDay(en, "en", "not a day")).toBe("not a day");
 });
 
 it("renders the Cycle section while both requests are still loading", () => {
@@ -163,6 +259,8 @@ it("shows unavailable data with its translated reasons and no invented numbers",
     reasons: ["brk_unavailable"],
     lines: [],
     as_of: null,
+    urpd_date: null,
+    onchain_close: null,
     brk_version: null,
     forming_at: null,
   };
@@ -190,6 +288,7 @@ it("shows unavailable data with its translated reasons and no invented numbers",
   expect(document.body.textContent).not.toMatch(/\$|day \d|\b0\.00\b/);
   expect(sourceSection().textContent).toContain("BRK Unavailable");
   expect(sourceSection().textContent).toContain("as of Unavailable");
+  expect(sourceSection().textContent).toContain("URPD Unavailable");
 });
 
 it("marks stale data with its as-of day and keeps the values", () => {
