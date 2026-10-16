@@ -5,6 +5,12 @@ import type { DemarkSequence } from "./demark-contract";
 import { labeled, useWheelhouseText } from "./i18n";
 import { visibleWindow, type RangeChoice, type BarWindow } from "./chart-range";
 import { ChartRangeNavigator } from "./chart-range-navigator";
+import {
+  LevelsRail,
+  bandReadout,
+  railWidth,
+  type RailBand,
+} from "./levels-rail";
 
 // A horizontal reference price drawn over the bars. It never takes part in the y-axis range.
 export interface ChartOverlay {
@@ -20,6 +26,7 @@ interface ChartProps {
   showDemark?: boolean;
   sequence?: DemarkSequence;
   overlays?: ChartOverlay[];
+  rail?: RailBand[];
 }
 
 // 11px JetBrains Mono advances about 6.6px per character.
@@ -48,11 +55,13 @@ export function MarketChart({
   showDemark = false,
   sequence,
   overlays,
+  rail,
 }: ChartProps) {
   const { text } = useWheelhouseText();
   const missing = text("missing");
   const [selected, setSelected] = useState<number | null>(null);
   const [rangeChoice, setRangeChoice] = useState<RangeChoice | null>(null);
+  const [activeBand, setActiveBand] = useState<RailBand | null>(null);
   useEffect(() => {
     setRangeChoice(null);
     setSelected(null);
@@ -144,7 +153,9 @@ export function MarketChart({
     observer.observe(chartRef.current);
     return () => observer.disconnect();
   }, [bars.length]);
-  const plotWidth = Math.max(120, chartWidth - 128);
+  // The rail takes its width from the plot, so the price tick column stays where it was.
+  const rw = rail ? railWidth(chartWidth) : 0;
+  const plotWidth = Math.max(120, chartWidth - 128 - rw);
   const right = 16 + plotWidth;
   const eventsByBar = useMemo(() => {
     const index = new Map<string, NonNullable<Analysis["demark"]>["events"]>();
@@ -237,7 +248,7 @@ export function MarketChart({
     previousLabelY = labelY;
     return labelY;
   });
-  const edgeLimit = Math.floor((chartWidth - 32) / EDGE_CHAR_WIDTH);
+  const edgeLimit = Math.floor((chartWidth - 32 - rw) / EDGE_CHAR_WIDTH);
   const aboveRows = edgeRows(
     "↑",
     (overlays ?? [])
@@ -300,7 +311,7 @@ export function MarketChart({
         className="wh-chart"
         ref={chartRef}
         viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-        role="img"
+        role={rail ? "group" : "img"}
         aria-label={
           showDemark
             ? text("chart.ariaDemark", {
@@ -330,17 +341,15 @@ export function MarketChart({
         }}
         onPointerMove={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
+          const svgX = ((event.clientX - rect.left) / rect.width) * chartWidth;
+          // The rail and the tick column are not bars: leave the selection alone there.
+          if (svgX > right) return;
           setSelected(
             Math.max(
               0,
               Math.min(
                 bars.length - 1,
-                Math.floor(
-                  ((((event.clientX - rect.left) / rect.width) * chartWidth -
-                    16) /
-                    plotWidth) *
-                    bars.length,
-                ),
+                Math.floor(((svgX - 16) / plotWidth) * bars.length),
               ),
             ),
           );
@@ -361,12 +370,25 @@ export function MarketChart({
                 y2={y(price)}
                 stroke="var(--wh-edge)"
               />
-              <text x={right + 11} y={y(price) + 4} className="wh-axis">
+              <text x={right + rw + 11} y={y(price) + 4} className="wh-axis">
                 {money(String(price), missing)}
               </text>
             </g>
           );
         })}
+        {rail && (
+          <LevelsRail
+            bands={rail}
+            y={y}
+            top={top}
+            bottom={bottom}
+            x={right + 4}
+            width={rw}
+            plotLeft={16}
+            plotRight={right}
+            onActive={setActiveBand}
+          />
+        )}
         {bars.map((row, i) => {
           const b = row.bar;
           const up = Number(b.close) >= Number(b.open);
@@ -572,6 +594,11 @@ export function MarketChart({
           UTC
         </text>
       </svg>
+      {rail && (
+        <div className="wh-chart-readout" role="status">
+          {activeBand && bandReadout(text, activeBand)}
+        </div>
+      )}
       <ChartRangeNavigator
         total={analysis.bars.length}
         start={window.start}

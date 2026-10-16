@@ -1142,6 +1142,37 @@
   }
 }
 
+/* Cost-basis bands on the price rail: STH rose, LTH sky. Hover or focus spreads one band. */
+.wh-market {
+  --wh-sky: #8fcaff;
+}
+.wh-rail-track {
+  fill: var(--wh-surface);
+}
+.wh-rail-band {
+  fill-opacity: 0.8;
+}
+.wh-rail-band:hover {
+  fill-opacity: 1;
+}
+.wh-rail-band.is-sth,
+.wh-rail-spread.is-sth {
+  fill: var(--wh-rose);
+}
+.wh-rail-band.is-lth,
+.wh-rail-spread.is-lth {
+  fill: var(--wh-sky);
+}
+.wh-rail-spread {
+  opacity: 0.13;
+  pointer-events: none;
+}
+.wh-market .wh-rail-band:focus-visible {
+  outline: none;
+  stroke: var(--wh-cyan);
+  stroke-width: 1.5;
+}
+
 /* Flows tab: the view switch, the perp placeholder and the seller-pressure charts. */
 .wh-flows-panel {
   margin-top: 16px;

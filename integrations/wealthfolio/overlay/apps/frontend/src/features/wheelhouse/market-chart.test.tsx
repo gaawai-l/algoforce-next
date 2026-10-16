@@ -1,7 +1,14 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { analysisSchema } from "./client";
+import { analysisSchema, stamp } from "./client";
 import { defaultDemarkConfig } from "./demark-contract";
+import type { RailBand } from "./levels-rail";
 import { MarketChart, type ChartOverlay } from "./market-chart";
 
 const time = (i: number) => new Date(Date.UTC(2026, 0, 1, i)).toISOString();
@@ -301,5 +308,148 @@ describe("on-chain overlays", () => {
       <MarketChart analysis={priced} visibleBars={100} showLevels />,
     );
     expect(screen.queryByText(/on-chain cost lines/i)).toBeNull();
+  });
+
+  describe("price rail", () => {
+    const sth2: RailBand = {
+      id: "sth-2",
+      cohort: "sth",
+      index: 2,
+      price: 82250,
+      low: 77264.5,
+      high: 87235.5,
+      strength: 1,
+      btc: 1910000,
+      share: 0.521,
+    };
+    const far: RailBand = {
+      id: "lth-1",
+      cohort: "lth",
+      index: 1,
+      price: 60000,
+      low: 58000,
+      high: 62000,
+      strength: 0.5,
+      btc: 880000,
+      share: 0.069,
+    };
+    const railed = (rail?: RailBand[], overlays?: ChartOverlay[]) => (
+      <MarketChart
+        analysis={priced}
+        visibleBars={100}
+        showLevels
+        overlays={overlays}
+        rail={rail}
+      />
+    );
+    const svg = (container: HTMLElement) =>
+      container.querySelector("svg.wh-chart")!;
+    // The five price ticks sit in the grid groups; the date labels are direct svg children.
+    const tickX = (container: HTMLElement) =>
+      [...container.querySelectorAll("svg > g > text.wh-axis")].map((n) =>
+        num(n, "x"),
+      );
+    const candleX = (container: HTMLElement) =>
+      [...container.querySelectorAll("g[stroke] > line")].map((n) =>
+        num(n, "x1"),
+      );
+    const gridRight = (container: HTMLElement) =>
+      num(container.querySelector("svg > g > line")!, "x2");
+    const ohlc = (container: HTMLElement) =>
+      container.querySelector(".wh-chart-readout")!.textContent;
+
+    it("adds no rail, read-out or group role without a rail", () => {
+      const view = render(railed());
+      expect(screen.queryByRole("list")).toBeNull();
+      expect(screen.queryByRole("status")).toBeNull();
+      expect(svg(view.container).getAttribute("role")).toBe("img");
+    });
+
+    it("narrows the plot by the rail but keeps the tick column and bar count", () => {
+      const plain = render(railed());
+      const ticks = tickX(plain.container);
+      const candles = candleX(plain.container);
+      plain.unmount();
+      expect(ticks).toEqual(Array(5).fill(TICK_COLUMN));
+      const view = render(railed([]));
+      expect(tickX(view.container)).toEqual(ticks);
+      expect(gridRight(view.container)).toBe(RIGHT - 28);
+      const after = candleX(view.container);
+      expect(after).toHaveLength(candles.length);
+      // The plot loses 28px; the last of 100 candle centres sits at 99.5 / 100 of it.
+      expect(candles.at(-1)! - after.at(-1)!).toBeCloseTo((28 * 99.5) / 100);
+      expect(svg(view.container).getAttribute("role")).toBe("group");
+      expect(screen.getByRole("status")).toBeTruthy();
+    });
+
+    it("uses a 16px rail on a narrow chart", () => {
+      class Narrow {
+        constructor(private cb: (entries: unknown[]) => void) {}
+        observe() {
+          this.cb([{ contentRect: { width: 500, height: 540 } }]);
+        }
+        disconnect() {}
+      }
+      vi.stubGlobal("ResizeObserver", Narrow);
+      const plain = render(railed());
+      const ticks = tickX(plain.container);
+      plain.unmount();
+      const view = render(railed([]));
+      expect(
+        num(view.container.querySelector(".wh-rail-track")!, "width"),
+      ).toBe(16);
+      expect(tickX(view.container)).toEqual(ticks);
+      expect(gridRight(view.container)).toBe(16 + (500 - 128 - 16));
+    });
+
+    it("ignores pointer moves over the rail", () => {
+      const view = render(railed([]));
+      const chart = svg(view.container);
+      vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(0, 0, 980, 540),
+      );
+      fireEvent.keyDown(chart, { key: "ArrowLeft" });
+      const selected = ohlc(view.container);
+      expect(selected).toContain(stamp(time(98)));
+      fireEvent.pointerMove(chart, { clientX: RIGHT - 28 + 10 });
+      expect(ohlc(view.container)).toBe(selected);
+      fireEvent.pointerMove(chart, { clientX: 20 });
+      expect(ohlc(view.container)).toContain(stamp(time(0)));
+    });
+
+    it("draws only bands inside the price range and keeps the axis", () => {
+      const line = { id: "true_mean", label: "True mean", price: 82200 };
+      const base = render(railed([], [line]));
+      const lineY = num(
+        base.container.querySelector("line.wh-overlay-line")!,
+        "y1",
+      );
+      const ticks = axis(base.container);
+      base.unmount();
+      const view = render(railed([sth2, far], [line]));
+      expect(screen.getAllByRole("listitem")).toHaveLength(1);
+      expect(
+        num(view.container.querySelector("line.wh-overlay-line")!, "y1"),
+      ).toBe(lineY);
+      expect(axis(view.container)).toEqual(ticks);
+    });
+
+    it("reads out the focused band and keeps arrow keys on it", () => {
+      const view = render(railed([sth2]));
+      const selected = ohlc(view.container);
+      const item = screen.getByRole("listitem", { name: /STH K2/ });
+      act(() => item.focus());
+      expect(view.container.querySelector(".wh-rail-spread")).not.toBeNull();
+      const status = screen.getByRole("status");
+      expect(status.textContent).toBe(
+        "STH K2 · $82,250 · width $9,971 · 1.91M BTC (52.1%) · strength 100%",
+      );
+      fireEvent.keyDown(item, { key: "ArrowLeft" });
+      expect(ohlc(view.container)).toBe(selected);
+      act(() => item.blur());
+      expect(view.container.querySelector(".wh-rail-spread")).toBeNull();
+      expect(status.textContent).not.toContain("STH K2");
+      expect(status.textContent).not.toContain("$82,250");
+    });
   });
 });

@@ -395,6 +395,9 @@ const en = {
     "On-chain prices are oracle estimates, not Bybit quotes. STH (<150d) means short-term holders: coins last moved less than 150 days ago.",
   "levels.refreshing": "Refreshing on-chain data…",
   "legend.onchain": "Light dashed: on-chain cost lines (oracle prices)",
+  "rail.list": "Cost-basis bands",
+  "rail.readout":
+    "{{band}} · {{price}} · width {{width}} · {{btc}} BTC ({{share}}) · strength {{strength}}",
   "flows.view": "Flows view",
   "flows.seller": "Seller pressure",
   "flows.perp": "Perp states",
@@ -839,6 +842,9 @@ const zh: Record<MessageKey, string> = {
     "链上价格为预言机估算值，不是 Bybit 报价。STH (<150d) 指短期持有者：币龄不足 150 天的筹码。",
   "levels.refreshing": "正在刷新链上数据…",
   "legend.onchain": "浅色虚线：链上成本线（预言机价格）",
+  "rail.list": "筹码成本价带",
+  "rail.readout":
+    "{{band}} · {{price}} · 宽度 {{width}} · {{btc}} BTC（{{share}}）· 强度 {{strength}}",
   "flows.view": "资金流视图",
   "flows.seller": "卖压",
   "flows.perp": "永续状态",
