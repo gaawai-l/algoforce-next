@@ -2,8 +2,9 @@
 
 One `Collector` keeps one connection to one topic (P4-R9) and records that connection's coverage.
 It is a state machine advanced by `step(now)`; the connection factory, clock, wait and random
-source are injected, so tests drive it without threads or network (P4-R4). Times are epoch
-seconds. Logs carry fixed codes only, never values.
+source are injected, so tests drive it without threads or network (P4-R4). `Collectors` runs two
+staggered connections per stream, each in its own thread. Times are epoch seconds. Logs carry
+fixed codes only, never values.
 """
 
 import json
@@ -17,6 +18,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Protocol
 
 from websockets.exceptions import WebSocketException
@@ -27,6 +29,7 @@ from .rows import RawLiquidation, Stream, Trade
 from .store import PerpsStore, Venue
 
 SYMBOL = "BTCUSDT"
+STREAMS: tuple[Stream, ...] = ("binance_liq", "bybit_liq", "bybit_trades")
 URLS: dict[Stream, str] = {
     "binance_liq": "wss://fstream.binance.com/market/ws/btcusdt@forceOrder",
     "bybit_liq": "wss://stream.bybit.com/v5/public/linear",
@@ -56,6 +59,10 @@ MAX_BACKOFF = 60.0
 BUFFER_CAP = 50_000
 OPEN_TIMEOUT = 5.0
 CLOSE_TIMEOUT = 2.0
+STAGGER = 60.0  # a stream's second connection starts this much later; rotations stay this apart
+SIBLING_LIVE = 30.0  # a rotation waits for the sibling's proof of life within this long
+LIVE_WITHIN = 60.0  # a stream is live while a connection proved life within this long (§3.7)
+STOP_WITHIN = 8.0
 
 logger = logging.getLogger("wheelhouse.perps.collector")
 
@@ -150,10 +157,13 @@ class Collector:
         clock: Callable[[], float] = time.time,
         wait: Callable[[float], object] | None = None,
         rng: random.Random | None = None,
+        delay: float = 0.0,
     ) -> None:
+        """`delay`: the first connection waits this long after the first step."""
         self.store = store
         self.stream = stream
         self.conn = conn
+        self._delay = delay
         # Problem codes, never values: dropped events are counted one by one.
         self.counts: Counter[str] = Counter()
         self._venue = VENUES[stream]
@@ -188,6 +198,12 @@ class Collector:
         """The last proof of life (handshake, frame or pong), at the step that saw it."""
         return self._last_proof
 
+    @property
+    def covering_since(self) -> float | None:
+        """The start of the live interval; None while this connection covers nothing."""
+        live = self._live
+        return None if live is None else live.start
+
     def step(self, now: float) -> None:
         """Connect when due, read one frame, keep the heartbeat, rotate, then commit when due.
 
@@ -195,6 +211,8 @@ class Collector:
         unread for longer than the margin: a suspension between steps or a stalled commit ends
         the connection at the proof held before it."""
         previous, self._last_step = self._last_step, now
+        if previous == -math.inf:
+            self._retry_at = now + self._delay
         if self._ws is not None:
             # Connected, `run` steps again at once; a step reads for at most RECV_TIMEOUT and its
             # commit takes at most MARGIN. The gap counts from the handshake if that came later.
@@ -243,11 +261,12 @@ class Collector:
         """Ask `run` to end the connection and close its interval, waiting until `deadline`
         (clock time) at most; when `run` is not running, do it here."""
         with self._lock:
+            stopped = self._stopping.is_set()
             self._stopping.set()
             running = self._running
         if running:
             self._done.wait(max(0.0, deadline - self._clock()))
-        else:
+        elif not stopped:
             self._shutdown()
 
     def _shutdown(self) -> None:
@@ -464,3 +483,89 @@ class Collector:
 
     def _log(self, event: str) -> None:
         logger.info("perps_ws stream=%s conn=%d event=%s", self.stream, self.conn, event)
+
+
+@dataclass(frozen=True)
+class StreamStatus:
+    live: bool  # a connection proved life within LIVE_WITHIN
+    last_proof: float | None  # the later of the two connections' last proofs
+
+
+class Collectors:
+    """Two connections per stream, the second started `STAGGER` later. A stream's coverage is the
+    union of theirs, so one drop or rotation leaves no hole (spec §3.2)."""
+
+    def __init__(
+        self,
+        store: PerpsStore,
+        *,
+        connect: Callable[..., Connection] = websocket_connect,
+        clock: Callable[[], float] = time.time,
+        wait: Callable[[float], object] | None = None,
+        rng: random.Random | None = None,
+    ) -> None:
+        self.store = store
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._rotated: dict[Stream, float] = {}  # when each stream's last rotation was allowed
+        self.collectors = {
+            (stream, conn): Collector(
+                store,
+                stream,
+                conn,
+                rotate_gate=partial(self.claim_rotation, stream, conn),
+                connect=connect,
+                clock=clock,
+                wait=wait,
+                rng=rng,
+                delay=conn * STAGGER,
+            )
+            for stream in STREAMS
+            for conn in (0, 1)
+        }
+
+    def start(self) -> None:
+        """Close the intervals a previous process left open, then run each connection in a
+        thread."""
+        self.store.close_open_coverage()
+        for (stream, conn), collector in self.collectors.items():
+            name = f"perps-{stream}-{conn}"
+            threading.Thread(target=collector.run, name=name, daemon=True).start()
+
+    def stop(self, total_deadline: float = STOP_WITHIN) -> None:
+        """Stop every connection in parallel, waiting `total_deadline` seconds at most. An interval
+        still open then is closed at its last saved end on the next start."""
+        deadline = self._clock() + total_deadline
+        for collector in self.collectors.values():
+            collector.stop(self._clock())  # asks a running loop to stop, without waiting
+        for collector in self.collectors.values():
+            collector.stop(deadline)
+
+    def status(self) -> dict[Stream, StreamStatus]:
+        """For logs and tests: the API derives the status from the stored coverage (P4-R10)."""
+        now = self._clock()
+        result = {}
+        for stream in STREAMS:
+            proofs = [self.collectors[stream, conn].last_proof for conn in (0, 1)]
+            last = max((p for p in proofs if p is not None), default=None)
+            live = last is not None and now - last <= LIVE_WITHIN
+            result[stream] = StreamStatus(live=live, last_proof=last)
+        return result
+
+    def claim_rotation(self, stream: Stream, conn: int) -> bool:
+        """The rotation gate: True, and the rotation recorded, when the sibling has proved life
+        within `SIBLING_LIVE` and has been covering since before this connection's interval will
+        end (its last proof less the margin), and no rotation of the stream was allowed within
+        `STAGGER`. Otherwise the rotation waits."""
+        mine, sibling = self.collectors[stream, conn], self.collectors[stream, 1 - conn]
+        with self._lock:
+            now = self._clock()
+            since, proof, held = sibling.covering_since, sibling.last_proof, mine.last_proof
+            if since is None or proof is None or held is None:
+                return False
+            if now - proof > SIBLING_LIVE or since > held - MARGIN:
+                return False
+            if now - self._rotated.get(stream, -math.inf) < STAGGER:
+                return False
+            self._rotated[stream] = now
+            return True

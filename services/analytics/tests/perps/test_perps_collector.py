@@ -1,7 +1,8 @@
-"""The WebSocket collector: message parsing, and the step-driven connection and coverage machine.
+"""The WebSocket collectors: message parsing, the step-driven connection and coverage machine, and
+the two staggered connections per stream.
 
-No threads and no network: a fake connection plays scripted frames, the test sets the clock and
-calls `step(now)` (P4-R4).
+No network, and threads only in the start/stop tests: a fake connection plays scripted frames,
+the test sets the clock and calls `step(now)` (P4-R4).
 """
 
 import json
@@ -23,6 +24,8 @@ from wheelhouse_service.perps.collector import (
     BUFFER_CAP,
     ROTATE_AFTER,
     Collector,
+    Collectors,
+    StreamStatus,
     parse_binance_force_order,
     parse_bybit_liquidation,
     parse_bybit_trades,
@@ -66,6 +69,7 @@ class FakeWs:
         self.sent: list[str] = []
         self.pings: list[threading.Event] = []
         self.closed = False
+        self.on_close: Callable[[], object] | None = None
         self.recv_calls = 0
 
     def recv(self, timeout: float | None = None) -> str:
@@ -92,6 +96,8 @@ class FakeWs:
         return pong
 
     def close(self) -> None:
+        if self.on_close is not None:
+            self.on_close()
         self.closed = True
 
 
@@ -161,6 +167,50 @@ class Rig:
 
     def connected_at(self) -> list[float]:
         return [t for t, _, _ in self.calls]
+
+
+Key = tuple[Stream, int]
+
+
+class Fleet:
+    """`Collectors` with a settable clock. Connections are scripted per (stream, conn), and only
+    the scripted collectors are stepped, in order, at each time."""
+
+    def __init__(self, store: PerpsStore, scripts: dict[Key, list[FakeWs | Exception]]) -> None:
+        self.t = 0.0
+        self.scripts = scripts
+        self.connected: dict[Key, list[float]] = {key: [] for key in scripts}
+        self.current: list[Key] = []  # the collectors being stepped, innermost last
+        self.collectors = Collectors(
+            store, connect=self.connect, clock=lambda: self.t, rng=Uniform(1.0)
+        )
+
+    def connect(self, url: str, **kwargs: Any) -> FakeWs:
+        key = self.current[-1]
+        result = self.scripts[key].pop(0)
+        if isinstance(result, Exception):
+            raise result
+        self.connected[key].append(self.t)
+        return result
+
+    def step(self, key: Key, t: float) -> None:
+        self.t = t
+        self.current.append(key)
+        try:
+            self.collectors.collectors[key].step(t)
+        finally:
+            self.current.pop()
+
+    def at(self, *times: float) -> None:
+        for t in times:
+            for key in self.scripts:
+                self.step(key, t)
+
+    def quiet(self, until: float) -> None:
+        """Step once a second up to `until`, then at `until` (see `Rig.quiet`)."""
+        while self.t + 1 < until:
+            self.at(self.t + 1)
+        self.at(until)
 
 
 class FlakyStore(PerpsStore):
@@ -737,3 +787,179 @@ def test_default_wait_is_interrupted_by_stop(tmp_path: Path):
     assert time.monotonic() - started < 0.5
     thread.join(1)
     assert not thread.is_alive()
+
+
+# --- two staggered connections per stream ---
+
+A: Key = ("binance_liq", 0)
+B: Key = ("binance_liq", 1)
+
+
+def test_two_connections_union_keeps_coverage_when_one_drops(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    a1, a2, b1 = FakeWs(), FakeWs(), FakeWs()
+    fleet = Fleet(store, {A: [a1, a2], B: [b1]})
+    fleet.at(0)
+    fleet.quiet(59)
+    assert fleet.connected == {A: [0], B: []}
+    fleet.at(60)  # the second connection starts 60 s after the first
+    fleet.quiet(99)
+    a1.frames.append(ConnectionClosedError(None, None))
+    fleet.at(100)  # its last proof was the pong to the ping at 80
+    fleet.quiet(130)
+    with caplog.at_level(logging.INFO, logger="wheelhouse.perps.collector"):
+        fleet.collectors.stop()
+    assert fleet.connected == {A: [0, 101], B: [60]}
+    assert coverage_rows(store) == [
+        ("binance_liq", 0, 0, 78, 0),
+        ("binance_liq", 1, 60, 118, 0),
+        ("binance_liq", 0, 101, 119, 0),
+    ]
+    # The first connection's hole from 78 to 101 is covered by the second.
+    assert store.coverage("binance_liq", 0) == [(0, 119)]
+    assert a2.closed and b1.closed
+    stopped = [r for r in caplog.records if r.getMessage().endswith("event=stopped")]
+    assert len(stopped) == 6  # each connection stops once, though stop asks twice
+
+
+def test_rotation_deferred_when_sibling_not_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(collector_module, "ROTATE_AFTER", 115.0)  # stepped once a second
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    a1, b1 = FakeWs(), FakeWs()
+    fleet = Fleet(store, {A: [a1, FakeWs()], B: [b1, FakeWs()]})
+    fleet.at(0)
+    fleet.quiet(99)
+    b1.answer_pings = False  # the sibling's last proof is the pong to its ping at 80
+    # From 115 `a` is due, but its sibling's proof is over 30 s old; at 120 the sibling is found
+    # half-open and dropped; from 121 it covers again, but from after 118, where `a`'s interval
+    # would end (its last proof, the pong to the ping at 120, less 2 s).
+    fleet.quiet(140)
+    assert not a1.closed
+    fleet.at(141)  # the pong to the ping at 140 moves that end to 138
+    assert a1.closed
+    fleet.quiet(170)
+    fleet.collectors.stop()
+    assert fleet.connected == {A: [0, 142], B: [60, 121]}
+    assert coverage_rows(store) == [
+        ("binance_liq", 0, 0, 138, 0),
+        ("binance_liq", 1, 60, 78, 0),
+        ("binance_liq", 1, 121, 159, 0),
+        ("binance_liq", 0, 142, 160, 0),
+    ]
+    assert store.coverage("binance_liq", 0) == [(0, 160)]
+
+
+def test_rotations_of_a_stream_stay_a_minute_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(collector_module, "ROTATE_AFTER", 120.0)
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    a1, a2, b1, b2 = FakeWs(), FakeWs(), FakeWs(), FakeWs()
+    fleet = Fleet(store, {A: [a1, a2, FakeWs()], B: [b1, b2, FakeWs()]})
+    fleet.at(0)
+    fleet.quiet(69)
+    a1.frames.append(ConnectionClosedError(None, None))
+    b1.frames.append(ConnectionClosedError(None, None))
+    fleet.at(70)  # both drop together and reconnect at 71: both are due at 191
+    # While `a` closes for its rotation, `b`'s thread asks its gate too.
+    a2.on_close = lambda: fleet.step(B, fleet.t)
+    fleet.quiet(250)
+    assert a2.closed
+    assert not b2.closed
+    fleet.at(251)
+    assert b2.closed
+    fleet.at(252)
+    assert fleet.connected == {A: [0, 71, 192], B: [60, 71, 252]}
+    # Each rotated interval ends inside its sibling's: no hole across either rotation.
+    assert coverage_rows(store)[2:] == [
+        ("binance_liq", 0, 71, 169, 0),
+        ("binance_liq", 1, 71, 229, 0),
+        ("binance_liq", 0, 192, 230, 1),
+        ("binance_liq", 1, 252, 252, 1),
+    ]
+    assert store.coverage("binance_liq", 71)[0] == (71, 230)
+
+
+def test_status_live_if_either_connection_live(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    a1, b1 = FakeWs(), FakeWs()
+    refusals: list[FakeWs | Exception] = [OSError("refused")] * 20
+    fleet = Fleet(store, {A: [a1, *refusals], B: [b1, *refusals]})
+    down = StreamStatus(live=False, last_proof=None)
+    assert fleet.collectors.status() == {
+        "binance_liq": down,
+        "bybit_liq": down,
+        "bybit_trades": down,
+    }
+    fleet.at(0)
+    assert fleet.collectors.status()["binance_liq"] == StreamStatus(live=True, last_proof=0)
+    fleet.quiet(99)
+    a1.frames.append(ConnectionClosedError(None, None))
+    fleet.quiet(110)  # `a` is down from 100 and cannot reconnect; `b` proved life at 100
+    assert fleet.collectors.status()["binance_liq"] == StreamStatus(live=True, last_proof=100)
+    fleet.quiet(129)
+    b1.frames.append(ConnectionClosedError(None, None))
+    fleet.quiet(180)  # both down; the last proof was `b`'s pong to its ping at 120
+    assert fleet.collectors.status()["binance_liq"] == StreamStatus(live=True, last_proof=120)
+    fleet.at(181)
+    assert fleet.collectors.status()["binance_liq"] == StreamStatus(live=False, last_proof=120)
+    assert fleet.collectors.status()["bybit_liq"] == down
+
+
+class SlowWs(FakeWs):
+    """For the threaded tests: each read blocks briefly and the close handshake takes 1 s."""
+
+    def recv(self, timeout: float | None = None) -> str:
+        time.sleep(0.01)
+        return super().recv(timeout)
+
+    def close(self) -> None:
+        time.sleep(1)
+        super().close()
+
+
+def test_restart_closes_open_intervals(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    old = Fleet(store, {A: [FakeWs()], B: [FakeWs()]})
+    old.at(0)
+    old.quiet(75)  # the process dies here, leaving both intervals open
+    left = coverage_rows(store)
+    assert [row[4] for row in left] == [1, 1]
+
+    def refuse(url: str, **kwargs: Any) -> FakeWs:
+        raise OSError("refused")
+
+    new = Collectors(store, connect=refuse)
+    new.start()
+    try:
+        # Closed at the ends they last saved, before any new connection could open a row.
+        assert coverage_rows(store) == [(*row[:4], 0) for row in left]
+    finally:
+        new.stop()
+    assert coverage_rows(store) == [(*row[:4], 0) for row in left]
+
+
+def test_parallel_stop_within_deadline(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    opened: list[SlowWs] = []
+    lock = threading.Lock()
+
+    def connect(url: str, **kwargs: Any) -> SlowWs:
+        ws = SlowWs(ACK) if url == BYBIT_URL else SlowWs()
+        with lock:
+            opened.append(ws)
+        return ws
+
+    collectors = Collectors(store, connect=connect)
+    collectors.start()
+    deadline = time.monotonic() + 5
+    while len(coverage_rows(store)) < 3 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [row[4] for row in coverage_rows(store)] == [1, 1, 1]
+    started = time.monotonic()
+    collectors.stop()
+    # Three 1 s close handshakes, run in parallel.
+    assert time.monotonic() - started < 2
+    assert len(opened) == 3  # the second connection of each stream waits 60 s
+    assert all(ws.closed for ws in opened)
+    assert [row[4] for row in coverage_rows(store)] == [0, 0, 0]
