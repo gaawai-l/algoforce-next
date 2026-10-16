@@ -743,174 +743,179 @@ export default function MarketPage() {
           {method === "td" && (
             <RegimeCheck stream={stream} rules={rules} live={!selectedId} />
           )}
-          <section className="wh-replay">
-            <div className="wh-section-title">
-              <div>
-                <span className="wh-eyebrow">{text("replay.eyebrow")}</span>
-                <h2>{text("replay.title")}</h2>
-              </div>
-              {analysis && (
-                <a
-                  href={`${PREFIX}/snapshots/${analysis.snapshot_id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {text("replay.json")}
-                </a>
-              )}
-            </div>
-            <label>
-              {text("replay.saved")}
-              <Dropdown
-                aria-label={text("replay.saved")}
-                value={selectedId ?? ""}
-                onValueChange={(value) => {
-                  setSelectedId(value || null);
-                  setMarketCutoff("");
-                  setCutoffEdited(false);
-                }}
-              >
-                <DropdownOption value="">
-                  {text("replay.latest")}
-                </DropdownOption>
-                {history.data?.map((item) => (
-                  <DropdownOption
-                    key={item.snapshot_id}
-                    value={item.snapshot_id}
-                  >
-                    {stamp(item.market_at, missing)} ·{" "}
-                    {text("replay.window", { window: item.rules.window })} ·{" "}
-                    {text("replay.bars", { count: item.bar_count })} ·{" "}
-                    {item.rules.demark
-                      ? text("engine.sequential")
-                      : text("engine.baseline")}{" "}
-                    · {labeled(text, "data", item.data_state)}
-                  </DropdownOption>
-                ))}
-              </Dropdown>
-            </label>
-            {analysis && (
-              <>
-                <div className="wh-cutoffs">
-                  <label>
-                    {text("replay.cutoff")}
-                    <input
-                      type="text"
-                      placeholder="YYYY-MM-DDTHH:mm:ss"
-                      value={marketCutoff}
-                      onChange={(e) => {
-                        setMarketCutoff(e.target.value);
-                        setCutoffEdited(true);
-                      }}
-                    />
-                  </label>
-                  <label>
-                    {text("replay.knowledge")}
-                    <Dropdown
-                      aria-label={text("replay.knowledge")}
-                      value={knowledgeMode}
-                      onValueChange={(value) => setKnowledgeMode(value)}
+          {/* Replay, audit and OHLC describe the K-line dataset; Flows has none. */}
+          {method !== "flows" && (
+            <>
+              <section className="wh-replay">
+                <div className="wh-section-title">
+                  <div>
+                    <span className="wh-eyebrow">{text("replay.eyebrow")}</span>
+                    <h2>{text("replay.title")}</h2>
+                  </div>
+                  {analysis && (
+                    <a
+                      href={`${PREFIX}/snapshots/${analysis.snapshot_id}`}
+                      target="_blank"
+                      rel="noreferrer"
                     >
-                      <DropdownOption value="pinned">
-                        {text("replay.pinned")}
-                      </DropdownOption>
-                      <DropdownOption value="as_known">
-                        {text("replay.asKnown")}
-                      </DropdownOption>
-                    </Dropdown>
-                  </label>
-                  <button
-                    disabled={busy || offline || !marketCutoff}
-                    onClick={() => void start("analyze")}
-                  >
-                    {pending?.kind === "analyze"
-                      ? text("replay.replaying")
-                      : text("replay.run")}
-                  </button>
+                      {text("replay.json")}
+                    </a>
+                  )}
                 </div>
-                <p className="wh-muted">
-                  {text("replay.pinnedNote", {
-                    time: stamp(analysis.knowledge_at, missing),
-                  })}
-                </p>
-                <p className="wh-hash">
-                  {text("replay.fingerprint", {
-                    hash: analysis.input_hash.slice(0, 24),
-                    mode: labeled(text, "mode", analysis.mode),
-                    engine: analysis.rules.engine_version,
-                  })}
-                </p>
-              </>
-            )}
-          </section>
-          <details className="wh-disclosure">
-            <summary>{text("audit.summary")}</summary>
-            {events.data && (
-              <div className="wh-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>{text("audit.time")}</th>
-                      <th>{text("audit.state")}</th>
-                      <th>{text("audit.reason")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {events.data.map((event, i) => (
-                      <tr key={i}>
-                        <td>{stamp(event.at)}</td>
-                        <td>{event.state}</td>
-                        <td>{event.reason}</td>
-                      </tr>
+                <label>
+                  {text("replay.saved")}
+                  <Dropdown
+                    aria-label={text("replay.saved")}
+                    value={selectedId ?? ""}
+                    onValueChange={(value) => {
+                      setSelectedId(value || null);
+                      setMarketCutoff("");
+                      setCutoffEdited(false);
+                    }}
+                  >
+                    <DropdownOption value="">
+                      {text("replay.latest")}
+                    </DropdownOption>
+                    {history.data?.map((item) => (
+                      <DropdownOption
+                        key={item.snapshot_id}
+                        value={item.snapshot_id}
+                      >
+                        {stamp(item.market_at, missing)} ·{" "}
+                        {text("replay.window", { window: item.rules.window })} ·{" "}
+                        {text("replay.bars", { count: item.bar_count })} ·{" "}
+                        {item.rules.demark
+                          ? text("engine.sequential")
+                          : text("engine.baseline")}{" "}
+                        · {labeled(text, "data", item.data_state)}
+                      </DropdownOption>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {latestJob?.checkpoint_batch_id && (
-              <a
-                href={`${PREFIX}/batches/${latestJob.checkpoint_batch_id}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {text("audit.batch")}
-              </a>
-            )}
-          </details>
-          {analysis && (
-            <details className="wh-disclosure">
-              <summary>{text("ohlc.summary")}</summary>
-              <div className="wh-table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>{text("ohlc.openTime")}</th>
-                      <th>{text("ohlc.open")}</th>
-                      <th>{text("ohlc.high")}</th>
-                      <th>{text("ohlc.low")}</th>
-                      <th>{text("ohlc.close")}</th>
-                      <th>{text("ohlc.volume")}</th>
-                      <th>{text("ohlc.revision")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...analysis.bars].reverse().map((row) => (
-                      <tr key={row.revision_id}>
-                        <td>{stamp(row.bar.open_time, missing)}</td>
-                        <td>{money(row.bar.open, missing)}</td>
-                        <td>{money(row.bar.high, missing)}</td>
-                        <td>{money(row.bar.low, missing)}</td>
-                        <td>{money(row.bar.close, missing)}</td>
-                        <td>{money(row.bar.volume, missing)}</td>
-                        <td title={row.revision_id}>
-                          v{row.revision} · {row.revision_id.slice(0, 8)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
+                  </Dropdown>
+                </label>
+                {analysis && (
+                  <>
+                    <div className="wh-cutoffs">
+                      <label>
+                        {text("replay.cutoff")}
+                        <input
+                          type="text"
+                          placeholder="YYYY-MM-DDTHH:mm:ss"
+                          value={marketCutoff}
+                          onChange={(e) => {
+                            setMarketCutoff(e.target.value);
+                            setCutoffEdited(true);
+                          }}
+                        />
+                      </label>
+                      <label>
+                        {text("replay.knowledge")}
+                        <Dropdown
+                          aria-label={text("replay.knowledge")}
+                          value={knowledgeMode}
+                          onValueChange={(value) => setKnowledgeMode(value)}
+                        >
+                          <DropdownOption value="pinned">
+                            {text("replay.pinned")}
+                          </DropdownOption>
+                          <DropdownOption value="as_known">
+                            {text("replay.asKnown")}
+                          </DropdownOption>
+                        </Dropdown>
+                      </label>
+                      <button
+                        disabled={busy || offline || !marketCutoff}
+                        onClick={() => void start("analyze")}
+                      >
+                        {pending?.kind === "analyze"
+                          ? text("replay.replaying")
+                          : text("replay.run")}
+                      </button>
+                    </div>
+                    <p className="wh-muted">
+                      {text("replay.pinnedNote", {
+                        time: stamp(analysis.knowledge_at, missing),
+                      })}
+                    </p>
+                    <p className="wh-hash">
+                      {text("replay.fingerprint", {
+                        hash: analysis.input_hash.slice(0, 24),
+                        mode: labeled(text, "mode", analysis.mode),
+                        engine: analysis.rules.engine_version,
+                      })}
+                    </p>
+                  </>
+                )}
+              </section>
+              <details className="wh-disclosure">
+                <summary>{text("audit.summary")}</summary>
+                {events.data && (
+                  <div className="wh-table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>{text("audit.time")}</th>
+                          <th>{text("audit.state")}</th>
+                          <th>{text("audit.reason")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {events.data.map((event, i) => (
+                          <tr key={i}>
+                            <td>{stamp(event.at)}</td>
+                            <td>{event.state}</td>
+                            <td>{event.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {latestJob?.checkpoint_batch_id && (
+                  <a
+                    href={`${PREFIX}/batches/${latestJob.checkpoint_batch_id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {text("audit.batch")}
+                  </a>
+                )}
+              </details>
+              {analysis && (
+                <details className="wh-disclosure">
+                  <summary>{text("ohlc.summary")}</summary>
+                  <div className="wh-table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>{text("ohlc.openTime")}</th>
+                          <th>{text("ohlc.open")}</th>
+                          <th>{text("ohlc.high")}</th>
+                          <th>{text("ohlc.low")}</th>
+                          <th>{text("ohlc.close")}</th>
+                          <th>{text("ohlc.volume")}</th>
+                          <th>{text("ohlc.revision")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...analysis.bars].reverse().map((row) => (
+                          <tr key={row.revision_id}>
+                            <td>{stamp(row.bar.open_time, missing)}</td>
+                            <td>{money(row.bar.open, missing)}</td>
+                            <td>{money(row.bar.high, missing)}</td>
+                            <td>{money(row.bar.low, missing)}</td>
+                            <td>{money(row.bar.close, missing)}</td>
+                            <td>{money(row.bar.volume, missing)}</td>
+                            <td title={row.revision_id}>
+                              v{row.revision} · {row.revision_id.slice(0, 8)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
+            </>
           )}
           <footer className="wh-footer">{text("footer")}</footer>
         </div>

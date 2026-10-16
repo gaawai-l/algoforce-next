@@ -255,9 +255,17 @@ it("wraps from Flows to TD Sequential and End jumps to Flows", async () => {
   );
 });
 
+// Resolves once the workspace response has rendered (the frame badge shows its
+// state), so absence checks cannot pass just because nothing has loaded yet.
+async function settled() {
+  await waitFor(() => expect(mocks.workspace).toHaveBeenCalled());
+  expect(await screen.findByText("fresh")).toBeTruthy();
+}
+
 it("shows the Flows panel without timeframe controls or a chart", async () => {
   openLevels("?symbol=BTCUSDT&method=flows");
   expect(await screen.findByText("flows.sellerPending")).toBeTruthy();
+  await settled();
   expect(
     screen
       .getByRole("tab", { name: /method\.flows/ })
@@ -270,6 +278,31 @@ it("shows the Flows panel without timeframe controls or a chart", async () => {
   expect(mocks.levels).not.toHaveBeenCalled();
 });
 
+it("reaches the perp placeholder from flow=perp", async () => {
+  openLevels("?symbol=BTCUSDT&method=flows&flow=perp");
+  expect(await screen.findByText("flows.perpPending")).toBeTruthy();
+  expect(screen.queryByText("flows.sellerPending")).toBeNull();
+  await settled();
+  expect(mocks.chart).not.toHaveBeenCalled();
+});
+
+it("hides the K-line replay, audit and OHLC sections under Flows", async () => {
+  openLevels("?symbol=BTCUSDT&method=flows");
+  expect(await screen.findByText("flows.sellerPending")).toBeTruthy();
+  await settled();
+  expect(screen.queryByText("replay.title")).toBeNull();
+  expect(screen.queryByText("audit.summary")).toBeNull();
+  expect(screen.queryByText("ohlc.summary")).toBeNull();
+  expect(screen.getByText("price.label")).toBeTruthy();
+});
+
+it("shows the K-line replay, audit and OHLC sections under Key levels", async () => {
+  openLevels("?symbol=BTCUSDT&method=levels");
+  expect(await screen.findByText("replay.title")).toBeTruthy();
+  expect(screen.getByText("audit.summary")).toBeTruthy();
+  expect(await screen.findByText("ohlc.summary")).toBeTruthy();
+});
+
 it("keeps the timeframe controls on the other tabs", async () => {
   openLevels("?symbol=BTCUSDT&method=td");
   expect(
@@ -280,6 +313,8 @@ it("keeps the timeframe controls on the other tabs", async () => {
 it("says flows are BTC only for ETH while the tab stays selectable", async () => {
   openLevels("?symbol=ETHUSDT&method=flows", { symbol: "ETHUSDT" });
   expect(await screen.findByText("flows.btcOnly")).toBeTruthy();
+  await settled();
+  expect(mocks.chart).not.toHaveBeenCalled();
   expect(screen.queryByText("flows.sellerPending")).toBeNull();
   expect(
     screen

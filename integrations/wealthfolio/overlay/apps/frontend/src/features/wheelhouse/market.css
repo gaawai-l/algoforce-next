@@ -1167,9 +1167,16 @@
 .wh-market .wh-flows-switch button:last-child {
   border-right: 0;
 }
+.wh-market .wh-flows-switch button:hover {
+  background: #19303a;
+}
 .wh-market .wh-flows-switch button[aria-pressed="true"] {
   background: #153338;
   color: var(--wh-cyan);
+}
+/* The container clips its corners, so the focus ring is drawn inside each button. */
+.wh-market .wh-flows-switch button:focus-visible {
+  outline-offset: -2px;
 }
 .wh-flows-panel .wh-flows-note {
   margin: 14px 0 0;
