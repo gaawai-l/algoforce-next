@@ -1,6 +1,6 @@
 """The original perp-squeeze page's v1 state rules, checked on synthetic 10-minute grids."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 import pytest
@@ -138,6 +138,16 @@ def test_blocks_align_to_epoch_drop_leading_partial_and_half_rule() -> None:
     assert r.thresholds.n_all == 3
 
 
+def test_blocks_align_to_epoch_8h() -> None:
+    # 04:00 is a 4h boundary but not an 8h one: the 24 buckets before 08:00 are a leading stub.
+    start = DAY0 + 4 * 3600
+    r = compute_states(grid(block(n=H4), block(n=H8), block(n=H8), start=start), "8h")
+    assert [b.t0 for b in r.blocks] == [at(DAY0 + 8 * 3600), at(DAY0 + 16 * 3600)]
+    assert all(b.buckets == H8 and not b.forming for b in r.blocks)
+    assert r.tail is None
+    assert r.thresholds.n_all == 2
+
+
 def test_quantile_floor_rank() -> None:
     assert quantile([4.0, 1.0, 3.0, 2.0], 0.75) == 3.0  # sorted[floor(0.75 * 3)] = sorted[2]
     assert quantile([4.0, 1.0, 3.0, 2.0], 0.9) == 3.0  # floor(2.7) = 2, no interpolation
@@ -155,6 +165,10 @@ CASCADE = [
     ("spot", {"dpx": 1.0, "doi": 50.0}),
     ("chop", {"dpx": 0.5}),
     ("shortun", {"doi": -100.0, "delta": 0.0}),  # no taker side: the original calls it short
+    # A big OI drop that also meets the squeeze rule: squeeze comes first in the cascade.
+    ("shortsq", {"dpx": 2.0, "sliq": 30.0, "lliq": 10.0, "doi": -200.0}),
+    # sLiq and dPx exactly on T_sLiq and T_px: the rule uses >=.
+    ("shortsq", {"dpx": 1.0, "sliq": 10.0}),
 ]
 
 
@@ -164,14 +178,14 @@ def test_cascade_each_branch() -> None:
     t = r.thresholds
     assert (t.s_liq, t.l_liq, t.oi) == (10.0, 10.0, 100.0)
     assert t.px == pytest.approx(1.0)
-    assert (t.n_liq, t.n_all) == (109, 109)
+    assert (t.n_liq, t.n_all) == (111, 111)
     assert not r.collecting
     assert [b.state for b in r.blocks[-len(CASCADE) :]] == [s for s, _ in CASCADE]
     assert all(b.state == "chop" for b in r.blocks[: -len(CASCADE)])
     tbl = table(r, 30)
     assert [row.state for row in tbl.rows] == list(TABLE_STATES)
-    assert (tbl.in_view, tbl.judged) == (109, 109)
-    assert sum(row.share for row in tbl.rows) == 100
+    assert (tbl.in_view, tbl.judged) == (111, 111)
+    assert sum(row.share or 0 for row in tbl.rows) == 100
 
 
 def test_both_liquidations_zero_degenerate_squeeze() -> None:
@@ -222,7 +236,7 @@ def test_collecting_gate() -> None:
     assert r.collecting
     assert r.covered_days == 41 / 6
     assert all(b.state is None for b in r.blocks)
-    assert all(t.judged == 0 and all(row.share == 0 for row in t.rows) for t in r.tables)
+    assert all(t.judged == 0 and all(row.share is None for row in t.rows) for t in r.tables)
     # Thresholds are still ranked while collecting; uncovered blocks do not count for the gate.
     assert r.thresholds.n_all == 46
 
@@ -281,8 +295,22 @@ def test_prob_largest_remainder() -> None:
     assert shares([0, 0, 0, 0, 0, 0, 1, 1]) == [0, 0, 0, 0, 0, 0, 50, 50]
     assert shares([0, 0, 0, 0, 0, 1, 1, 1]) == [0, 0, 0, 0, 0, 34, 33, 33]
     assert shares([0, 1, 0, 0, 0, 0, 1, 1]) == [0, 34, 0, 0, 0, 0, 33, 33]
-    # A state with no blocks gets no spare point even when points are left.
-    assert shares([0, 0, 0, 0, 0, 0, 0, 0]) == [0, 0, 0, 0, 0, 0, 0, 0]
+    # Nothing judged: there are no shares to give, rather than 0% for every state.
+    assert shares([0, 0, 0, 0, 0, 0, 0, 0]) is None
+
+
+def test_prob_empty_when_every_block_in_view_is_uncovered() -> None:
+    # 50 covered blocks pass the gate; the last 43 (over 7 days) are uncovered.
+    parts = [filler() for _ in range(50)] + [filler(liq=False) for _ in range(43)]
+    r = compute_states(grid(*parts), "4h")
+    assert not r.collecting
+    week = table(r, 7)
+    assert (week.in_view, week.judged) == (42, 0)
+    assert all((row.count, row.share, row.max_move) == (0, None, None) for row in week.rows)
+    assert (week.latest, week.latest_uncovered) == (None, True)
+    month = table(r, 30)
+    assert (month.in_view, month.judged) == (93, 50)
+    assert row_of(month, "chop") == (50, 100, pytest.approx(1.0), 50)  # one run of 50
 
 
 def test_max_move_runs() -> None:
@@ -417,6 +445,22 @@ def test_blocks_limited_to_30d_view() -> None:
     assert r.blocks[0].t0 == at(DAY0 + 60 * 4 * 3600)  # straddles `from`, so it is kept
     assert len(r.blocks) == 240 - 60 + 1
     assert r.thresholds.n_all == 241
+
+
+def test_grid_rejects_misaligned_or_ragged_input() -> None:
+    good = grid(filler(), filler())
+    with pytest.raises(ValueError, match="multiples of 600"):
+        replace(good, start=good.start + 300, last=good.last + 300)
+    with pytest.raises(ValueError, match="multiples of 600"):
+        replace(good, last=good.last + 300)
+    with pytest.raises(ValueError, match="ends before it starts"):
+        replace(good, start=good.last + STEP)
+    with pytest.raises(ValueError, match="oi has 47 buckets, expected 48"):
+        replace(good, oi=good.oi[:-1])
+    with pytest.raises(ValueError, match="liq_covered has 49 buckets, expected 48"):
+        replace(good, liq_covered=[*good.liq_covered, True])
+    with pytest.raises(ValueError, match="bybit:oi has 47 buckets, expected 48"):
+        replace(good, rest_series={"bybit:price": good.price, "bybit:oi": good.oi[:-1]})
 
 
 def test_forming_block_doi_nonzero_when_oi_present() -> None:

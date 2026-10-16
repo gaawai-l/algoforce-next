@@ -59,6 +59,26 @@ class Grid:
     rest_series: dict[str, list[float | None]]
     quarantined_days: int
 
+    def __post_init__(self) -> None:
+        if self.start % STEP or self.last % STEP:
+            raise ValueError(f"grid start and last must be multiples of {STEP}")
+        if self.last < self.start:
+            raise ValueError("grid ends before it starts")
+        n = (self.last - self.start) // STEP + 1
+        columns: list[tuple[str, Sequence[object]]] = [
+            ("price", self.price),
+            ("oi", self.oi),
+            ("vd", self.vd),
+            ("long_liq", self.long_liq),
+            ("short_liq", self.short_liq),
+            ("liq_covered", self.liq_covered),
+            ("vd_covered", self.vd_covered),
+        ]
+        columns += self.rest_series.items()
+        for name, values in columns:
+            if len(values) != n:
+                raise ValueError(f"grid {name} has {len(values)} buckets, expected {n}")
+
 
 class Imputed(Model):
     """Which features the original's rules set to 0 for missing inputs."""
@@ -115,7 +135,7 @@ class Thresholds(Model):
 class TableRow(Model):
     state: State
     count: int
-    share: int  # percent, by largest remainder; 0 for every row when nothing is judged
+    share: int | None  # percent, by largest remainder; None for every row when nothing is judged
     max_move: float | None  # percent, sign kept
     run_blocks: int | None
 
@@ -150,11 +170,14 @@ def quantile(values: Sequence[float], q: float) -> float:
     return sorted(values)[math.floor(q * (len(values) - 1))]
 
 
-def shares(counts: Sequence[int]) -> list[int]:
-    """Whole percents of `counts` (in TABLE_STATES order) adding up to 100, by largest remainder."""
+def shares(counts: Sequence[int]) -> list[int] | None:
+    """Whole percents of `counts` (in TABLE_STATES order) adding up to 100, by largest remainder.
+
+    None when nothing is counted: there is no share to give, and 0% would read as a real value.
+    """
     n = sum(counts)
     if n == 0:
-        return [0] * len(counts)
+        return None
     raw = [100 * c / n for c in counts]
     whole = [math.floor(v) for v in raw]
     rems = [v - f for v, f in zip(raw, whole, strict=True)]
@@ -303,7 +326,7 @@ def _table(grid: Grid, blocks: list[Block], spans: list[tuple[int, int]], show_d
             TableRow(
                 state=s,
                 count=counts[s],
-                share=pct[k],
+                share=None if pct is None else pct[k],
                 max_move=best[s][0] if s in best else None,
                 run_blocks=best[s][1] if s in best else None,
             )
