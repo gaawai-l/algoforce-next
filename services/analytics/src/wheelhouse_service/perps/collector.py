@@ -49,6 +49,10 @@ VENUES: dict[Stream, Venue] = {
 BYBIT_PING = '{"op":"ping"}'
 
 RECV_TIMEOUT = 1.0
+READ_CAP = 1_000  # frames read in one step at most
+# The client stops reading the socket past this many queued frames. It exceeds what one step
+# reads, so a read that finds the queue empty means the socket is drained too.
+QUEUE_CAP = 10 * READ_CAP
 HEARTBEAT = 20.0  # seconds between pings; also the longest wait for a pong or a subscription ack
 MARGIN = 2.0  # an interval ends this long before its last proof of life, for clock error
 FLUSH_EVERY = 1.0
@@ -179,6 +183,7 @@ class Collector:
 
         self._ws: Connection | None = None
         self._opened_at = 0.0
+        self._caught_up = -math.inf  # when a read last found the queue empty
         self._next_ping = 0.0
         # The pending ping's pong event, and when the ping was sent.
         self._pong: tuple[threading.Event, float] | None = None
@@ -205,20 +210,20 @@ class Collector:
         return None if live is None else live.start
 
     def step(self, now: float) -> None:
-        """Connect when due, read one frame, keep the heartbeat, rotate, then commit when due.
+        """Connect when due, read the queued frames, keep the heartbeat, rotate, then commit when
+        due.
 
-        A frame is credited at the `now` of the step that reads it, so frames must not queue
-        unread for longer than the margin: a suspension between steps or a stalled commit ends
-        the connection at the proof held before it."""
+        A frame is credited at the `now` of the step that reads it. It arrived after a read last
+        found the queue empty (or after the handshake), so if that was longer ago than the
+        margin (a slow commit, a suspended process), the connection ends at the proof held
+        before and the frames queued meanwhile are never read."""
         previous, self._last_step = self._last_step, now
         if previous == -math.inf:
             self._retry_at = now + self._delay
         if self._ws is not None:
-            # Connected, `run` steps again at once; a step reads for at most RECV_TIMEOUT and its
-            # commit takes at most MARGIN. The gap counts from the handshake if that came later.
-            since = max(previous, self._opened_at)
-            if now - since > RECV_TIMEOUT + MARGIN:
-                self._fail(since, "suspended")
+            since = max(self._caught_up, self._opened_at)
+            if now - since > MARGIN:
+                self._fail(since, "stalled")
         ws = self._ws
         if ws is None:
             if now >= self._retry_at:
@@ -230,13 +235,7 @@ class Collector:
             if self._ws is ws:
                 self._check_age(now)
         if now >= self._next_flush:
-            ws = self._ws  # perhaps opened in this step
-            started = self._clock()
             self._flush(now)
-            if ws is not None and self._ws is ws and self._clock() - started > MARGIN:
-                # The commit stalled (a slow lock): frames queued meanwhile would be credited
-                # late, so the connection ends at the proof held before the stall.
-                self._fail(now, "stalled")
 
     def run(self) -> None:
         """Thread entry: step until `stop`, then end the connection and close its interval."""
@@ -254,8 +253,10 @@ class Collector:
                 if self._ws is None:
                     self._wait(min(RECV_TIMEOUT, max(0.0, self._retry_at - self._clock())))
         finally:
-            self._shutdown()
-            self._done.set()
+            try:
+                self._shutdown()
+            finally:
+                self._done.set()
 
     def stop(self, deadline: float) -> None:
         """Ask `run` to end the connection and close its interval, waiting until `deadline`
@@ -281,6 +282,7 @@ class Collector:
                 ping_interval=None,
                 open_timeout=OPEN_TIMEOUT,
                 close_timeout=CLOSE_TIMEOUT,
+                max_queue=QUEUE_CAP,
                 legacy=True,
             )
         except (OSError, WebSocketException):
@@ -302,13 +304,24 @@ class Collector:
             self._fail(opened, "closed")
 
     def _receive(self, ws: Connection, now: float) -> None:
-        try:
-            frame = ws.recv(timeout=RECV_TIMEOUT)
-        except TimeoutError:
-            return
-        except (OSError, WebSocketException):
-            self._fail(now, "closed")
-            return
+        """Wait up to RECV_TIMEOUT for a frame, then take the frames already queued without
+        waiting, until the queue is empty (READ_CAP at most)."""
+        timeout = RECV_TIMEOUT
+        for _ in range(READ_CAP):
+            try:
+                frame = ws.recv(timeout=timeout)
+            except TimeoutError:
+                self._caught_up = self._clock()
+                return
+            except (OSError, WebSocketException):
+                self._fail(now, "closed")
+                return
+            self._take(frame, now)
+            if self._ws is not ws:
+                return
+            timeout = 0.0
+
+    def _take(self, frame: str | bytes, now: float) -> None:
         live = self._live
         held = live.proof if live is not None else None  # the proof before this frame
         self._prove(now)
@@ -412,12 +425,12 @@ class Collector:
     def _close(self, now: float, code: str, *, retry_at: float) -> None:
         """End the connection; its interval closes once the events it delivered are committed."""
         ws, self._ws, self._pong = self._ws, None, None
-        if ws is not None:
-            with suppress(OSError, WebSocketException):
-                ws.close()
         if self._live is not None:
             self._ended.append(self._live)
             self._live = None
+        if ws is not None:
+            with suppress(OSError, WebSocketException):
+                ws.close()
         self._retry_at = retry_at
         self._next_flush = min(self._next_flush, now)
         self._log(code)
@@ -507,6 +520,7 @@ class Collectors:
         self.store = store
         self._clock = clock
         self._lock = threading.Lock()
+        self._used = False  # set by the first start or stop: it starts once, never after a stop
         self._rotated: dict[Stream, float] = {}  # when each stream's last rotation was allowed
         self.collectors = {
             (stream, conn): Collector(
@@ -527,6 +541,10 @@ class Collectors:
     def start(self) -> None:
         """Close the intervals a previous process left open, then run each connection in a
         thread."""
+        with self._lock:
+            if self._used:
+                raise RuntimeError("perps collectors start once, and not after a stop")
+            self._used = True
         self.store.close_open_coverage()
         for (stream, conn), collector in self.collectors.items():
             name = f"perps-{stream}-{conn}"
@@ -535,6 +553,8 @@ class Collectors:
     def stop(self, total_deadline: float = STOP_WITHIN) -> None:
         """Stop every connection in parallel, waiting `total_deadline` seconds at most. An interval
         still open then is closed at its last saved end on the next start."""
+        with self._lock:
+            self._used = True
         deadline = self._clock() + total_deadline
         for collector in self.collectors.values():
             collector.stop(self._clock())  # asks a running loop to stop, without waiting

@@ -22,6 +22,8 @@ from websockets.exceptions import ConnectionClosedError
 from wheelhouse_service.perps import collector as collector_module
 from wheelhouse_service.perps.collector import (
     BUFFER_CAP,
+    QUEUE_CAP,
+    READ_CAP,
     ROTATE_AFTER,
     Collector,
     Collectors,
@@ -61,7 +63,8 @@ def edited(frame: str, **fields: Any) -> str:
 
 class FakeWs:
     """Plays its frames one per `recv`; an exception is raised and a callable is called (then the
-    read times out). An empty script times out."""
+    read times out). An empty script times out. A step reads every frame queued, so frames meant
+    for a later step are appended before it."""
 
     def __init__(self, *frames: str | BaseException | Callable[[], object]) -> None:
         self.frames = list(frames)
@@ -73,7 +76,7 @@ class FakeWs:
         self.recv_calls = 0
 
     def recv(self, timeout: float | None = None) -> str:
-        assert timeout is not None and 0 < timeout <= 1
+        assert timeout is not None and 0 <= timeout <= 1
         self.recv_calls += 1
         if not self.frames:
             raise TimeoutError
@@ -258,6 +261,10 @@ class RecordingStore(PerpsStore):
         self._record("extend_coverage", end)
         super().extend_coverage(row_id, end)
 
+    def close_open_coverage(self) -> None:
+        self._record("close_open_coverage", None)
+        super().close_open_coverage()
+
 
 class SlowStore(PerpsStore):
     """While `rig` is set, each write waits `delay` seconds for the lock on the rig's clock."""
@@ -335,7 +342,13 @@ def test_coverage_start_bybit_ack_binance_handshake(tmp_path: Path):
         (
             100,
             BINANCE_URL,
-            {"ping_interval": None, "open_timeout": 5.0, "close_timeout": 2.0, "legacy": True},
+            {
+                "ping_interval": None,
+                "open_timeout": 5.0,
+                "close_timeout": 2.0,
+                "max_queue": QUEUE_CAP,
+                "legacy": True,
+            },
         )
     ]
     assert binance_ws.sent == []  # the stream is named by the path
@@ -346,6 +359,8 @@ def test_coverage_start_bybit_ack_binance_handshake(tmp_path: Path):
     bybit.at(100, 101)
     assert bybit.calls[0][1] == BYBIT_URL
     assert bybit.calls[0][2]["ping_interval"] is None
+    # The reader never pauses before a step could drain it, so an empty queue means caught up.
+    assert QUEUE_CAP > READ_CAP
     assert [json.loads(m) for m in bybit_ws.sent] == [
         {"op": "subscribe", "args": ["allLiquidation.BTCUSDT"]}
     ]
@@ -489,9 +504,16 @@ def test_backoff_restarts_after_a_stable_connection(tmp_path: Path):
 
 def test_trades_recorded_in_batches(tmp_path: Path):
     store = RecordingStore(tmp_path / "perps.sqlite3")
-    ws = FakeWs(ACK, *TRADES[:3], PONG, *TRADES[3:])
+    ws = FakeWs(ACK, TRADES[0])
     rig = Rig(store, "bybit_trades", ws)
-    rig.at(0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)
+    rig.at(0, 0.25)
+    for frame in TRADES[1:3]:
+        ws.frames.append(frame)
+        rig.at(rig.t + 0.25)
+    for frame in (PONG, *TRADES[3:]):
+        ws.frames.append(frame)
+        rig.at(rig.t + 0.25)
+    rig.at(2)
     assert json.loads(ws.sent[0]) == {"op": "subscribe", "args": ["publicTrade.BTCUSDT"]}
     assert [(name, n) for name, n, _ in store.writes if name == "record_trades"] == [
         ("record_trades", 8),
@@ -643,16 +665,78 @@ def test_stall_drops_the_connection_and_claims_nothing_after_it(tmp_path: Path):
     rig = Rig(store, "bybit_trades", first, FakeWs())
     rig.at(0, 0.5, 1)
     rig.quiet(4)
-    first.frames.extend([*TRADES[:5], ConnectionClosedError(None, None)])
+    first.frames.append(TRADES[0])
     store.rig = rig
     rig.at(5)  # the commit waits 10 s on the lock: the clock reads 15 after it
     store.rig = None
+    first.frames.extend([*TRADES[1:5], ConnectionClosedError(None, None)])  # queued meanwhile
+    rig.at(15)
     assert first.closed
     assert len(first.frames) == 5  # the frames queued during the stall are never read
-    rig.at(16)
     assert coverage_rows(store) == [("bybit_trades", 0, 0.5, 3, 0)]
     [(buy, sell)] = store.trades("bybit", 0).values()
     assert (buy, sell) == (0, pytest.approx(0.001))
+
+
+class Feed(FakeWs):
+    """A stream on the rig's clock: frames arrive at set times, and a read waits up to its
+    timeout for the next one."""
+
+    def __init__(self, rig: Rig, arrivals: list[tuple[float, str]]) -> None:
+        super().__init__()
+        self.rig = rig
+        self.arrivals = arrivals
+
+    def recv(self, timeout: float | None = None) -> str:
+        assert timeout is not None and 0 <= timeout <= 1
+        if self.arrivals and self.arrivals[0][0] <= self.rig.t + timeout:
+            self.rig.t = max(self.rig.t, self.arrivals[0][0])
+            return self.arrivals.pop(0)[1]
+        self.rig.t += timeout
+        raise TimeoutError
+
+
+class SlowTradesStore(PerpsStore):
+    """Recording trades takes `delay` seconds on the rig's clock."""
+
+    rig: "Rig | None" = None
+    delay = 1.2
+
+    def record_trades(self, venue: Any, trades: Any) -> None:
+        if self.rig is not None:
+            self.rig.t += self.delay
+        super().record_trades(venue, trades)
+
+
+def test_busy_stream_with_slow_commits_claims_no_unread_frame(tmp_path: Path):
+    store = SlowTradesStore(tmp_path / "perps.sqlite3")
+    rig = Rig(store, "bybit_trades")
+    trades = [(1 + n * 0.05, TRADES[0]) for n in range(int(40 / 0.05))]  # 20 frames a second
+    feed = Feed(rig, [(0.0, ACK), *trades])
+    rig.results.append(feed)
+    store.rig = rig  # each commit of trades takes 1.2 s: under the margin, yet longer than 1 s
+    while rig.t < 30:
+        rig.at(rig.t)  # each step starts where the last one ended, as `run` does
+    store.rig = None
+    rig.collector.stop(rig.t)
+    unread = [at for at, _ in feed.arrivals if at <= rig.t]
+    [(_, _, start, end, _)] = coverage_rows(store)
+    assert (start, end) == (0, pytest.approx(rig.t - 2, abs=1.5))
+    assert not [at for at in unread if start <= at <= end]
+
+
+def test_a_step_reads_at_most_read_cap_frames(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    other_symbol = lines("binance_force_order.jsonl")[0]  # skipped, so nothing is stored
+    ws = FakeWs(*[other_symbol] * (READ_CAP + 5))
+    rig = Rig(store, "binance_liq", ws, FakeWs())
+    rig.at(0, 1)
+    assert ws.recv_calls == READ_CAP
+    assert len(ws.frames) == 5
+    # The queue was never seen empty since the handshake at 0: 2.5 s later the connection ends.
+    rig.at(2.5)
+    assert ws.closed
+    assert len(ws.frames) == 5
 
 
 def test_stall_in_the_connect_step_claims_nothing(tmp_path: Path):
@@ -663,12 +747,12 @@ def test_stall_in_the_connect_step_claims_nothing(tmp_path: Path):
     store.rig = rig
     rig.at(0)  # opening the coverage row waits 10 s on the lock: the clock reads 10 after it
     store.rig = None
+    rig.at(10)
     assert first.closed
     assert len(first.frames) == 2  # the frame queued during the stall proves nothing
-    rig.at(10.5)
     assert coverage_rows(store) == [
         ("binance_liq", 0, 0, 0, 0),
-        ("binance_liq", 0, 10.5, 10.5, 1),
+        ("binance_liq", 0, 10, 10, 1),
     ]
 
 
@@ -681,7 +765,7 @@ def test_stall_guard_times_the_commit_alone(tmp_path: Path, delay: float, droppe
         rig.t += 1  # a read on a quiet stream waits its full second
 
     ws = FakeWs(*[wait_out_read] * 30)
-    rig = Rig(store, "binance_liq", ws)
+    rig = Rig(store, "binance_liq", ws, FakeWs())
     rig.at(0)
     store.rig = rig  # from here each write takes `delay`; the end is written at 10 and 20
     while rig.t < 25 and not ws.closed:
@@ -723,7 +807,7 @@ def test_dropped_event_splits_coverage_around_it(tmp_path: Path):
     rig.at(base)
     rig.quiet(base + 7)
     ws.frames.append(edited(BTC_FORCE_ORDER, T=1792186097000))
-    rig.at(base + 8)
+    rig.at(base + 8, base + 9)
     ws.frames.append(edited(BTC_FORCE_ORDER, S="SHORT"))
     rig.at(base + 10.5)
     rows = coverage_rows(store)
@@ -822,6 +906,8 @@ def test_two_connections_union_keeps_coverage_when_one_drops(
     assert a2.closed and b1.closed
     stopped = [r for r in caplog.records if r.getMessage().endswith("event=stopped")]
     assert len(stopped) == 6  # each connection stops once, though stop asks twice
+    with pytest.raises(RuntimeError):
+        fleet.collectors.start()  # a stopped fleet stays stopped
 
 
 def test_rotation_deferred_when_sibling_not_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -861,8 +947,14 @@ def test_rotations_of_a_stream_stay_a_minute_apart(tmp_path: Path, monkeypatch: 
     a1.frames.append(ConnectionClosedError(None, None))
     b1.frames.append(ConnectionClosedError(None, None))
     fleet.at(70)  # both drop together and reconnect at 71: both are due at 191
-    # While `a` closes for its rotation, `b`'s thread asks its gate too.
-    a2.on_close = lambda: fleet.step(B, fleet.t)
+
+    def during_close() -> None:
+        # While `a` closes for its rotation, `b`'s thread asks its gate too. `a`'s interval has
+        # already ended, and the claim holds `b` back for a minute.
+        assert fleet.collectors.collectors[A].covering_since is None
+        fleet.step(B, fleet.t)
+
+    a2.on_close = during_close
     fleet.quiet(250)
     assert a2.closed
     assert not b2.closed
@@ -907,55 +999,73 @@ def test_status_live_if_either_connection_live(tmp_path: Path):
 
 
 class SlowWs(FakeWs):
-    """For the threaded tests: each read blocks briefly and the close handshake takes 1 s."""
+    """For the threaded tests: each read blocks briefly and the close handshake takes `closing`
+    seconds."""
+
+    closing = 1.0
 
     def recv(self, timeout: float | None = None) -> str:
         time.sleep(0.01)
         return super().recv(timeout)
 
     def close(self) -> None:
-        time.sleep(1)
+        time.sleep(self.closing)
         super().close()
 
 
+def slow_connect(opened: list[SlowWs], closing: float = 1.0) -> Callable[..., SlowWs]:
+    lock = threading.Lock()
+
+    def connect(url: str, **kwargs: Any) -> SlowWs:
+        ws = SlowWs(ACK) if url == BYBIT_URL else SlowWs()
+        ws.closing = closing
+        with lock:
+            opened.append(ws)
+        return ws
+
+    return connect
+
+
+def wait_for_rows(store: PerpsStore, n: int, open_: int) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if [row[4] for row in coverage_rows(store)].count(open_) >= n:
+            return
+        time.sleep(0.01)
+    raise AssertionError("the coverage rows did not appear")
+
+
 def test_restart_closes_open_intervals(tmp_path: Path):
-    store = PerpsStore(tmp_path / "perps.sqlite3")
+    store = RecordingStore(tmp_path / "perps.sqlite3")
     old = Fleet(store, {A: [FakeWs()], B: [FakeWs()]})
     old.at(0)
     old.quiet(75)  # the process dies here, leaving both intervals open
     left = coverage_rows(store)
     assert [row[4] for row in left] == [1, 1]
+    store.writes.clear()
 
-    def refuse(url: str, **kwargs: Any) -> FakeWs:
-        raise OSError("refused")
-
-    new = Collectors(store, connect=refuse)
+    opened: list[SlowWs] = []
+    new = Collectors(store, connect=slow_connect(opened, closing=0))
     new.start()
     try:
-        # Closed at the ends they last saved, before any new connection could open a row.
-        assert coverage_rows(store) == [(*row[:4], 0) for row in left]
+        wait_for_rows(store, 3, open_=1)  # the new connections cover
+        assert store.writes[0][0] == "close_open_coverage"  # before any new row
+        rows = coverage_rows(store)
+        assert rows[:2] == [(*row[:4], 0) for row in left]  # closed at their last saved ends
+        assert [row[4] for row in rows[2:]] == [1, 1, 1]
+        with pytest.raises(RuntimeError):
+            new.start()  # one thread per connection, never two
     finally:
         new.stop()
-    assert coverage_rows(store) == [(*row[:4], 0) for row in left]
+    assert [row[4] for row in coverage_rows(store)] == [0] * 5
 
 
 def test_parallel_stop_within_deadline(tmp_path: Path):
     store = PerpsStore(tmp_path / "perps.sqlite3")
     opened: list[SlowWs] = []
-    lock = threading.Lock()
-
-    def connect(url: str, **kwargs: Any) -> SlowWs:
-        ws = SlowWs(ACK) if url == BYBIT_URL else SlowWs()
-        with lock:
-            opened.append(ws)
-        return ws
-
-    collectors = Collectors(store, connect=connect)
+    collectors = Collectors(store, connect=slow_connect(opened))
     collectors.start()
-    deadline = time.monotonic() + 5
-    while len(coverage_rows(store)) < 3 and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert [row[4] for row in coverage_rows(store)] == [1, 1, 1]
+    wait_for_rows(store, 3, open_=1)
     started = time.monotonic()
     collectors.stop()
     # Three 1 s close handshakes, run in parallel.
@@ -963,3 +1073,36 @@ def test_parallel_stop_within_deadline(tmp_path: Path):
     assert len(opened) == 3  # the second connection of each stream waits 60 s
     assert all(ws.closed for ws in opened)
     assert [row[4] for row in coverage_rows(store)] == [0, 0, 0]
+
+
+def test_stop_returns_at_its_deadline(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    opened: list[SlowWs] = []
+    collectors = Collectors(store, connect=slow_connect(opened))
+    collectors.start()
+    wait_for_rows(store, 3, open_=1)
+    started = time.monotonic()
+    collectors.stop(total_deadline=0.5)
+    assert 0.4 < time.monotonic() - started < 0.9
+    # The 1 s close handshakes are still running: the intervals are not closed yet.
+    assert [row[4] for row in coverage_rows(store)] == [1, 1, 1]
+    wait_for_rows(store, 3, open_=0)  # the threads still finish their work
+
+
+def test_stop_does_not_wait_for_a_run_that_failed_to_shut_down(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+
+    def stop() -> None:
+        rig.collector.stop(rig.t)
+
+    def broken_close() -> None:
+        raise RuntimeError("close failed")
+
+    ws = FakeWs(stop)
+    ws.on_close = broken_close
+    rig = Rig(store, "binance_liq", ws)
+    with pytest.raises(RuntimeError):
+        rig.collector.run()
+    started = time.monotonic()
+    rig.collector.stop(rig.t + 5)
+    assert time.monotonic() - started < 0.5
