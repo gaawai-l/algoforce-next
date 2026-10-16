@@ -99,3 +99,49 @@ worker 首次同步用时 2.8 秒，BRK 版本 0.12.2，day1 与 URPD 都是 fre
 
 - **已保存快照下的 latestOnly 提示**：本地库没有已保存的快照，没在浏览器中验证；单元测试已覆盖。
 - **推送**：本分支未推送，因为 OAuth token 缺 `workflow` scope，原因见 SDD 记录。
+
+## 7. 整分支终审与修复（同日补记）
+
+终审结论为"修复后可合并"，严重问题 0 项，重要问题 1 项。
+
+**重要问题**：URPD 接口持续报错时，Median 会退回到任意旧的快照，而界面不显示快照日期，旧数据看起来像当前读数。
+- 后端：退回时只接受日期不早于运行日前一天的快照，更旧的一律视同没有，不出 Median，reason 记 `urpd_missing`。
+- URPD 阶段失败不再给周期视图带上 `brk_unavailable`，错误只记在 `/status` 的 `last_error` 里。
+- 前端：Source 行显示 URPD 日期；URPD 日期早于 levels 的 as_of 时，Median 在 inspector 和图上都标出自己的日期。
+- 对应提交：`522789e`、`73a945b`。
+
+**同一批顺带修复的小问题**
+- refreshing 提示移到折叠区块之外，手机上也能看到。
+- Perp 占位文案写明缺哪类数据源：Glassnode、Coinalyze 或自建清算采集器。
+- 测试辅助代码的类型错误（`b2066ae`）。
+- 周期徽章改用 `isError` 判断请求失败。
+
+修复后经过一次限定范围的复审：6 项全部解决，没有引入新问题。浏览器复核：Source 显示"URPD 筹码分布 2026-10-16 UTC"；URPD 日期与 as_of 相同，所以 Median 不加日期标记。
+
+**环境问题**：本机 Vite 的文件监听不会收到 `foundation.py sync` 写入 `.local/wealthfolio` 的改动。每次 sync 之后，都要重启 `pnpm --filter frontend dev`，页面才会更新。原因未查，可能与路径位于 `.local` 下有关。
+
+## 8. 执行中的裁定
+
+| 编号 | 裁定 | 判错的代价 |
+|---|---|---|
+| R1 | 按用户要求，在主 checkout 的 `claude/btc-onchain-perp` 分支上执行，不另开 worktree | 与用户未跟踪的遗留文件共用一个 checkout |
+| R2 | 各任务只在本地提交，推送统一放到最后。push 被拒是因为 OAuth token 缺 `workflow` scope：本地 main 上还没推送的 60cab3e、f85e118 改动了 `.github/workflows` | 在用户刷新 token 之前，提交都停留在本地 |
+| R3 | `last_complete` 返回的数值以 BRK 序列名为键，`model_lines` 也按同样的键读取 | 改个名而已 |
+| R4 | 周期只保留 W、STH、TMM、`price_close` 四条都有值且大于 0 的日期，这是原站的规则；spec §3.1 正文只写了三条成本序列 | 只缺 `price_close` 的日期会被跳过 |
+| R5 | spec 中"最后一行超过 3 天视为过期"的 QC，由更严格的 `day1_state` 覆盖 | 无，只是更早标为 stale |
+| R6 | URPD 报错时，仍用新序列派生周期和模型线；后由 R12 修正 | — |
+| R7 | 把 `.local/wealthfolio` 中唯一一行过期的宿主补丁（`href` 少了 `?method=td`）按已提交的补丁对齐 | 无持久影响，checkout 可以重新生成 |
+| R8 | `CycleView.changes` 改为可空，覆盖计划原文的 `int`，以免缺失数据显示成 0 | 契约多一个可空字段 |
+| R9 | reasons 按模块过滤：cycle 只保留自己依赖的序列缺失和 `brk_unavailable`；levels 只保留模型线序列缺失、`urpd_missing` 和 `brk_unavailable` | 跨模块的问题只能在 `/status` 中看到 |
+| R10 | Flows 下隐藏 Replay、Audit、OHLC，与确认过的 mockup 一致；页头现价和后台刷新保留 | 要恢复只需改回一个条件 |
+| R11 | Task 11 由主会话亲自执行，并用分支代码替换本机遗留的 Python 和 Vite 孤儿进程，同时启动 wealthfolio 容器 | 用户的长跑开发进程被等价的新进程替换 |
+| R12 | 修正 R6：URPD 退回快照的日期不早于运行日前一天，否则不出 Median；URPD 失败不再影响周期视图；前端显示 URPD 日期，并标出旧的 Median | URPD 中断超过一天后，Median 会缺失，但缺失是如实显示的 |
+
+**暂缓处理的问题**（详见 `.superpowers/sdd/PLAN-P1/progress.md`）
+- 午夜宽限期内，forming 标记会消失，每天不超过 1 小时。
+- BRK 整天不可达、数据却仍是 fresh 时，徽章不提示。
+- 越界的多行贴边标注可能进入绘图区。
+- `UrpdBucket` 把用不到的字段设为必填。
+- stale 日期格式不统一。
+- `market-page` 用错误消息字符串判断失败，这个隐患目前不会触发。
+- 各任务评审中记下的若干 Minor 项。

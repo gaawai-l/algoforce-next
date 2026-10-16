@@ -75,6 +75,9 @@ Task 11 的浏览器核验需要 `make dev` 起全三个服务：Wealthfolio :80
 1. **当天的行里有部分序列还没更新**（例如 `realized_price` 为 null）：模型线改用"4 条模型线都齐的最后一行"，周期按自己的规则跳过缺值的日期；不报错，不补 0。测试放在 Task 4 的 `last_complete` 和 Task 3。
 2. **UTC 午夜到 02:00 之间，BRK 还没有今天的行**：day1 状态在这段宽限期内仍算 fresh，不会在每天午夜闪成 stale。测试放在 Task 6 的 `day1_state`。
 3. **今天的 URPD 还不存在**：退回昨天的快照，`urpd_date` 写昨天；两天都没有时，不出 Median，其余 4 条线照出，并在 reasons 里加 `urpd_missing`。测试放在 Task 5。
+   - URPD 接口报错（非 404）时也照此处理，规则见执行中的裁定 R12：只接受日期不早于运行日前一天的已存快照，更旧的一律视同没有。
+   - URPD 失败只记在 `last_error` 里，不影响周期视图。
+   - 界面上 Source 行显示 URPD 日期；如果它早于 levels 的 as_of，Median 会标出自己的日期。
 4. **BRK 版本变了，但重新取数中途失败**：旧数据保持可读，`refreshing` 保持 true，直到下一次成功替换。界面显示 refreshing 提示。测试放在 Task 5 和 Task 9。
 5. **选了 ETH/MU，或者正在看已保存的快照**：不显示徽章，不画叠加线；Key levels 显示 BTC only 或 latest only，Flows 显示 BTC only。测试放在 Task 8、Task 9 和 Task 10。
 
