@@ -1,7 +1,7 @@
 """Read-only on-chain endpoints. They only read the private store: no network, no computation."""
 
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -13,12 +13,18 @@ from pydantic import AwareDatetime
 from ..market import Model
 from .brk import BrkClient
 from .cycle import Cycle
-from .levels import ModelLine
+from .levels import LINE_SERIES, ModelLine
 from .models import CycleView, DatasetStatus, LevelsView, OnchainStatus, day1_state
 from .store import OnchainStore
-from .sync import OnchainSync
+from .sync import CYCLE_SERIES, OnchainSync
 
 URPD_REASONS = ("urpd_missing", "brk_unavailable")
+CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unavailable")
+LEVELS_REASONS = (
+    *(f"series_missing:{name}" for name in LINE_SERIES.values()),
+    "urpd_missing",
+    "brk_unavailable",
+)
 
 
 class StoredLevels(Model):
@@ -46,6 +52,12 @@ def forming_at(row: datetime, now: datetime) -> datetime | None:
 def stored_reasons(state: dict[str, str | None]) -> list[str]:
     reasons: list[str] = json.loads(state["reasons"] or "[]")
     return reasons
+
+
+def only(reasons: Iterable[str], relevant: Iterable[str]) -> list[str]:
+    """The reasons that concern one module, in their stored order."""
+    keep = set(relevant)
+    return [reason for reason in reasons if reason in keep]
 
 
 def instant(value: str | None) -> datetime | None:
@@ -125,7 +137,7 @@ def create_router(
                 dataset(
                     "urpd",
                     urpd_date,
-                    [reason for reason in reasons if reason in URPD_REASONS],
+                    only(reasons, URPD_REASONS),
                     "urpd_missing",
                 ),
             ],
@@ -135,7 +147,7 @@ def create_router(
     def cycle() -> CycleView:
         now = clock()
         state = db().state()
-        reasons = stored_reasons(state)
+        reasons = only(stored_reasons(state), CYCLE_REASONS)
         refreshing = state["refreshing"] == "true"
         result = stored_cycle()
         if result is None:
@@ -150,7 +162,7 @@ def create_router(
                 day=None,
                 components=[],
                 episodes=[],
-                changes=0,
+                changes=None,
                 brk_version=state["brk_version"],
             )
         return CycleView(
@@ -166,7 +178,7 @@ def create_router(
     def levels() -> LevelsView:
         now = clock()
         state = db().state()
-        reasons = stored_reasons(state)
+        reasons = only(stored_reasons(state), LEVELS_REASONS)
         refreshing = state["refreshing"] == "true"
         result = stored_levels()
         if result is None:

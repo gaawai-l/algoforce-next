@@ -65,6 +65,8 @@ def test_empty_store_is_unavailable_with_200(tmp_path: Path):
     assert cycle.json()["as_of"] is None
     assert cycle.json()["forming_at"] is None
     assert cycle.json()["components"] == []
+    assert cycle.json()["episodes"] == []
+    assert cycle.json()["changes"] is None
     assert cycle.json()["reasons"]
     assert levels.json()["lines"] == []
     assert levels.json()["onchain_close"] is None
@@ -150,11 +152,16 @@ def test_status_reports_each_dataset(tmp_path: Path):
 def test_missing_urpd_only_shows_in_reasons(tmp_path: Path):
     path = synced(tmp_path, urpd_dates=set())
     with TestClient(router_app(path, NOW)) as http:
+        cycle = http.get(f"{PREFIX}/cycle").json()
         levels = http.get(f"{PREFIX}/levels").json()
         status = http.get(f"{PREFIX}/status").json()
 
+    # The cycle does not use URPD, so it stays healthy and says nothing about it.
+    assert cycle["data_state"] == "fresh"
+    assert cycle["reasons"] == []
+    assert cycle["changes"] == 48
     assert levels["data_state"] == "fresh"
-    assert "urpd_missing" in levels["reasons"]
+    assert levels["reasons"] == ["urpd_missing"]
     assert levels["urpd_date"] is None
     assert levels["onchain_close"] is None
     assert {line["name"] for line in levels["lines"]} == LINES - {"median"}
@@ -162,6 +169,36 @@ def test_missing_urpd_only_shows_in_reasons(tmp_path: Path):
     assert day1["data_state"] == "fresh"
     assert (urpd["data_state"], urpd["last_at"]) == ("unavailable", None)
     assert urpd["reasons"] == ["urpd_missing"]
+
+
+def test_missing_cycle_series_only_concerns_the_cycle(tmp_path: Path):
+    missing = "utxos_1d_to_1w_old_realized_price"
+    path = synced(tmp_path, missing={missing})
+    with TestClient(router_app(path, NOW)) as http:
+        cycle = http.get(f"{PREFIX}/cycle").json()
+        levels = http.get(f"{PREFIX}/levels").json()
+
+    assert cycle["data_state"] == "unavailable"
+    assert cycle["reasons"] == [f"series_missing:{missing}"]
+    assert cycle["changes"] is None
+    assert levels["data_state"] == "fresh"
+    assert levels["reasons"] == []
+    assert {line["name"] for line in levels["lines"]} == LINES
+
+
+def test_missing_line_series_only_concerns_the_levels(tmp_path: Path):
+    missing = "lth_realized_price"
+    path = synced(tmp_path, missing={missing})
+    with TestClient(router_app(path, NOW)) as http:
+        cycle = http.get(f"{PREFIX}/cycle").json()
+        levels = http.get(f"{PREFIX}/levels").json()
+
+    assert levels["data_state"] == "unavailable"
+    assert levels["reasons"] == [f"series_missing:{missing}"]
+    assert levels["lines"] == []
+    assert cycle["data_state"] == "fresh"
+    assert cycle["reasons"] == []
+    assert cycle["state"] == "breakout"
 
 
 def test_failed_first_sync_is_unavailable_with_reason(tmp_path: Path):

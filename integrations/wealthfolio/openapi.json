@@ -1835,7 +1835,14 @@
             "title": "Episodes"
           },
           "changes": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Changes"
           },
           "brk_version": {

@@ -54,7 +54,8 @@ class CycleView(Model):
     day: int | None
     components: list[Component]
     episodes: list[Episode]
-    changes: int
+    # Null when there is no cycle: an absent count is not zero.
+    changes: int | None
     brk_version: str | None
 
 

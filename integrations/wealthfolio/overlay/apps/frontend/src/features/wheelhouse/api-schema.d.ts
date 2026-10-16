@@ -694,7 +694,7 @@ export interface components {
             /** Episodes */
             episodes: components["schemas"]["Episode"][];
             /** Changes */
-            changes: number;
+            changes: number | null;
             /** Brk Version */
             brk_version: string | null;
         };
