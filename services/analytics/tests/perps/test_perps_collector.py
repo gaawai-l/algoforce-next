@@ -7,6 +7,7 @@ calls `step(now)` (P4-R4).
 import json
 import sqlite3
 import threading
+import time
 from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -198,6 +199,19 @@ class RecordingStore(PerpsStore):
         super().extend_coverage(row_id, end)
 
 
+class SlowStore(PerpsStore):
+    """While `rig` is set, each write waits 10 s for the lock on the rig's clock."""
+
+    rig: "Rig | None" = None
+
+    @contextmanager
+    def connection(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        if write and self.rig is not None:
+            self.rig.t += 10
+        with super().connection(write=write) as db:
+            yield db
+
+
 def coverage_rows(store: PerpsStore) -> list[tuple[str, int, float, float, int]]:
     with store.connection() as db:
         return [
@@ -257,7 +271,11 @@ def test_coverage_start_bybit_ack_binance_handshake(tmp_path: Path):
     binance = Rig(store, "binance_liq", binance_ws, handshake=0.4)
     binance.at(100)
     assert binance.calls == [
-        (100, BINANCE_URL, {"ping_interval": None, "close_timeout": 2.0, "legacy": True})
+        (
+            100,
+            BINANCE_URL,
+            {"ping_interval": None, "open_timeout": 5.0, "close_timeout": 2.0, "legacy": True},
+        )
     ]
     assert binance_ws.sent == []  # the stream is named by the path
     assert coverage_rows(store) == [("binance_liq", 0, 100.4, 100.4, 1)]
@@ -309,8 +327,8 @@ def test_half_open_ends_coverage_at_last_proof_minus_2s_and_reconnects(tmp_path:
     store = PerpsStore(tmp_path / "perps.sqlite3")
     ws = FakeWs()
     rig = Rig(store, "binance_liq", ws, FakeWs())
-    rig.at(0, 20, 21)  # ping at 20, its pong seen at 21
-    assert rig.collector.last_proof == 21
+    rig.at(0, 20, 21)  # ping at 20, its pong seen at 21 but credited no later than 20
+    assert rig.collector.last_proof == 20
     ws.frames.append(BTC_FORCE_ORDER)
     rig.at(30)
     ws.answer_pings = False
@@ -352,7 +370,7 @@ def test_rotation_after_12h(tmp_path: Path):
 
     first = FakeWs()
     rig = Rig(store, "binance_liq", first, FakeWs(), gate=gate)
-    rig.at(0, 43190, 43191)  # ping at 43190, pong seen at 43191
+    rig.at(0, 43190, 43191)  # ping at 43190, pong seen at 43191 and credited at 43190
     assert asked == []
     rig.at(43200, 43205)  # 12 h old, but the gate holds the rotation
     assert asked == [43200, 43205]
@@ -363,7 +381,7 @@ def test_rotation_after_12h(tmp_path: Path):
     rig.at(43211)  # no backoff after a rotation
     assert rig.connected_at() == [0, 43211]
     assert coverage_rows(store) == [
-        ("binance_liq", 0, 0, 43189, 0),
+        ("binance_liq", 0, 0, 43188, 0),
         ("binance_liq", 0, 43211, 43211, 1),
     ]
 
@@ -423,7 +441,9 @@ def test_commit_failure_keeps_buffer_and_does_not_advance_coverage(tmp_path: Pat
     ws.frames.append(TRADES[0])
     rig.at(2)
     assert store.failed_writes == 1
-    rig.at(2.25)  # retried at the next step
+    rig.at(2.25)  # retried once a second, not at every step
+    assert store.failed_writes == 1
+    rig.at(3)
     assert store.failed_writes == 2
     rig.at(10.5, 11)  # the end is due, but the events are not stored
     assert coverage_rows(store) == [("bybit_trades", 0, 0.5, 0.5, 1)]
@@ -435,7 +455,7 @@ def test_commit_failure_keeps_buffer_and_does_not_advance_coverage(tmp_path: Pat
     [(buy, sell)] = store.trades("bybit", 0).values()
     assert (buy, sell) == (pytest.approx(0.614), pytest.approx(0.001))
     assert coverage_rows(store) == [("bybit_trades", 0, 0.5, 10, 1)]
-    assert rig.collector.counts == Counter({"commit_failed": 4})
+    assert rig.collector.counts == Counter({"commit_failed": 3})
 
 
 def test_buffer_cap_drops_and_ends_coverage(tmp_path: Path):
@@ -526,3 +546,84 @@ def test_run_steps_until_stop_and_closes_coverage(tmp_path: Path):
     other.at(200, 205)
     other.collector.stop(205)
     assert coverage_rows(store)[1] == ("binance_liq", 1, 200, 200, 0)
+
+
+def test_subscribe_rejected_reconnects(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    rejected = json.dumps({**json.loads(ACK), "success": False, "ret_msg": "error"})
+    first = FakeWs(rejected)
+    rig = Rig(store, "bybit_liq", first, FakeWs(ACK))
+    rig.at(0, 1)
+    assert first.closed
+    rig.at(1.5, 2, 3)  # backoff 1 s
+    assert rig.connected_at() == [0, 2]
+    assert coverage_rows(store) == [("bybit_liq", 0, 3, 3, 1)]
+
+
+def test_stall_drops_the_connection_and_claims_nothing_after_it(tmp_path: Path):
+    store = SlowStore(tmp_path / "perps.sqlite3")
+    first = FakeWs(ACK)
+    rig = Rig(store, "bybit_trades", first, FakeWs())
+    rig.at(0, 0.5, 1)
+    first.frames.extend([*TRADES[:5], ConnectionClosedError(None, None)])
+    store.rig = rig
+    rig.at(5)  # the commit waits 10 s on the lock: the clock reads 15 after it
+    store.rig = None
+    assert first.closed
+    assert len(first.frames) == 5  # the frames queued during the stall are never read
+    rig.at(16)
+    assert coverage_rows(store) == [("bybit_trades", 0, 0.5, 3, 0)]
+    [(buy, sell)] = store.trades("bybit", 0).values()
+    assert (buy, sell) == (0, pytest.approx(0.001))
+
+
+def test_dropped_event_splits_coverage_around_it(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    base = 1792186090.0  # the fixture event's T is base + 10.113
+    ws = FakeWs()
+    rig = Rig(store, "binance_liq", ws)
+    rig.at(base)
+    ws.frames.append(edited(BTC_FORCE_ORDER, T=1792186097000))
+    rig.at(base + 8)
+    ws.frames.append(edited(BTC_FORCE_ORDER, S="SHORT"))
+    rig.at(base + 10.5)
+    rows = coverage_rows(store)
+    assert rows == [
+        ("binance_liq", 0, base, base + 6, 0),
+        ("binance_liq", 0, base + 10.5, base + 10.5, 1),
+    ]
+    assert rows[0][3] < 1792186100.113 < rows[1][2]
+
+    # A frame that cannot be parsed splits the same way.
+    ws.frames.append(edited(BTC_FORCE_ORDER, T=1792186103000))
+    rig.at(base + 14)
+    ws.frames.append("not json")
+    rig.at(base + 16)
+    assert coverage_rows(store)[1:] == [
+        ("binance_liq", 0, base + 10.5, base + 12, 0),
+        ("binance_liq", 0, base + 16, base + 16, 1),
+    ]
+    assert rig.collector.counts == Counter({"unreadable_liquidation": 1, "bad_frame": 1})
+    assert len(store.liquidations("binance", 0)) == 2
+
+
+def test_default_wait_is_interrupted_by_stop(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    attempted = threading.Event()
+
+    def refuse(url: str, **kwargs: Any) -> FakeWs:
+        attempted.set()
+        raise OSError("refused")
+
+    collector = Collector(
+        store, "binance_liq", 0, rotate_gate=lambda: True, connect=refuse, rng=Uniform(1.0)
+    )
+    thread = threading.Thread(target=collector.run, daemon=True)
+    thread.start()
+    assert attempted.wait(5)
+    time.sleep(0.05)  # now in its 1 s backoff wait
+    started = time.monotonic()
+    collector.stop(time.time() + 5)
+    assert time.monotonic() - started < 0.5
+    thread.join(1)
+    assert not thread.is_alive()

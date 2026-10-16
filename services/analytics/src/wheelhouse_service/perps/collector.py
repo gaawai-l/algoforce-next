@@ -54,6 +54,7 @@ ROTATE_AFTER = 12 * 3600.0
 STABLE = 60.0  # a connection that lived this long restarts the reconnect backoff from 1 s
 MAX_BACKOFF = 60.0
 BUFFER_CAP = 50_000
+OPEN_TIMEOUT = 5.0
 CLOSE_TIMEOUT = 2.0
 
 logger = logging.getLogger("wheelhouse.perps.collector")
@@ -180,6 +181,7 @@ class Collector:
         self._trades: list[Trade] = []
         self._next_flush = -math.inf
         self._next_end = math.inf
+        self._last_step = -math.inf
 
     @property
     def last_proof(self) -> float | None:
@@ -188,6 +190,7 @@ class Collector:
 
     def step(self, now: float) -> None:
         """Connect when due, read one frame, keep the heartbeat, rotate, then commit when due."""
+        previous, self._last_step = self._last_step, now
         ws = self._ws
         if ws is None:
             if now >= self._retry_at:
@@ -195,11 +198,15 @@ class Collector:
         else:
             self._receive(ws, now)
             if self._ws is ws:
-                self._heartbeat(ws, now)
+                self._heartbeat(ws, now, previous)
             if self._ws is ws:
                 self._check_age(now)
         if now >= self._next_flush:
             self._flush(now)
+        if ws is not None and self._ws is ws and self._clock() - now > MARGIN:
+            # The step stalled (a slow commit): frames queued meanwhile would be credited late,
+            # so the connection ends at the proof held before the stall.
+            self._fail(now, "stalled")
 
     def run(self) -> None:
         """Thread entry: step until `stop`, then end the connection and close its interval."""
@@ -239,7 +246,11 @@ class Collector:
     def _open(self, now: float) -> None:
         try:
             ws = self._connect(
-                URLS[self.stream], ping_interval=None, close_timeout=CLOSE_TIMEOUT, legacy=True
+                URLS[self.stream],
+                ping_interval=None,
+                open_timeout=OPEN_TIMEOUT,
+                close_timeout=CLOSE_TIMEOUT,
+                legacy=True,
             )
         except (OSError, WebSocketException):
             self._fail(self._clock(), "connect_failed")
@@ -267,20 +278,29 @@ class Collector:
         except (OSError, WebSocketException):
             self._fail(now, "closed")
             return
+        live = self._live
+        held = live.proof if live is not None else None  # the proof before this frame
         self._prove(now)
         try:
             msg = json.loads(frame)
             if not isinstance(msg, dict):
                 raise TypeError("frame is not an object")
-            self._handle(msg, now)
+            lost = self._handle(msg, now)
         except (KeyError, TypeError, ValueError):
             self._warn("bad_frame")
+            lost = True
+        if lost and live is not None and held is not None and self._live is live:
+            # A dropped event must not sit in a covered bucket: the interval ends before this
+            # frame and a new one starts after it.
+            live.proof = held
+            self._ended.append(live)
+            self._begin(self._clock())
 
-    def _handle(self, msg: dict[str, Any], now: float) -> None:
+    def _handle(self, msg: dict[str, Any], now: float) -> bool:
+        """Buffer the frame's events; True when some were dropped."""
         if self.stream == "binance_liq":
             row = parse_binance_force_order(msg)
-            self._keep([] if row is None else [row])
-            return
+            return self._keep([] if row is None else [row])
         if "op" in msg:
             # Bybit's replies: the subscription ack, and the heartbeat's op "ping" / "pong".
             if msg["op"] == "subscribe":
@@ -288,26 +308,30 @@ class Collector:
                     self._fail(now, "subscribe_rejected")
                 elif self._live is None:
                     self._begin(self._clock())  # covered from the ack
-            return
+            return False
         if self.stream == "bybit_liq":
-            self._keep(parse_bybit_liquidation(msg))
-        else:
-            self._trades.extend(parse_bybit_trades(msg))
+            return self._keep(parse_bybit_liquidation(msg))
+        self._trades.extend(parse_bybit_trades(msg))
+        return False
 
-    def _keep(self, rows: list[RawLiquidation]) -> None:
-        """Buffer the events grid.py can read; count the others."""
+    def _keep(self, rows: list[RawLiquidation]) -> bool:
+        """Buffer the events grid.py can read; count the others and return True if any."""
         readable = [row for row in rows if _readable(self._venue, row)]
         if len(readable) < len(rows):
             self._warn("unreadable_liquidation", len(rows) - len(readable))
         self._liquidations.extend(readable)
+        return len(readable) < len(rows)
 
-    def _heartbeat(self, ws: Connection, now: float) -> None:
-        """Ping every 20 s and poll its pong without blocking; none within 20 s means half-open."""
+    def _heartbeat(self, ws: Connection, now: float, previous: float) -> None:
+        """Ping every 20 s and poll its pong without blocking; none within 20 s means half-open.
+
+        A pong seen now arrived after the previous step's poll (or the ping), so it proves life
+        no later than that."""
         if self._pong is not None:
             pong, sent = self._pong
             if pong.is_set():
                 self._pong = None
-                self._prove(now)
+                self._prove(max(sent, previous))
             elif now - sent >= HEARTBEAT:
                 self._fail(now, "half_open")
                 return
@@ -364,7 +388,8 @@ class Collector:
 
     def _flush(self, now: float) -> None:
         """Commit the buffered events, then write the coverage they back. A failed write keeps
-        everything for the next step, so coverage never moves past an uncommitted event."""
+        everything for the next try, so coverage never moves past an uncommitted event."""
+        self._next_flush = now + FLUSH_EVERY  # a failed write is retried a second later
         try:
             if self._liquidations:
                 self.store.insert_liquidations(self._venue, self.conn, self._liquidations)
@@ -393,8 +418,6 @@ class Collector:
             self._warn("commit_failed")
             if len(self._liquidations) + len(self._trades) > BUFFER_CAP:
                 self._drop_buffer()
-            return
-        self._next_flush = now + FLUSH_EVERY
 
     def _drop_buffer(self) -> None:
         """The store failed too long: drop the buffer and end coverage at the last commit."""
