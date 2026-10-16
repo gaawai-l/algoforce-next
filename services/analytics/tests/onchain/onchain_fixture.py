@@ -46,7 +46,7 @@ def _position(start: str) -> int:
 
 def _bulk(params: dict[str, str], missing: Set[str]) -> httpx.Response:
     names = params["series"].split(",")
-    if missing.intersection(names):
+    if not missing.isdisjoint(names):
         return _error(404, "series_not_found")
     start = _position(params["start"])
     body = []
