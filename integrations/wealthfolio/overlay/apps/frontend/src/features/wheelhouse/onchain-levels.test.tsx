@@ -370,10 +370,10 @@ it("reads the per-snapshot URPD reason codes in both languages", () => {
     "STH URPD snapshot missing for the $200 bucket",
   );
   expect(reasonText(en, "urpd_missing:all:lin1000")).toBe(
-    "all-holder URPD snapshot missing for the $1000 bucket",
+    "All-holder URPD snapshot missing for the $1000 bucket",
   );
   expect(reasonText(zh, "urpd_missing:all:lin200")).toBe(
-    "$200 桶宽缺少 全体 URPD 快照",
+    "$200 桶宽缺少全体持有者的 URPD 快照",
   );
   expect(reasonText(en, "urpd_grid_partial:lin500")).toBe(
     "some earlier URPD snapshots are missing for the $500 bucket; the grid uses the days available",

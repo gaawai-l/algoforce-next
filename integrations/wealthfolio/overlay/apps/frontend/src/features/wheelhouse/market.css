@@ -1243,6 +1243,12 @@
 .wh-cb-legend .is-lth {
   color: var(--wh-sky);
 }
+/* On phones the loaded legend wraps to two lines; reserve them so the chart does not jump. */
+@media (max-width: 600px) {
+  .wh-cb-legend {
+    min-height: 28px;
+  }
+}
 @media (max-width: 600px) {
   .wh-market .wh-cb-toggles button {
     min-height: 44px;

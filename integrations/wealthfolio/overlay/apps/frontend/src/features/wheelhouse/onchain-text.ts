@@ -16,20 +16,19 @@ export const lineNameKey: Record<LineName, MessageKey> = {
 // "lin200" names the $200 bucket.
 const aggBucket = (agg: string) => agg.replace(/^lin/, "$");
 
-// "all" is the whole supply; the cohorts keep their short names.
-const cohortName = (text: TextFn, cohort: string) =>
-  cohort === "all" ? text("cycle.reason.cohortAll") : cohort.toUpperCase();
-
 // Reason codes from the service; anything unknown is shown as received.
 export function reasonText(text: TextFn, reason: string) {
   const series = /^series_missing:(.+)$/.exec(reason);
   if (series) return text("cycle.reason.seriesMissing", { name: series[1] });
   const snapshot = /^urpd_missing:([^:]+):([^:]+)$/.exec(reason);
+  // "all" is the whole supply and reads as a phrase of its own; the cohorts keep their short names.
   if (snapshot)
-    return text("cycle.reason.urpdMissingSnapshot", {
-      cohort: cohortName(text, snapshot[1]),
-      bucket: aggBucket(snapshot[2]),
-    });
+    return snapshot[1] === "all"
+      ? text("cycle.reason.urpdMissingAll", { bucket: aggBucket(snapshot[2]) })
+      : text("cycle.reason.urpdMissingSnapshot", {
+          cohort: snapshot[1].toUpperCase(),
+          bucket: aggBucket(snapshot[2]),
+        });
   const partial = /^urpd_grid_partial:([^:]+)$/.exec(reason);
   if (partial)
     return text("cycle.reason.urpdGridPartial", {
