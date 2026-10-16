@@ -225,7 +225,7 @@ class OnchainSync:
 
         The rest of URPD_SET is fetched for the same day D, and so are the past snapshots the
         cost-basis grid needs while they are missing or not final. All are stored, and the days no
-        longer needed are pruned.
+        longer needed are pruned, also when a same-day request fails the stage.
         """
         today = at.astimezone(UTC).date()
         urpd: Urpd | None = None
@@ -237,10 +237,16 @@ class OnchainSync:
             # Without D nothing else is asked for, and nothing is pruned.
             return None
         self.store.save_urpd(urpd, at)
-        for cohort, agg in URPD_SET[1:]:
-            # A failure here fails the stage, like one of `all lin500`.
-            self._save_urpd(cohort, urpd.date, agg, at)
         past = [urpd.date - timedelta(days=n) for n in PAST_DAYS]
+        keep = {today, today - timedelta(days=1), urpd.date, *past}
+        try:
+            for cohort, agg in URPD_SET[1:]:
+                # A failure here fails the stage, like one of `all lin500`.
+                self._save_urpd(cohort, urpd.date, agg, at)
+        except BrkError:
+            # A lasting outage of one endpoint must not keep the table growing.
+            self.store.prune_urpd(keep)
+            raise
         for day in past:
             # Fetched before the day closed, plus the grace day1 rows get, it may have been forming.
             final = datetime.combine(day + timedelta(days=1), GRACE_END, tzinfo=UTC)
@@ -253,7 +259,7 @@ class OnchainSync:
                 except BrkError as exc:
                     # Past snapshots only widen the grid: the derived reasons tell what is missing.
                     logger.warning("onchain_urpd_past_failed code=%s", exc.code)
-        self.store.prune_urpd({today, today - timedelta(days=1), urpd.date, *past})
+        self.store.prune_urpd(keep)
         return urpd
 
     def _save_urpd(self, cohort: str, day: date, agg: str, at: datetime) -> None:
@@ -307,8 +313,15 @@ class OnchainSync:
                 # Without all five lines the bands would quietly change, so there is none.
                 self.store.clear_derived("costbasis")
             else:
-                stored = self._cost_basis(urpd.date, as_of.date(), lines)
-                self.store.save_derived("costbasis", stored.model_dump_json(), at)
+                try:
+                    payload = self._cost_basis(urpd.date, as_of.date(), lines).model_dump_json()
+                except Exception:
+                    # The pressure and the run's state must not depend on the cost basis. Never
+                    # log the exception: it may carry values. A fixed code is enough here.
+                    logger.warning("onchain_derive_failed code=costbasis_failed")
+                    self.store.clear_derived("costbasis")
+                else:
+                    self.store.save_derived("costbasis", payload, at)
 
         if hour1_at is None:
             # The stored pressure stays, with the time it was computed, until hour1 is fetched.

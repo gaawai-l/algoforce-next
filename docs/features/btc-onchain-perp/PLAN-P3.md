@@ -153,6 +153,7 @@
   - 每轮 9 个；
   - 历史快照在库里没有，或尚未"定稿"时，再取。定稿指 `fetched_at ≥ 该日结束 + 2h`，宽限与 day1 的 `GRACE_END` 相同。
   - 日期变化后的那一轮最多 +36 个。历史快照一直 404 时，每轮最多 +36 个，正常情况下为 0。
+  - 日期变化后的头几轮里，D−1 每轮再取 9 份，直到定稿（约 3 轮），每天约 +54 个。
 
 **界面**（以 mockup `key-levels.html` 和 `mobile.html` 为准）
 - **控件行**：只在 Key levels、BTC、实时视图下显示。
@@ -360,7 +361,7 @@
    - 尚未定稿：`urpd_fetched_at < d 的次日 00:00 + 2h`。
 
    这些请求抛出 `BrkError` 时，只记一行日志（错误码），跳过，不算阶段错误。
-4. 阶段结束时（D 存在）调用 `prune_urpd({today, yesterday, D, D−1, D−7, D−30, D−90})`。
+4. 阶段结束时（D 存在，包括第 2 步失败时：先清理再抛出）调用 `prune_urpd({today, yesterday, D, D−1, D−7, D−30, D−90})`。
 5. **`_derive` 中 cost-basis 的位置**：在 levels 之后、`if hour1_at is None: return` 之前，复用 levels 的 `lines` 和 `as_of`。hour1 失败不影响 cost-basis。
    - `urpd` 为 None，或模型线不全（P3-R11）时：`clear_derived("costbasis")`。
    - 否则，对每个桶宽从库中读取 D 的 3 份当天快照：
@@ -370,6 +371,7 @@
      - `lines_as_of = as_of.date()`；
      - `snapshot_at` 为所用当天快照中最早的 `urpd_fetched_at`；没有可用桶宽时，取 `all lin500` 的 `fetched_at`；
      - `reasons` 为上面这些原因码。
+   - 计算中出现任何意外异常时：`clear_derived("costbasis")`，日志只记固定错误码 `costbasis_failed`，继续派生 pressure 并写共享状态，不影响 `last_error`。
 6. 共享的 `reasons` 和 `missing_series` **不变**（P3-R16）。
 
 步骤：

@@ -18,7 +18,7 @@ from wheelhouse_service.onchain.brk import (
     START,
     BrkClient,
 )
-from wheelhouse_service.onchain.costbasis import PAST_DAYS, StoredCostBasis
+from wheelhouse_service.onchain.costbasis import MIN_PRICE, PAST_DAYS, StoredCostBasis
 from wheelhouse_service.onchain.cycle import Cycle
 from wheelhouse_service.onchain.pressure import Pressure
 from wheelhouse_service.onchain.store import OnchainStore
@@ -933,6 +933,89 @@ def test_failed_snapshot_keeps_stored_same_day(tmp_path: Path):
     assert cost.urpd_date == D
     # The oldest snapshot in use is that one.
     assert cost.snapshot_at == NOW
+
+
+def test_same_day_snapshot_error_stops_the_stage_and_still_prunes(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # A snapshot of a day no longer needed: a lasting outage must not keep it, or grow the table.
+    store.save_urpd(load_urpd("all").model_copy(update={"date": date(2026, 10, 14)}), NOW)
+    transport, calls = brk_transport(urpd_fail={("sth", "lin500")})
+
+    assert run(store, transport, NOW) is True
+
+    # The failed request ends the stage: nothing after it is asked for.
+    assert urpd_calls(calls) == same_day(D)[:2]
+    assert urpd_rows(store) == {("all", "2026-10-16", "lin500")}
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["next_due"]) == NOW + timedelta(minutes=5)
+    cost = costbasis_of(store)
+    assert cost.urpd_date == D
+    assert cost.buckets == []
+    assert cost.reasons == [
+        "urpd_missing:all:lin200",
+        "urpd_missing:sth:lin200",
+        "urpd_missing:lth:lin200",
+        "urpd_missing:sth:lin500",
+        "urpd_missing:lth:lin500",
+        "urpd_missing:all:lin1000",
+        "urpd_missing:sth:lin1000",
+        "urpd_missing:lth:lin1000",
+    ]
+
+
+def test_bucket_without_rows_from_the_floor_is_reported_empty(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport()
+
+    def below_floor(request: httpx.Request) -> httpx.Response:
+        # Every lin200 snapshot keeps only the rows priced below MIN_PRICE.
+        response = inner.handler(request)
+        if request.url.path.startswith("/api/urpd/") and request.url.params["agg"] == "lin200":
+            body = json.loads(response.content)
+            body["buckets"] = [
+                row for row in body["buckets"] if row["price_floor"] + 200 / 2 < MIN_PRICE
+            ]
+            return httpx.Response(200, json=body)
+        return response
+
+    assert run(store, httpx.MockTransport(below_floor), NOW) is True
+
+    assert bucket_widths(store) == [500, 1000]
+    assert costbasis_of(store).reasons == ["urpd_empty:lin200"]
+    state = store.state()
+    assert state["last_error"] is None
+    assert strings(state["reasons"]) == []
+
+
+def test_costbasis_failure_still_derives_the_pressure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("costbasis") is not None
+
+    def boom(*args: object) -> None:
+        raise RuntimeError("secret value 123")
+
+    monkeypatch.setattr("wheelhouse_service.onchain.sync.cost_basis", boom)
+    second = NOW + timedelta(hours=1)
+    again, _ = brk_transport()
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, again, second) is True
+
+    # Only the cost basis is gone; every other view is derived as usual.
+    assert store.derived("costbasis") is None
+    for kind in ("cycle", "levels", "pressure"):
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == second
+    state = store.state()
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == second
+    assert strings(state["reasons"]) == []
+    assert "code=costbasis_failed" in caplog.text
+    assert "secret" not in caplog.text
 
 
 def test_hour1_failure_still_derives_costbasis(tmp_path: Path):

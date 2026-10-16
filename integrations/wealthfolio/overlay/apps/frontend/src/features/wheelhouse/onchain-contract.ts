@@ -970,6 +970,7 @@ const bucket1000: BucketCostBasis = {
   support: [76000, 74000, 70000, 64000],
 };
 
+// To regenerate the buckets, dump `golden_result()` in services/analytics/tests/onchain/test_onchain_costbasis.py.
 export const costBasisSample: CostBasisView = {
   data_state: "fresh",
   reasons: [],

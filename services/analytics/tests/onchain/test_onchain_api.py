@@ -271,10 +271,10 @@ def test_refreshing_flag_is_exposed(tmp_path: Path):
     path = synced(tmp_path)
     OnchainStore(path).set_state(refreshing="true")
     with TestClient(router_app(path, NOW)) as http:
-        names = ("cycle", "levels", "seller-pressure", "status")
+        names = ("cycle", "levels", "seller-pressure", "cost-basis", "status")
         views = [http.get(f"{PREFIX}/{name}").json() for name in names]
 
-    assert [view["refreshing"] for view in views] == [True, True, True, True]
+    assert [view["refreshing"] for view in views] == [True, True, True, True, True]
 
 
 @pytest.mark.parametrize(
@@ -769,6 +769,17 @@ def test_cost_basis_unavailable_before_sync(tmp_path: Path):
     assert seen == []
 
 
+def test_cost_basis_without_result_keeps_its_shared_reasons(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    OnchainStore(path).set_state(reasons=json.dumps(["urpd_missing"]))
+    view = cost_basis_of(path)
+
+    assert view["data_state"] == "unavailable"
+    # A known reason is shown as it is; the fallback is only for when there is none.
+    assert view["reasons"] == ["urpd_missing"]
+    assert view["buckets"] == []
+
+
 def test_cost_basis_reasons_filtered(tmp_path: Path):
     path = tmp_path / "onchain.sqlite"
     store_cost_basis(
@@ -779,6 +790,8 @@ def test_cost_basis_reasons_filtered(tmp_path: Path):
         computed_at=moment(16, 10, 1),
         reasons=("urpd_missing:sth:lin200",),
     )
+    # A synthetic state: no single run stores all of these codes at once. Only the filter is
+    # under test here.
     OnchainStore(path).set_state(
         reasons=json.dumps(
             [

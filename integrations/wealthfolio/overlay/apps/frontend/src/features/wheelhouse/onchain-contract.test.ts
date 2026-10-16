@@ -303,6 +303,11 @@ describe("on-chain cost basis contract", () => {
       expect(item.below.every((band) => band.high <= item.spot)).toBe(true);
       expect(item.resistance).toEqual(item.above.map((band) => band.high));
       expect(item.support).toEqual(item.below.map((band) => band.low));
+      // Nearest first: above climbs away from spot, below falls away from it.
+      for (let i = 1; i < item.above.length; i += 1)
+        expect(item.above[i].low).toBeGreaterThan(item.above[i - 1].low);
+      for (let i = 1; i < item.below.length; i += 1)
+        expect(item.below[i].high).toBeLessThan(item.below[i - 1].high);
     }
   });
 
@@ -403,6 +408,28 @@ describe("on-chain cost basis contract", () => {
         data_state: "delayed",
       }).success,
     ).toBe(false);
+  });
+
+  it("rejects an unknown candidate kind, edge or cohort", () => {
+    const band = bucket(500).above[0];
+    const component = bucket(500)
+      .above.flatMap((item) => item.candidates)
+      .find((candidate) => candidate.kind === "component");
+    if (!component) throw new Error("no component candidate in the sample");
+    const withCandidate = (patch: object) => ({
+      ...costBasisSample,
+      buckets: [
+        {
+          ...bucket(500),
+          above: [{ ...band, candidates: [{ ...component, ...patch }] }],
+        },
+      ],
+    });
+    expect(costBasisViewSchema.safeParse(withCandidate({})).success).toBe(true);
+    for (const patch of [{ kind: "peak" }, { edge: "top" }, { cohort: "all" }])
+      expect(costBasisViewSchema.safeParse(withCandidate(patch)).success).toBe(
+        false,
+      );
   });
 
   it("rejects a malformed date or a datetime without an offset", () => {
