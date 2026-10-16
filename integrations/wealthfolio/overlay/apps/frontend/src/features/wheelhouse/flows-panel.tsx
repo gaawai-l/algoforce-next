@@ -1,11 +1,12 @@
 import { useSearchParams } from "react-router-dom";
 import type { Stream } from "./client";
 import { useWheelhouseText } from "./i18n";
+import { SellerCharts } from "./seller-charts";
 
 type Flow = "seller" | "perp";
 const flows: Flow[] = ["seller", "perp"];
 
-// P1 shell: both views are honest placeholders until their data sources exist.
+// Seller pressure is live; the perp view stays an honest placeholder until its data source exists.
 export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
   const { text } = useWheelhouseText();
   const [search, setSearch] = useSearchParams();
@@ -39,7 +40,7 @@ export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
         ))}
       </div>
       {flow === "seller" ? (
-        <p className="wh-flows-note">{text("flows.sellerPending")}</p>
+        <SellerCharts />
       ) : (
         <p className="wh-flows-note wh-flows-note--pending">
           {text("flows.perpPending")}

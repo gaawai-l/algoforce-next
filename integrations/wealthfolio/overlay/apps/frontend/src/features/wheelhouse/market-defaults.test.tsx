@@ -28,6 +28,10 @@ vi.mock("./market-chart", () => ({
 }));
 vi.mock("./demark-details", () => ({ DemarkDetails: () => null }));
 vi.mock("./regime-check", () => ({ RegimeCheck: () => null }));
+// The seller charts have their own tests; here only whether the page mounts them matters.
+vi.mock("./seller-charts", () => ({
+  SellerCharts: () => <p>seller-charts</p>,
+}));
 vi.mock("./language-toggle", () => ({ LanguageToggle: () => null }));
 vi.mock("./i18n", () => ({
   useWheelhouseText: () => ({ text: mocks.text }),
@@ -303,7 +307,7 @@ async function settled() {
 
 it("shows the Flows panel without timeframe controls or a chart", async () => {
   openLevels("?symbol=BTCUSDT&method=flows");
-  expect(await screen.findByText("flows.sellerPending")).toBeTruthy();
+  expect(await screen.findByText("seller-charts")).toBeTruthy();
   await settled();
   expect(
     screen
@@ -320,14 +324,14 @@ it("shows the Flows panel without timeframe controls or a chart", async () => {
 it("reaches the perp placeholder from flow=perp", async () => {
   openLevels("?symbol=BTCUSDT&method=flows&flow=perp");
   expect(await screen.findByText("flows.perpPending")).toBeTruthy();
-  expect(screen.queryByText("flows.sellerPending")).toBeNull();
+  expect(screen.queryByText("seller-charts")).toBeNull();
   await settled();
   expect(mocks.chart).not.toHaveBeenCalled();
 });
 
 it("hides the K-line replay, audit and OHLC sections under Flows", async () => {
   openLevels("?symbol=BTCUSDT&method=flows");
-  expect(await screen.findByText("flows.sellerPending")).toBeTruthy();
+  expect(await screen.findByText("seller-charts")).toBeTruthy();
   await settled();
   expect(screen.queryByText("replay.title")).toBeNull();
   expect(screen.queryByText("audit.summary")).toBeNull();
@@ -354,7 +358,7 @@ it("says flows are BTC only for ETH while the tab stays selectable", async () =>
   expect(await screen.findByText("flows.btcOnly")).toBeTruthy();
   await settled();
   expect(mocks.chart).not.toHaveBeenCalled();
-  expect(screen.queryByText("flows.sellerPending")).toBeNull();
+  expect(screen.queryByText("seller-charts")).toBeNull();
   expect(
     screen
       .getByRole("tab", { name: /method\.flows/ })

@@ -1142,7 +1142,7 @@
   }
 }
 
-/* Flows tab: honest placeholders until the seller-pressure and perp data sources exist. */
+/* Flows tab: the view switch, the perp placeholder and the seller-pressure charts. */
 .wh-flows-panel {
   margin-top: 16px;
   min-width: 0;
@@ -1199,5 +1199,230 @@
     flex: 1;
     min-height: 44px;
     padding-inline: 8px;
+  }
+}
+
+/* Seller pressure: three stacked panels, each with its own span, levels, legend and notes. */
+.wh-seller {
+  --wh-sky: #8fcaff;
+  --wh-red: #ff6b6b;
+  --wh-amber: #ffcf66;
+  margin-top: 14px;
+  min-width: 0;
+}
+.wh-seller .wh-seller-meta {
+  margin: 0 0 4px;
+  color: var(--wh-muted);
+  font:
+    12px/1.6 "JetBrains Mono",
+    monospace;
+}
+.wh-seller .wh-onchain-warn,
+.wh-seller .wh-muted {
+  margin: 8px 0;
+}
+.wh-seller-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--wh-edge);
+  border-radius: 8px;
+  background: var(--wh-surface);
+  min-width: 0;
+}
+.wh-seller-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+.wh-market .wh-seller-head h3 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wh-seller-span {
+  display: inline-flex;
+  border: 1px solid var(--wh-edge);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.wh-market .wh-seller-span button {
+  min-height: 32px;
+  padding: 3px 10px;
+  border: 0;
+  border-right: 1px solid var(--wh-edge);
+  border-radius: 0;
+  background: transparent;
+  color: var(--wh-muted);
+  font-size: 11px;
+}
+.wh-market .wh-seller-span button:last-child {
+  border-right: 0;
+}
+.wh-market .wh-seller-span button:hover {
+  background: #19303a;
+}
+.wh-market .wh-seller-span button[aria-pressed="true"] {
+  background: #153338;
+  color: var(--wh-cyan);
+}
+/* The container clips its corners, so the focus ring is drawn inside each button. */
+.wh-market .wh-seller-span button:focus-visible {
+  outline-offset: -2px;
+}
+.wh-seller-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  color: var(--wh-muted);
+  font-size: 11px;
+}
+.wh-seller-levels b {
+  font:
+    500 12px "JetBrains Mono",
+    monospace;
+}
+.wh-seller-extreme {
+  color: var(--wh-red);
+}
+.wh-seller-warning {
+  color: var(--wh-amber);
+}
+.wh-seller-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 6px;
+  touch-action: pan-y;
+}
+.wh-seller-grid {
+  stroke: var(--wh-edge);
+  stroke-width: 1;
+}
+.wh-seller-tick {
+  fill: var(--wh-muted);
+  font:
+    10px "JetBrains Mono",
+    monospace;
+}
+.wh-seller-tick--price {
+  fill: var(--wh-cyan);
+  opacity: 0.8;
+}
+.wh-seller-bar--lth {
+  fill: var(--wh-sky);
+}
+.wh-seller-bar--sth {
+  fill: var(--wh-rose);
+}
+.wh-seller-line,
+.wh-seller-price,
+.wh-seller-extreme-line,
+.wh-seller-warning-line {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.wh-seller-line {
+  stroke: var(--wh-sky);
+  stroke-width: 1.4;
+}
+.wh-seller-price {
+  stroke: var(--wh-cyan);
+  stroke-width: 1.2;
+}
+.wh-seller-extreme-line,
+.wh-seller-warning-line {
+  stroke-width: 1;
+  stroke-dasharray: 5 3;
+}
+.wh-seller-extreme-line {
+  stroke: var(--wh-red);
+}
+.wh-seller-warning-line {
+  stroke: var(--wh-amber);
+}
+.wh-seller-forming {
+  fill: none;
+  stroke: var(--wh-muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+.wh-seller-cursor {
+  stroke: var(--wh-muted);
+  stroke-dasharray: 2 4;
+  opacity: 0.6;
+}
+.wh-seller-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 16px;
+  margin-top: 4px;
+  color: var(--wh-muted);
+  font:
+    11px/1.6 "JetBrains Mono",
+    monospace;
+}
+.wh-seller-when {
+  color: #e5edf6;
+}
+.wh-seller-key b {
+  font-weight: 500;
+  color: #e5edf6;
+}
+.wh-seller-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+.wh-seller-swatch--sky {
+  background: var(--wh-sky);
+}
+.wh-seller-swatch--rose {
+  background: var(--wh-rose);
+}
+.wh-seller-swatch--price {
+  height: 2px;
+  vertical-align: 3px;
+  background: var(--wh-cyan);
+}
+.wh-seller-read {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--wh-edge);
+  color: var(--wh-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.wh-market .wh-seller-read h4 {
+  margin: 0 0 2px;
+  color: #e5edf6;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wh-seller .wh-seller-read p {
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .wh-seller-panel {
+    padding: 10px;
+  }
+  .wh-market .wh-seller-span button {
+    min-height: 44px;
+    padding-inline: 14px;
+  }
+  /* The three notes stay expanded and stack one above the other. */
+  .wh-seller-read {
+    grid-template-columns: 1fr;
   }
 }

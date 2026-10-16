@@ -398,7 +398,54 @@ const en = {
   "flows.view": "Flows view",
   "flows.seller": "Seller pressure",
   "flows.perp": "Perp states",
-  "flows.sellerPending": "Seller pressure is not implemented yet",
+  "seller.loading": "Loading seller pressure…",
+  "seller.unavailable": "Seller pressure unavailable",
+  "seller.meta":
+    "Resolution 1h · Data {{time}} UTC · Source Bitcoin Research Kit",
+  "seller.forming": "includes the forming hour",
+  "seller.delayed": "Data is delayed · last update {{time}} UTC",
+  "seller.stale": "Data is stale · last update {{time}} UTC",
+  "seller.noData": "No data for this chart",
+  "seller.span": "Span",
+  "seller.extreme": "Extreme",
+  "seller.warning": "Warning",
+  "seller.extremeHint":
+    "95th percentile of the last 30 days · {{n}} hourly samples",
+  "seller.warningHint":
+    "75th percentile of the last 30 days · {{n}} hourly samples",
+  "seller.latest": "Latest · {{time}} UTC",
+  "seller.price": "BTC/USD",
+  "seller.aria":
+    "{{title}}. Use the left and right arrow keys to read one hour; Escape returns to the latest.",
+  "seller.read.shows": "What it shows",
+  "seller.read.implies": "What extreme values imply",
+  "seller.read.how": "How to read",
+  "seller.loss.title": "Chart 1 — Total realized loss by cohorts (USD)",
+  "seller.loss.lth": "LTH loss",
+  "seller.loss.sth": "STH loss",
+  "seller.loss.shows":
+    "Dollars lost when coins are sold for less than their holders paid. Long-term (LTH) and short-term (STH) holders are stacked; STH leaves out coins held under an hour. The right axis is the BTC price.",
+  "seller.loss.implies":
+    "A bar above the Extreme line is in the top 5% of the last 30 days: unusually heavy loss-taking.",
+  "seller.loss.how":
+    "Compare the bars with the dashed Extreme and Warning lines, use the colour to see who is selling, and look for runs of tall bars rather than a single hour.",
+  "seller.share.title":
+    "Chart 2 — STH realized loss as a share of the sell side (%)",
+  "seller.share.label": "STH loss share",
+  "seller.share.shows":
+    "The part of each hour's realized profit and loss that comes from short-term holders (STH) selling at a loss; coins held under an hour are left out. Only hours above zero are drawn.",
+  "seller.share.implies":
+    "Above the Extreme line (top 5% of the last 30 days) the newest holders are giving up: capitulation by recent buyers.",
+  "seller.share.how":
+    "This is a share, not a size: a quiet hour can read high on a few dollars, so check Chart 1 for the amount behind it.",
+  "seller.supply.title": "Chart 3 — STH supply in loss (%)",
+  "seller.supply.label": "STH supply in loss",
+  "seller.supply.shows":
+    "The share of short-term-holder (STH) coins that are worth less than their holders paid; coins held under an hour are left out.",
+  "seller.supply.implies":
+    "Above the Extreme line (top 5% of the last 30 days) an unusually large part of recent buyers is under water.",
+  "seller.supply.how":
+    "This is a stock, not a flow: it moves with price against recent cost. The STH bars in Chart 1 are what leaves this pool.",
   "flows.perpPending":
     "Not connected — perp data source not chosen yet (Glassnode, Coinalyze or own liquidation collector)",
   "flows.btcOnly": "Flows are BTC only",
@@ -790,7 +837,50 @@ const zh: Record<MessageKey, string> = {
   "flows.view": "资金流视图",
   "flows.seller": "卖压",
   "flows.perp": "永续状态",
-  "flows.sellerPending": "卖压视图尚未实现",
+  "seller.loading": "正在加载卖压数据…",
+  "seller.unavailable": "卖压数据不可用",
+  "seller.meta": "分辨率 1h · 数据 {{time}} UTC · 来源 Bitcoin Research Kit",
+  "seller.forming": "含未收盘的当前小时",
+  "seller.delayed": "数据延迟 · 最近更新 {{time}} UTC",
+  "seller.stale": "数据已过期 · 最近更新 {{time}} UTC",
+  "seller.noData": "此图暂无数据",
+  "seller.span": "区间",
+  "seller.extreme": "极端",
+  "seller.warning": "预警",
+  "seller.extremeHint": "近 30 天第 95 百分位 · {{n}} 个小时样本",
+  "seller.warningHint": "近 30 天第 75 百分位 · {{n}} 个小时样本",
+  "seller.latest": "最新 · {{time}} UTC",
+  "seller.price": "BTC/USD",
+  "seller.aria":
+    "{{title}}。用左右方向键逐小时读取；按 Esc 回到最新。",
+  "seller.read.shows": "展示内容",
+  "seller.read.implies": "极端值的含义",
+  "seller.read.how": "如何解读",
+  "seller.loss.title": "图 1 — 各持有者群体已实现亏损总额（美元）",
+  "seller.loss.lth": "LTH 亏损",
+  "seller.loss.sth": "STH 亏损",
+  "seller.loss.shows":
+    "币以低于持有者成本的价格卖出时实现的美元亏损。长期持有者（LTH）与短期持有者（STH）堆叠显示，STH 不含持有不足 1 小时的币。右轴为 BTC 价格。",
+  "seller.loss.implies":
+    "柱子高过“极端”线，说明处于近 30 天最高的 5%：亏损卖出异常集中。",
+  "seller.loss.how":
+    "对照虚线的“极端”与“预警”水平；用颜色分辨是谁在卖；看连续的一段高柱，而不是单个小时。",
+  "seller.share.title": "图 2 — STH 已实现亏损占卖出端的比例（%）",
+  "seller.share.label": "STH 亏损占比",
+  "seller.share.shows":
+    "每小时全部已实现盈亏中，短期持有者（STH）亏损卖出所占的比例，不含持有不足 1 小时的币。只画大于 0 的小时。",
+  "seller.share.implies":
+    "高过“极端”线（近 30 天最高的 5%），说明最新入场的持有者在认亏离场，即近期买家的投降。",
+  "seller.share.how":
+    "这是比例而非规模：成交清淡的小时只涉及很少金额也可能读数很高，请对照图 1 确认背后的金额。",
+  "seller.supply.title": "图 3 — STH 亏损持仓占比（%）",
+  "seller.supply.label": "STH 亏损持仓占比",
+  "seller.supply.shows":
+    "短期持有者（STH）手中成本高于当前价格的币所占的比例，不含持有不足 1 小时的币。",
+  "seller.supply.implies":
+    "高过“极端”线（近 30 天最高的 5%），说明异常多的近期买家处于浮亏。",
+  "seller.supply.how":
+    "这是存量而非流量：随价格相对近期成本的位置而变。图 1 的 STH 柱就是从这个池子里流出的部分。",
   "flows.perpPending":
     "未连接 — 永续数据源尚未选定（Glassnode、Coinalyze 或自建清算采集器）",
   "flows.btcOnly": "资金流仅支持 BTC",

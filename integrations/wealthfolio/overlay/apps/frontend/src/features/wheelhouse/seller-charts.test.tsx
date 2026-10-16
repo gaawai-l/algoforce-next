@@ -1,0 +1,449 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { messages } from "./i18n";
+import { pressureSample, type SellerPressureView } from "./onchain-contract";
+import { SellerCharts, compactUsd, percent, usdPrice } from "./seller-charts";
+
+const mocks = vi.hoisted(() => ({ pressure: vi.fn() }));
+vi.mock("./client", async (original) => ({
+  ...(await original<typeof import("./client")>()),
+  getSellerPressure: mocks.pressure,
+}));
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+function show(
+  view: SellerPressureView | Error | "pending",
+  cached?: SellerPressureView,
+) {
+  if (view === "pending") mocks.pressure.mockReturnValue(new Promise(() => {}));
+  else if (view instanceof Error) mocks.pressure.mockRejectedValue(view);
+  else mocks.pressure.mockResolvedValue(view);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  // An earlier successful reading, which a failed refetch leaves in the cache.
+  if (cached) client.setQueryData(["wh", "onchain", "seller-pressure"], cached);
+  const rendered = render(
+    <QueryClientProvider client={client}>
+      <SellerCharts />
+    </QueryClientProvider>,
+  );
+  return { client, ...rendered };
+}
+
+const unavailable = (reasons: string[]): SellerPressureView => ({
+  data_state: "unavailable",
+  reasons,
+  refreshing: false,
+  forming_at: null,
+  last_at: null,
+  loss: [],
+  share: [],
+  supply: [],
+  price: [],
+  loss_levels: null,
+  share_levels: null,
+  supply_levels: null,
+  xgap: null,
+  brk_version: null,
+});
+
+const chart = (container: HTMLElement, name: "loss" | "share" | "supply") =>
+  container.querySelector<HTMLElement>(`[data-chart="${name}"]`)!;
+const points = (container: HTMLElement, name: "loss" | "share" | "supply") =>
+  Number(
+    chart(container, name).querySelector("svg")!.getAttribute("data-points"),
+  );
+const pathOf = (el: HTMLElement, selector: string) =>
+  el.querySelector(selector)?.getAttribute("d") ?? "";
+const moves = (d: string) => (d.match(/M/g) ?? []).length;
+
+// Drops one hour from a series so its neighbours are two hours apart.
+const without = <T extends { at: string }>(rows: T[], index: number) =>
+  rows.filter((_, i) => i !== index);
+
+it("shows the three chart titles, the header levels and the current values", async () => {
+  const { container } = show(pressureSample());
+  expect(
+    await screen.findByText("Chart 1 — Total realized loss by cohorts (USD)"),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Chart 2 — STH realized loss as a share of the sell side (%)",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText("Chart 3 — STH supply in loss (%)")).toBeTruthy();
+
+  const head = (name: "loss" | "share" | "supply") =>
+    chart(container, name).querySelector(".wh-seller-head")!;
+  const legend = (name: "loss" | "share" | "supply") =>
+    chart(container, name).querySelector(".wh-seller-legend")!.textContent ??
+    "";
+  const levels = (name: "loss" | "share" | "supply") =>
+    [".wh-seller-extreme", ".wh-seller-warning"].map(
+      (selector) => head(name).querySelector(selector)?.textContent,
+    );
+  expect(levels("loss")).toEqual(["$41.3M", "$10.1M"]);
+  expect(levels("share")).toEqual(["56.1%", "22.2%"]);
+  expect(levels("supply")).toEqual(["38.7%", "26.2%"]);
+  expect(head("loss").textContent).toContain("$41.3M");
+  expect(head("loss").textContent).toContain("$10.1M");
+
+  expect(legend("loss")).toContain("LTH loss $1.98M");
+  expect(legend("loss")).toContain("STH loss $8.54M");
+  expect(legend("share")).toContain("41.9%");
+  expect(legend("supply")).toContain("29.6%");
+  // the original rounds the price to one decimal
+  for (const name of ["loss", "share", "supply"] as const)
+    expect(legend(name)).toMatch(/BTC\/USD \$[\d,]+\.\d(?!\d)/);
+});
+
+it("defaults to 30d and slices each chart on its own span", async () => {
+  const { container } = show(pressureSample());
+  await screen.findByText("Chart 3 — STH supply in loss (%)");
+  for (const name of ["loss", "share", "supply"] as const) {
+    expect(points(container, name)).toBe(720);
+    const pressed = within(chart(container, name))
+      .getAllByRole("button")
+      .filter((button) => button.getAttribute("aria-pressed") === "true");
+    expect(pressed.map((button) => button.textContent)).toEqual(["30d"]);
+  }
+  expect(
+    chart(container, "share").querySelectorAll("rect.wh-seller-bar"),
+  ).toHaveLength(720);
+
+  fireEvent.click(
+    within(chart(container, "share")).getByRole("button", { name: "7d" }),
+  );
+  expect(points(container, "share")).toBe(168);
+  expect(
+    chart(container, "share").querySelectorAll("rect.wh-seller-bar").length,
+  ).toBeLessThanOrEqual(168);
+  expect(points(container, "loss")).toBe(720);
+  expect(points(container, "supply")).toBe(720);
+
+  fireEvent.click(
+    within(chart(container, "supply")).getByRole("button", { name: "90d" }),
+  );
+  expect(points(container, "supply")).toBe(2160);
+  expect(points(container, "share")).toBe(168);
+  expect(points(container, "loss")).toBe(720);
+});
+
+it("draws bars only for positive shares and stacks LTH under STH", async () => {
+  const view = pressureSample();
+  view.share[view.share.length - 2].value = 0;
+  const { container } = show(view);
+  await screen.findByText(
+    "Chart 2 — STH realized loss as a share of the sell side (%)",
+  );
+  expect(
+    chart(container, "share").querySelectorAll("rect.wh-seller-bar"),
+  ).toHaveLength(719);
+  expect(
+    chart(container, "loss").querySelectorAll("rect.wh-seller-bar--lth"),
+  ).toHaveLength(720);
+  expect(
+    chart(container, "loss").querySelectorAll("rect.wh-seller-bar--sth"),
+  ).toHaveLength(720);
+});
+
+it("shows nine explanations, all expanded and outside any details element", async () => {
+  const { container } = show(pressureSample());
+  await screen.findByText("Chart 3 — STH supply in loss (%)");
+  expect(container.querySelectorAll("details")).toHaveLength(0);
+  for (const name of ["loss", "share", "supply"] as const) {
+    const headings = [
+      ...chart(container, name).querySelectorAll(".wh-seller-read h4"),
+    ];
+    expect(headings.map((heading) => heading.textContent)).toEqual([
+      "What it shows",
+      "What extreme values imply",
+      "How to read",
+    ]);
+    for (const heading of headings) {
+      expect(heading.closest("details")).toBeNull();
+      expect((heading.parentElement?.textContent ?? "").length).toBeGreaterThan(
+        (heading.textContent ?? "").length + 20,
+      );
+    }
+  }
+});
+
+it("breaks the price line and chart 3's line where hours are missing", async () => {
+  const view = pressureSample();
+  view.price = without(view.price, 2000);
+  view.supply = without(view.supply, 2100);
+  const { container } = show(view);
+  await screen.findByText("Chart 3 — STH supply in loss (%)");
+  expect(moves(pathOf(chart(container, "loss"), "path.wh-seller-price"))).toBe(
+    2,
+  );
+  expect(moves(pathOf(chart(container, "supply"), "path.wh-seller-line"))).toBe(
+    2,
+  );
+  // the 30d window of every chart contains the missing price hour
+  expect(moves(pathOf(chart(container, "share"), "path.wh-seller-price"))).toBe(
+    2,
+  );
+});
+
+it("keeps one piece when no hour is missing", async () => {
+  const { container } = show(pressureSample());
+  await screen.findByText("Chart 3 — STH supply in loss (%)");
+  for (const name of ["loss", "share", "supply"] as const)
+    expect(moves(pathOf(chart(container, name), "path.wh-seller-price"))).toBe(
+      1,
+    );
+  expect(moves(pathOf(chart(container, "supply"), "path.wh-seller-line"))).toBe(
+    1,
+  );
+});
+
+it("treats an exact one-hour step as continuous and any other step as a break", async () => {
+  const view = pressureSample();
+  // shifting one price point by a minute is not exactly one hour from its neighbours
+  view.price[2100] = {
+    ...view.price[2100],
+    at: new Date(Date.parse(view.price[2100].at) + 60_000).toISOString(),
+  };
+  const { container } = show(view);
+  await screen.findByText("Chart 3 — STH supply in loss (%)");
+  expect(moves(pathOf(chart(container, "loss"), "path.wh-seller-price"))).toBe(
+    3,
+  );
+});
+
+it("draws the Extreme and Warning lines and omits them when a level is missing", async () => {
+  const { container, unmount } = show(pressureSample());
+  await screen.findByText("Chart 3 — STH supply in loss (%)");
+  for (const name of ["loss", "share", "supply"] as const) {
+    expect(
+      chart(container, name).querySelectorAll("line.wh-seller-extreme-line"),
+    ).toHaveLength(1);
+    expect(
+      chart(container, name).querySelectorAll("line.wh-seller-warning-line"),
+    ).toHaveLength(1);
+  }
+  unmount();
+
+  const view = pressureSample();
+  view.loss_levels = null;
+  view.share_levels = { p95: null, p75: null, n: 0 };
+  const second = show(view);
+  await screen.findByText("Chart 3 — STH supply in loss (%)");
+  for (const name of ["loss", "share"] as const) {
+    const panel = chart(second.container, name);
+    expect(panel.querySelector("line.wh-seller-extreme-line")).toBeNull();
+    expect(panel.querySelector("line.wh-seller-warning-line")).toBeNull();
+    expect(panel.querySelector(".wh-seller-extreme")?.textContent).toBe(
+      "Unavailable",
+    );
+    expect(panel.querySelector(".wh-seller-warning")?.textContent).toBe(
+      "Unavailable",
+    );
+    expect(panel.querySelector(".wh-seller-head")?.textContent).not.toMatch(
+      /0\.0|\$0/,
+    );
+  }
+  expect(
+    chart(second.container, "supply").querySelector(
+      "line.wh-seller-extreme-line",
+    ),
+  ).not.toBeNull();
+});
+
+it("marks the forming hour on the last point and in the header line", async () => {
+  const view = pressureSample();
+  const { container } = show(view);
+  expect(
+    await screen.findByText(
+      "Resolution 1h · Data 2026-10-16 08:00 UTC · Source Bitcoin Research Kit",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText(/includes the forming hour/)).toBeTruthy();
+  for (const name of ["loss", "share", "supply"] as const) {
+    const forming = chart(container, name).querySelectorAll(
+      '[data-forming="true"]',
+    );
+    expect(forming).toHaveLength(1);
+    expect(forming[0].getAttribute("data-at")).toBe(view.last_at);
+  }
+});
+
+it("shows no forming marker once the last hour is closed", async () => {
+  const { container } = show({ ...pressureSample(), forming_at: null });
+  await screen.findByText(/Resolution 1h/);
+  expect(screen.queryByText(/includes the forming hour/)).toBeNull();
+  expect(container.querySelector('[data-forming="true"]')).toBeNull();
+});
+
+it("marks only the point at the forming time, not the last point of a lagging series", async () => {
+  const view = pressureSample();
+  // the share series has no row for the forming hour (its denominator was not positive)
+  view.share = view.share.slice(0, -1);
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  expect(
+    chart(container, "share").querySelector('[data-forming="true"]'),
+  ).toBeNull();
+  expect(
+    chart(container, "loss").querySelectorAll('[data-forming="true"]'),
+  ).toHaveLength(1);
+});
+
+it("says the data is unavailable and why, with no chart", async () => {
+  const { container } = show(unavailable(["brk_unavailable"]));
+  expect(await screen.findByText("Seller pressure unavailable")).toBeTruthy();
+  expect(screen.getByText("on-chain data source unavailable")).toBeTruthy();
+  expect(container.querySelector("svg")).toBeNull();
+  expect(container.querySelector("[data-chart]")).toBeNull();
+  expect(container.textContent ?? "").not.toMatch(/\d/);
+});
+
+it("names the missing hour1 series", async () => {
+  show(unavailable(["series_missing:hour1:price_close"]));
+  expect(
+    await screen.findByText("missing series hour1:price_close"),
+  ).toBeTruthy();
+});
+
+it("shows a loading line and no number while the request is pending", () => {
+  const { container } = show("pending");
+  expect(screen.getByText("Loading seller pressure…")).toBeTruthy();
+  expect(container.querySelector("svg")).toBeNull();
+  expect(container.textContent ?? "").not.toMatch(/\d/);
+});
+
+it("shows the failure and never the earlier reading", async () => {
+  const { container } = show(
+    new Error("Python service unavailable"),
+    pressureSample(),
+  );
+  expect(await screen.findByText("Seller pressure unavailable")).toBeTruthy();
+  expect(screen.getByText("Python service unavailable")).toBeTruthy();
+  expect(container.querySelector("svg")).toBeNull();
+  expect(screen.queryByText(/Chart 1/)).toBeNull();
+});
+
+it("treats a failure with an empty message as a failure", async () => {
+  const { container } = show(new Error(""), pressureSample());
+  expect(await screen.findByText("Seller pressure unavailable")).toBeTruthy();
+  expect(container.querySelector("svg")).toBeNull();
+});
+
+it.each([
+  ["delayed", "Data is delayed · last update 2026-10-16 08:00 UTC"],
+  ["stale", "Data is stale · last update 2026-10-16 08:00 UTC"],
+] as const)(
+  "warns when the data is %s but keeps the charts",
+  async (state, notice) => {
+    const { container } = show({ ...pressureSample(), data_state: state });
+    expect(await screen.findByText(notice)).toBeTruthy();
+    expect(container.querySelectorAll("svg")).toHaveLength(3);
+  },
+);
+
+it("shows no warning for fresh data", async () => {
+  show(pressureSample());
+  await screen.findByText(/Resolution 1h/);
+  expect(screen.queryByText(/Data is (delayed|stale)/)).toBeNull();
+  expect(screen.queryByRole("status")).toBeNull();
+});
+
+it("says when it is refreshing", async () => {
+  show({ ...pressureSample(), refreshing: true });
+  expect(await screen.findByRole("status")).toBeTruthy();
+  expect(screen.getByText("Refreshing on-chain data…")).toBeTruthy();
+});
+
+it("shows a message instead of an empty chart when a series has no points", async () => {
+  const view = pressureSample();
+  view.share = [];
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  expect(chart(container, "share").querySelector("svg")).toBeNull();
+  expect(
+    within(chart(container, "share")).getByText("No data for this chart"),
+  ).toBeTruthy();
+  expect(chart(container, "loss").querySelector("svg")).not.toBeNull();
+});
+
+it("shows the price as unavailable when the latest hour has no price", async () => {
+  const view = pressureSample();
+  view.price = view.price.slice(0, -1);
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  expect(
+    chart(container, "loss").querySelector(".wh-seller-legend")?.textContent,
+  ).toContain("BTC/USD Unavailable");
+});
+
+it("reads a point in UTC from the keyboard", async () => {
+  const { container } = show(pressureSample());
+  await screen.findByText(/Resolution 1h/);
+  const svg = chart(container, "share").querySelector("svg")!;
+  const legend = () =>
+    chart(container, "share").querySelector(".wh-seller-legend")?.textContent ??
+    "";
+  expect(legend()).toContain("Latest");
+  fireEvent.keyDown(svg, { key: "ArrowLeft" });
+  expect(legend()).toContain("2026-10-16 07:00 UTC");
+  expect(legend()).not.toContain("41.9%");
+  fireEvent.keyDown(svg, { key: "ArrowLeft" });
+  expect(legend()).toContain("2026-10-16 06:00 UTC");
+  fireEvent.keyDown(svg, { key: "Escape" });
+  expect(legend()).toContain("Latest");
+  expect(legend()).toContain("41.9%");
+});
+
+it("queries under the shared key and refreshes every minute", async () => {
+  const { client } = show(pressureSample());
+  await screen.findByText(/Resolution 1h/);
+  const query = client
+    .getQueryCache()
+    .find({ queryKey: ["wh", "onchain", "seller-pressure"] });
+  expect(query).toBeTruthy();
+  expect(query?.observers[0].options.refetchInterval).toBe(60000);
+  await waitFor(() => expect(mocks.pressure).toHaveBeenCalledOnce());
+});
+
+it("formats amounts and percents the way the plan fixes them", () => {
+  expect(compactUsd(41_345_525, 1)).toBe("$41.3M");
+  expect(compactUsd(10_050_150, 1)).toBe("$10.1M");
+  expect(compactUsd(1_983_300, 2)).toBe("$1.98M");
+  expect(compactUsd(8_540_500, 2)).toBe("$8.54M");
+  // rounding up must not leave "1000.00K"
+  expect(compactUsd(999_996, 2)).toBe("$1.00M");
+  expect(compactUsd(0, 1)).toBe("$0.0");
+  expect(percent(0.41893330324776934)).toBe("41.9%");
+  expect(percent(0.5611976039771673)).toBe("56.1%");
+  expect(usdPrice(100234.456)).toBe("$100,234.5");
+  expect(usdPrice(100000)).toBe("$100,000.0");
+});
+
+it("has Chinese copy for every seller key and a different string from English", () => {
+  const keys = Object.keys(messages.en).filter((key) =>
+    key.startsWith("seller."),
+  );
+  expect(keys.length).toBeGreaterThan(20);
+  for (const key of keys) {
+    const zh = messages.zh[key as keyof typeof messages.zh];
+    expect(zh.length).toBeGreaterThan(0);
+  }
+  expect(messages.zh["seller.loss.shows" as keyof typeof messages.zh]).not.toBe(
+    messages.en["seller.loss.shows" as keyof typeof messages.en],
+  );
+});

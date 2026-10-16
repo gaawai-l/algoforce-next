@@ -35,7 +35,7 @@ const stateKey: Record<CycleState, MessageKey> = {
 };
 
 // Reason codes from the service; anything unknown is shown as received.
-function reasonText(text: TextFn, reason: string) {
+export function reasonText(text: TextFn, reason: string) {
   const series = /^series_missing:(.+)$/.exec(reason);
   if (series) return text("cycle.reason.seriesMissing", { name: series[1] });
   const key = `cycle.reason.${reason}`;
