@@ -646,18 +646,22 @@ export default function MarketPage() {
                         </button>
                       ))}
                     </div>
-                    {costBucket && (
-                      <p className="wh-cb-legend">
-                        <span className="is-sth">
-                          {text("costBasis.sth")} ·{" "}
-                          {bandsLegend(text, costBucket, "sth", costStale)}
-                        </span>
-                        <span className="is-lth">
-                          {text("costBasis.lth")} ·{" "}
-                          {bandsLegend(text, costBucket, "lth", costStale)}
-                        </span>
-                      </p>
-                    )}
+                    {/* Always there, with placeholders until the bands arrive, so the
+                        chart below never moves when they do. */}
+                    <p className="wh-cb-legend">
+                      <span className="is-sth">
+                        {text("costBasis.sth")} ·{" "}
+                        {costBucket
+                          ? bandsLegend(text, costBucket, "sth", costStale)
+                          : "—"}
+                      </span>
+                      <span className="is-lth">
+                        {text("costBasis.lth")} ·{" "}
+                        {costBucket
+                          ? bandsLegend(text, costBucket, "lth", costStale)
+                          : "—"}
+                      </span>
+                    </p>
                   </div>
                 )}
                 {analysis ? (

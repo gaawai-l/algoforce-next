@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getSellerPressure } from "./client";
 import { useWheelhouseText, type MessageKey } from "./i18n";
 import type { SellerPressureView } from "./onchain-contract";
-import { reasonText } from "./onchain-levels";
+import { reasonText } from "./onchain-text";
 
 type Levels = NonNullable<SellerPressureView["loss_levels"]>;
 type ChartKey = "loss" | "share" | "supply";

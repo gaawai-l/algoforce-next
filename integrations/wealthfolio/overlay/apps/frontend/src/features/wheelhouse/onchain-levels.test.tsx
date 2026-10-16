@@ -3,12 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CycleView, LevelsView } from "./onchain-contract";
 import { costBasisSample, cycleSample, levelsSample } from "./onchain-contract";
 import { phrase } from "./i18n";
-import {
-  OnchainLevels,
-  olderUrpdDate,
-  reasonText,
-  shortDay,
-} from "./onchain-levels";
+import { OnchainLevels, olderUrpdDate, shortDay } from "./onchain-levels";
+import { reasonText } from "./onchain-text";
 
 // The shared test setup mocks matchMedia as a narrow screen; each test sets its own width.
 function viewport(wide: boolean) {
@@ -374,7 +370,10 @@ it("reads the per-snapshot URPD reason codes in both languages", () => {
     "STH URPD snapshot missing for the $200 bucket",
   );
   expect(reasonText(en, "urpd_missing:all:lin1000")).toBe(
-    "ALL URPD snapshot missing for the $1000 bucket",
+    "all-holder URPD snapshot missing for the $1000 bucket",
+  );
+  expect(reasonText(zh, "urpd_missing:all:lin200")).toBe(
+    "$200 桶宽缺少 全体 URPD 快照",
   );
   expect(reasonText(en, "urpd_grid_partial:lin500")).toBe(
     "some earlier URPD snapshots are missing for the $500 bucket; the grid uses the days available",
@@ -387,5 +386,11 @@ it("reads the per-snapshot URPD reason codes in both languages", () => {
   );
   // The shared code without a cohort keeps its own text; unknown codes are shown as received.
   expect(reasonText(en, "urpd_missing")).toBe("URPD distribution unavailable");
-  expect(reasonText(en, "urpd_empty:lin500")).toBe("urpd_empty:lin500");
+  expect(reasonText(en, "urpd_empty:lin500")).toBe(
+    "No cost-basis rows above $1k for the $500 buckets",
+  );
+  expect(reasonText(zh, "urpd_empty:lin1000")).toBe(
+    "$1000 桶宽下没有高于 $1k 的成本数据",
+  );
+  expect(reasonText(en, "urpd_unknown:lin500")).toBe("urpd_unknown:lin500");
 });

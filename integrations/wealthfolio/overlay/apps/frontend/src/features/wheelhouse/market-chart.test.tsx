@@ -448,6 +448,18 @@ describe("on-chain overlays", () => {
       expect(screen.getByRole("status").textContent).toBe("");
     });
 
+    it("clears the read-out when the rail goes away and comes back", () => {
+      const view = render(railed([sth2]));
+      act(() => screen.getByRole("listitem", { name: /STH K2/ }).focus());
+      expect(screen.getByRole("status").textContent).toContain("STH K2");
+      // A method switch keeps the chart mounted and takes the rail away.
+      view.rerender(railed(undefined));
+      expect(screen.queryByRole("status")).toBeNull();
+      view.rerender(railed([sth2]));
+      expect(screen.getByRole("status").textContent).toBe("");
+      expect(view.container.querySelector(".wh-rail-spread")).toBeNull();
+    });
+
     it("draws only bands inside the price range and keeps the axis", () => {
       const line = { id: "true_mean", label: "True mean", price: 82200 };
       const base = render(railed([], [line]));

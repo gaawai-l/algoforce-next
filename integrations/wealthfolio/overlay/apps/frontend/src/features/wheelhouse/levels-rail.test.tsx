@@ -88,14 +88,102 @@ describe("LevelsRail", () => {
         band({ id: `sth-${i + 1}`, index: i + 1, strength }),
       ),
     );
+    // In list order: aria-posinset follows the K number, whatever the paint order is.
     const widths = screen
       .getAllByRole("listitem")
+      .sort((a, b) => num(a, "aria-posinset") - num(b, "aria-posinset"))
       .map((item) => num(item, "width"));
     // laneWidth = 28 / 2 - 1 = 13: the weakest band is 2px, the strongest fills the lane.
     expect(widths[0]).toBe(2);
     expect(widths.at(-1)).toBe(13);
     for (let i = 1; i < widths.length; i++)
       expect(widths[i]).toBeGreaterThan(widths[i - 1]);
+  });
+
+  it("paints a lane's widest band first so every band keeps a visible strip", () => {
+    const nested = [
+      band({
+        id: "sth-2",
+        index: 2,
+        price: 85000,
+        low: 84000,
+        high: 86000,
+        strength: 0.3,
+      }),
+      band({
+        id: "sth-3",
+        index: 3,
+        price: 85000,
+        low: 83000,
+        high: 87000,
+        strength: 0.6,
+      }),
+      band({
+        id: "sth-4",
+        index: 4,
+        price: 85000,
+        low: 81000,
+        high: 89000,
+        strength: 1,
+      }),
+    ];
+    const view = draw(nested);
+    const items = screen.getAllByRole("listitem");
+    // Paint order is DOM order: widest to narrowest, so a narrower band sits on top.
+    expect(items.map((item) => item.getAttribute("aria-label"))).toEqual([
+      "STH K4 · $85,000",
+      "STH K3 · $85,000",
+      "STH K2 · $85,000",
+    ]);
+    const box = (node: Element) => ({
+      left: num(node, "x"),
+      right: num(node, "x") + num(node, "width"),
+      top: num(node, "y"),
+      bottom: num(node, "y") + num(node, "height"),
+    });
+    items.forEach((item, i) => {
+      const own = box(item);
+      for (const later of items.slice(i + 1)) {
+        const over = box(later);
+        const covered =
+          over.left <= own.left &&
+          over.right >= own.right &&
+          over.top <= own.top &&
+          over.bottom >= own.bottom;
+        expect(covered).toBe(false);
+      }
+    });
+    // The list position still follows the K number.
+    expect(
+      items.map((item) => [
+        item.getAttribute("aria-posinset"),
+        item.getAttribute("aria-setsize"),
+      ]),
+    ).toEqual([
+      ["3", "3"],
+      ["2", "3"],
+      ["1", "3"],
+    ]);
+    expect(view.container.querySelector(".wh-rail-active")).toBeNull();
+    // The active band's outline is drawn last, over every band.
+    act(() => items[1].focus());
+    const last = screen.getByRole("list").lastElementChild!;
+    expect(last.classList.contains("wh-rail-active")).toBe(true);
+    expect(last.getAttribute("aria-hidden")).toBe("true");
+    expect(box(last)).toEqual(box(items[1]));
+    fireEvent.pointerEnter(items[2]);
+    expect(box(screen.getByRole("list").lastElementChild!)).toEqual(
+      box(items[2]),
+    );
+  });
+
+  it("reports no active band once it unmounts", () => {
+    const onActive = vi.fn();
+    const view = draw([band()], onActive);
+    act(() => screen.getByRole("listitem").focus());
+    expect(onActive).toHaveBeenLastCalledWith(band());
+    view.unmount();
+    expect(onActive).toHaveBeenLastCalledWith(null);
   });
 
   it("spreads the focused band across the plot and reports it", () => {

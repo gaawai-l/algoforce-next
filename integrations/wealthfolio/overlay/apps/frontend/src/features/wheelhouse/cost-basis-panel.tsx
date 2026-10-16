@@ -3,7 +3,7 @@ import { usd } from "./client";
 import { useWheelhouseText, type MessageKey, type TextFn } from "./i18n";
 import type { RailBand } from "./levels-rail";
 import type { BucketCostBasis, CostBasisView } from "./onchain-contract";
-import { lineNameKey, reasonText, utcDay } from "./onchain-levels";
+import { lineNameKey, reasonText, utcDay } from "./onchain-text";
 
 export type CostBucket = BucketCostBasis["bucket"];
 type Cohort = "sth" | "lth";
@@ -22,8 +22,21 @@ const compact = new Intl.NumberFormat("en-US", {
   maximumSignificantDigits: 3,
 });
 
+// The service counts every row from its fixed MIN_PRICE of $1k, whatever the bucket's domain.
+const LEGEND_FLOOR = "$1k";
+
 // $86.0k
 const kUsd = (price: number) => `$${(price / 1000).toFixed(1)}k`;
+
+// The older of two UTC days: a reading is as old as its oldest input.
+const olderDay = (a: string | null, b: string | null) =>
+  a && b ? (a < b ? a : b) : (a ?? b);
+
+// A missing bucket is explained by the codes without a width and those of its own width.
+const forBucket = (bucket: CostBucket) => (reason: string) => {
+  const agg = /:(lin\d+)$/.exec(reason)?.[1];
+  return !agg || agg === `lin${bucket}`;
+};
 
 // From spot to the band's midpoint, one decimal, signed with a true minus.
 function fromSpot(band: Band, spot: number) {
@@ -60,7 +73,7 @@ export function railBands(
     );
 }
 
-// "3.66M BTC ≥$1k · 62% in profit": the cohort's coins above the price floor of this bucket.
+// "3.66M BTC ≥$1k · 62% in profit": the cohort's coins from the service's fixed $1k floor.
 export function bandsLegend(
   text: TextFn,
   bucket: BucketCostBasis,
@@ -70,7 +83,7 @@ export function bandsLegend(
   const { total, in_profit } = bucket[cohort];
   const legend = text("costBasis.legend", {
     btc: compact.format(total),
-    floor: `$${compact.format(bucket.domain_low).toLowerCase()}`,
+    floor: LEGEND_FLOOR,
     profit: in_profit == null ? "—" : `${Math.round(in_profit * 100)}%`,
   });
   return stale ? text("costBasis.legendStale", { legend }) : legend;
@@ -88,10 +101,10 @@ export function CostBasisPanel({
 }) {
   const { text } = useWheelhouseText();
   const id = useId();
-  const reasons =
-    view?.reasons.length && !error ? (
+  const reasonLine = (reasons: string[]) =>
+    reasons.length ? (
       <p className="wh-muted">
-        {view.reasons.map((reason) => reasonText(text, reason)).join(" · ")}
+        {reasons.map((reason) => reasonText(text, reason)).join(" · ")}
       </p>
     ) : null;
 
@@ -109,7 +122,7 @@ export function CostBasisPanel({
     body = (
       <>
         <p className="wh-onchain-warn">{text("costBasis.unavailable")}</p>
-        {reasons}
+        {reasonLine(view.reasons)}
       </>
     );
   else {
@@ -135,7 +148,10 @@ export function CostBasisPanel({
       <>
         {view.data_state === "stale" ? (
           <p className="wh-onchain-warn">
-            {text("cycle.stale", { date: view.urpd_date ?? text("missing") })}
+            {text("cycle.stale", {
+              date:
+                olderDay(view.urpd_date, view.lines_as_of) ?? text("missing"),
+            })}
           </p>
         ) : null}
         {view.forming_at ? (
@@ -215,10 +231,9 @@ export function CostBasisPanel({
         ) : (
           <p className="wh-onchain-warn">{text("costBasis.bucketMissing")}</p>
         )}
-        {reasons}
-        {view.refreshing ? (
-          <p role="status">{text("costBasis.refreshing")}</p>
-        ) : null}
+        {reasonLine(
+          selected ? view.reasons : view.reasons.filter(forBucket(bucket)),
+        )}
       </>
     );
   }
@@ -227,6 +242,9 @@ export function CostBasisPanel({
     <>
       <h3 id={`${id}-levels`}>{text("costBasis.levelsTitle")}</h3>
       {body}
+      {!error && view?.refreshing ? (
+        <p role="status">{text("costBasis.refreshing")}</p>
+      ) : null}
     </>
   );
 }

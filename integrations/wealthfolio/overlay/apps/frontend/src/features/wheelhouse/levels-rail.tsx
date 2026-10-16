@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usd } from "./client";
 import { useWheelhouseText, type TextFn } from "./i18n";
 
@@ -16,7 +16,7 @@ export interface RailBand {
 }
 
 interface RailProps {
-  bands: RailBand[];
+  bands: RailBand[]; // in list order: cohort, then K number
   y: (price: number) => number;
   top: number;
   bottom: number;
@@ -29,6 +29,8 @@ interface RailProps {
 
 // The rail follows the chart's own width, not the viewport.
 export const railWidth = (chartWidth: number) => (chartWidth < 600 ? 16 : 28);
+
+const LANE = { sth: 0, lth: 1 } as const;
 
 const bandName = (band: RailBand) =>
   `${band.cohort.toUpperCase()} K${band.index}`;
@@ -61,25 +63,48 @@ export function LevelsRail({
 }: RailProps) {
   const { text } = useWheelhouseText();
   const [active, setActive] = useState<string | null>(null);
-  const activate = (band: RailBand | null) => {
+  // The latest callback, so the unmount report below reaches the current chart.
+  const report = useRef(onActive);
+  useEffect(() => {
+    report.current = onActive;
+  });
+  const activate = useCallback((band: RailBand | null) => {
     setActive(band?.id ?? null);
-    onActive(band);
-  };
+    report.current(band);
+  }, []);
   const laneWidth = width / 2 - 1;
   // Only the part inside the price range is drawn; the rail never widens the y-axis.
   const drawn = bands
     .filter((band) => band.high > bottom && band.low < top)
-    .map((band) => {
+    .map((band, i) => {
       const y1 = y(Math.min(band.high, top));
-      return { band, y: y1, height: y(Math.max(band.low, bottom)) - y1 };
-    });
+      return {
+        band,
+        // The band's place in the list, which the paint order below no longer follows.
+        position: i + 1,
+        x: x + 1 + (band.cohort === "lth" ? width / 2 : 0),
+        width: 2 + band.strength * (laneWidth - 2),
+        y: y1,
+        height: y(Math.max(band.low, bottom)) - y1,
+      };
+    })
+    // SVG paints in DOM order: within a lane the widest band goes first, so every narrower one
+    // sits on top of it and keeps a visible, hoverable strip.
+    .sort(
+      (a, b) =>
+        LANE[a.band.cohort] - LANE[b.band.cohort] ||
+        b.band.strength - a.band.strength ||
+        a.band.price - b.band.price,
+    );
   const spread = drawn.find((d) => d.band.id === active);
   // A refresh can remove the active band or move it out of range; drop it so the chart's
   // read-out never keeps showing a band that is no longer drawn.
   const gone = active !== null && !spread;
   useEffect(() => {
     if (gone) activate(null);
-  }, [gone]);
+  }, [gone, activate]);
+  // Unmounting (a method switch, an empty range) must not leave the read-out on a band either.
+  useEffect(() => () => report.current(null), []);
   return (
     <g role="list" aria-label={text("rail.list")}>
       {spread && (
@@ -100,17 +125,16 @@ export function LevelsRail({
         y={y(top)}
         height={y(bottom) - y(top)}
       />
-      {drawn.map(({ band, y: bandY, height }) => (
+      {drawn.map(({ band, position, ...box }) => (
         <rect
           key={band.id}
           className={`wh-rail-band is-${band.cohort}`}
           role="listitem"
           tabIndex={0}
           aria-label={`${bandName(band)} · ${usd(band.price)}`}
-          x={x + 1 + (band.cohort === "lth" ? width / 2 : 0)}
-          width={2 + band.strength * (laneWidth - 2)}
-          y={bandY}
-          height={height}
+          aria-posinset={position}
+          aria-setsize={drawn.length}
+          {...box}
           onPointerEnter={() => activate(band)}
           onPointerLeave={() => activate(null)}
           onFocus={() => activate(band)}
@@ -119,6 +143,17 @@ export function LevelsRail({
           onKeyDown={(event) => event.stopPropagation()}
         />
       ))}
+      {spread && (
+        // Drawn last, so the focus and hover cue is never under another band.
+        <rect
+          className="wh-rail-active"
+          aria-hidden="true"
+          x={spread.x}
+          width={spread.width}
+          y={spread.y}
+          height={spread.height}
+        />
+      )}
     </g>
   );
 }

@@ -1172,6 +1172,13 @@
   stroke: var(--wh-cyan);
   stroke-width: 3;
 }
+/* The active band's outline, drawn over every band so a narrower one never hides it. */
+.wh-rail-active {
+  fill: none;
+  stroke: var(--wh-cyan);
+  stroke-width: 3;
+  pointer-events: none;
+}
 
 /* Key levels controls above the chart: layer toggles, the bucket switch and the band legend. */
 .wh-cb-controls {

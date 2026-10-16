@@ -449,11 +449,15 @@ it("switches the bucket without asking for cost basis again", async () => {
   expect(mocks.costBasis).toHaveBeenCalledTimes(1);
 });
 
-it("keeps room for the rail before the cost basis arrives", async () => {
+it("keeps room for the rail and the band legend before the cost basis arrives", async () => {
   openLevels("?symbol=BTCUSDT&method=levels", { costBasis: "pending" });
   await waitFor(() => expect(mocks.chart).toHaveBeenCalled());
   expect(lastRail()).toEqual([]);
   expect(mocks.costBasis).toHaveBeenCalled();
+  // The legend row is there with placeholders, so the chart does not move when data arrives.
+  expect(document.querySelector(".wh-cb-legend")?.textContent).toBe(
+    "costBasis.sth · —costBasis.lth · —",
+  );
 });
 
 it("gives a failed cost-basis request an empty rail", async () => {

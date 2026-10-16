@@ -143,6 +143,30 @@ it("says when the selected bucket is not available and why", () => {
   expect(screen.queryByRole("table")).toBeNull();
 });
 
+it("explains a missing bucket only with its own and the shared reasons", () => {
+  render(
+    <CostBasisPanel
+      view={{
+        ...costBasisSample,
+        reasons: [
+          "brk_unavailable",
+          "urpd_grid_partial:lin500",
+          "urpd_missing:sth:lin200",
+        ],
+        buckets: costBasisSample.buckets.filter((b) => b.bucket !== 200),
+      }}
+      bucket={200}
+    />,
+  );
+  expect(
+    screen.getByText(/STH URPD snapshot missing for the \$200 bucket/)
+      .textContent,
+  ).toBe(
+    "on-chain data source unavailable · STH URPD snapshot missing for the $200 bucket",
+  );
+  expect(screen.queryByText(/\$500 bucket/)).toBeNull();
+});
+
 it("notes a snapshot that was still forming and a refresh in progress", () => {
   render(
     <CostBasisPanel
@@ -203,6 +227,51 @@ it("shows unavailable data with its reasons and no numbers", () => {
   expect(document.body.textContent).not.toMatch(/\$/);
 });
 
+it("notes a refresh in progress while the reading is unavailable", () => {
+  render(
+    <CostBasisPanel
+      view={{
+        ...costBasisSample,
+        data_state: "unavailable",
+        reasons: ["brk_unavailable"],
+        buckets: [],
+        forming_at: null,
+        refreshing: true,
+      }}
+      bucket={500}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toBe(
+    "Refreshing cost-basis levels…",
+  );
+});
+
+it("dates stale data by the older of its URPD and cost-line days", () => {
+  render(
+    <CostBasisPanel
+      view={{
+        ...costBasisSample,
+        data_state: "stale",
+        lines_as_of: "2026-10-15",
+      }}
+      bucket={500}
+    />,
+  );
+  expect(screen.getByText("stale · as of 2026-10-15")).toBeTruthy();
+  cleanup();
+  render(
+    <CostBasisPanel
+      view={{
+        ...costBasisSample,
+        data_state: "stale",
+        urpd_date: "2026-10-14",
+      }}
+      bucket={500}
+    />,
+  );
+  expect(screen.getByText("stale · as of 2026-10-14")).toBeTruthy();
+});
+
 it("marks stale data with its URPD day and keeps the values", () => {
   render(
     <CostBasisPanel
@@ -256,6 +325,10 @@ it("writes the band legend with the total, the floor and the share in profit", (
   );
   expect(bandsLegend(en, b500, "lth", true)).toBe(
     "12.8M BTC ≥$1k · 59% in profit (stale)",
+  );
+  // The floor is the service's fixed $1k, wherever the bucket's domain starts.
+  expect(bandsLegend(en, { ...b500, domain_low: 3000 }, "sth", false)).toBe(
+    "3.66M BTC ≥$1k · 62% in profit",
   );
   expect(
     bandsLegend(

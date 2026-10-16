@@ -365,6 +365,9 @@ const en = {
     "{{cohort}} URPD snapshot missing for the {{bucket}} bucket",
   "cycle.reason.urpdGridPartial":
     "some earlier URPD snapshots are missing for the {{bucket}} bucket; the grid uses the days available",
+  "cycle.reason.urpdEmpty":
+    "No cost-basis rows above $1k for the {{bucket}} buckets",
+  "cycle.reason.cohortAll": "all-holder",
   "cycle.title": "Cycle",
   "cycle.loading": "Loading cycle…",
   "cycle.stateLabel": "State",
@@ -847,6 +850,8 @@ const zh: Record<MessageKey, string> = {
     "{{bucket}} 桶宽缺少 {{cohort}} URPD 快照",
   "cycle.reason.urpdGridPartial":
     "{{bucket}} 桶宽缺少部分历史 URPD 快照，网格只用已有日期",
+  "cycle.reason.urpdEmpty": "{{bucket}} 桶宽下没有高于 $1k 的成本数据",
+  "cycle.reason.cohortAll": "全体",
   "cycle.title": "周期",
   "cycle.loading": "正在加载周期…",
   "cycle.stateLabel": "状态",

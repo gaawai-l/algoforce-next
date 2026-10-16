@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { usd } from "./client";
 import {
-  messages,
   useWheelhouseText,
   type MessageKey,
   type TextFn,
@@ -9,18 +8,12 @@ import {
 } from "./i18n";
 import type { CostBasisView, CycleView, LevelsView } from "./onchain-contract";
 import { CostBasisPanel, type CostBucket } from "./cost-basis-panel";
+import { lineNameKey, reasonText, utcDay } from "./onchain-text";
 
 type LineName = LevelsView["lines"][number]["name"];
 type ComponentName = CycleView["components"][number]["name"];
 type CycleState = NonNullable<CycleView["state"]>;
 
-export const lineNameKey: Record<LineName, MessageKey> = {
-  true_mean: "levels.line.true_mean",
-  short_term: "levels.line.short_term",
-  average: "levels.line.average",
-  long_term: "levels.line.long_term",
-  median: "levels.line.median",
-};
 const componentKey: Record<ComponentName, MessageKey> = {
   depth: "cycle.component.depth",
   spread: "cycle.component.spread",
@@ -35,37 +28,10 @@ const stateKey: Record<CycleState, MessageKey> = {
   capitulation: "cycle.state.capitulation",
 };
 
-// "lin200" names the $200 bucket.
-const aggBucket = (agg: string) => agg.replace(/^lin/, "$");
-
-// Reason codes from the service; anything unknown is shown as received.
-export function reasonText(text: TextFn, reason: string) {
-  const series = /^series_missing:(.+)$/.exec(reason);
-  if (series) return text("cycle.reason.seriesMissing", { name: series[1] });
-  const snapshot = /^urpd_missing:([^:]+):([^:]+)$/.exec(reason);
-  if (snapshot)
-    return text("cycle.reason.urpdMissingSnapshot", {
-      cohort: snapshot[1].toUpperCase(),
-      bucket: aggBucket(snapshot[2]),
-    });
-  const partial = /^urpd_grid_partial:([^:]+)$/.exec(reason);
-  if (partial)
-    return text("cycle.reason.urpdGridPartial", {
-      bucket: aggBucket(partial[1]),
-    });
-  const key = `cycle.reason.${reason}`;
-  return Object.prototype.hasOwnProperty.call(messages.en, key)
-    ? text(key as MessageKey)
-    : reason;
-}
-
 const signed = (value: number) => {
   const rounded = Math.round(value * 100) / 100;
   return `${rounded < 0 ? "−" : "+"}${Math.abs(rounded).toFixed(2)}`;
 };
-// The cost-line timestamps are UTC instants; the day they name is the UTC day.
-export const utcDay = (instant: string) =>
-  new Date(instant).toISOString().slice(0, 10);
 
 const dayPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 // A UTC calendar day as "15 Oct" / "10月15日". It is formatted in UTC so it never shifts.
