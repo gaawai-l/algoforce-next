@@ -1173,6 +1173,117 @@
   stroke-width: 1.5;
 }
 
+/* Key levels controls above the chart: layer toggles, the bucket switch and the band legend. */
+.wh-cb-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 11px;
+}
+.wh-cb-toggles {
+  display: inline-flex;
+  border: 1px solid var(--wh-edge);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.wh-market .wh-cb-toggles button {
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 0;
+  border-right: 1px solid var(--wh-edge);
+  border-radius: 0;
+  background: transparent;
+  color: var(--wh-muted);
+  font:
+    11px "JetBrains Mono",
+    monospace;
+}
+.wh-market .wh-cb-toggles button:last-child {
+  border-right: 0;
+}
+.wh-market .wh-cb-toggles button:hover {
+  background: #19303a;
+}
+.wh-market .wh-cb-toggles button[aria-pressed="true"] {
+  background: #153338;
+  color: var(--wh-cyan);
+}
+.wh-market .wh-cb-toggles button.is-sth[aria-pressed="true"] {
+  color: var(--wh-rose);
+}
+.wh-market .wh-cb-toggles button.is-lth[aria-pressed="true"] {
+  color: var(--wh-sky);
+}
+/* The group clips its corners, so the focus ring is drawn inside each button. */
+.wh-market .wh-cb-toggles button:focus-visible {
+  outline-offset: -2px;
+}
+.wh-cb-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  flex-basis: 100%;
+  margin: 0;
+  font:
+    10px "JetBrains Mono",
+    monospace;
+}
+.wh-cb-legend .is-sth {
+  color: var(--wh-rose);
+}
+.wh-cb-legend .is-lth {
+  color: var(--wh-sky);
+}
+@media (max-width: 600px) {
+  .wh-market .wh-cb-toggles button {
+    min-height: 44px;
+  }
+}
+
+/* Inspector tables: the levels table and the nearest occupied bands. */
+.wh-cb-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-block: 8px 12px;
+  font:
+    10px/1.5 "JetBrains Mono",
+    monospace;
+}
+.wh-cb-table th,
+.wh-cb-table td {
+  padding: 5px 3px;
+  border-bottom: 1px dashed var(--wh-edge);
+  text-align: right;
+  vertical-align: top;
+  font-weight: 400;
+}
+.wh-cb-table thead th {
+  color: var(--wh-muted);
+}
+.wh-cb-table th[scope="row"] {
+  color: var(--wh-muted);
+  text-align: left;
+  font-family: Inter, sans-serif;
+}
+.wh-cb-bands td:nth-child(2) {
+  text-align: left;
+}
+.wh-cb-range {
+  display: block;
+  white-space: nowrap;
+}
+.wh-cb-labels {
+  display: block;
+  color: var(--wh-muted);
+  font-size: 9.5px;
+}
+.wh-cb-bands tr.is-spot > * {
+  color: var(--wh-cyan);
+  border-bottom: 1px solid var(--wh-cyan);
+}
+
 /* Flows tab: the view switch, the perp placeholder and the seller-pressure charts. */
 .wh-flows-panel {
   margin-top: 16px;

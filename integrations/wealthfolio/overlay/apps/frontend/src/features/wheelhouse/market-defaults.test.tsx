@@ -9,13 +9,14 @@ import { afterEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import MarketPage from "./market-page";
-import { cycleSample, levelsSample } from "./onchain-contract";
+import { costBasisSample, cycleSample, levelsSample } from "./onchain-contract";
 const mocks = vi.hoisted(() => ({
   workspace: vi.fn(),
   submit: vi.fn(),
   snapshot: vi.fn(),
   levels: vi.fn(),
   cycle: vi.fn(),
+  costBasis: vi.fn(),
   chart: vi.fn(),
   text: vi.fn((key: string) => key),
 }));
@@ -49,6 +50,7 @@ vi.mock("./client", async (original) => ({
   submitJob: mocks.submit,
   getOnchainLevels: mocks.levels,
   getOnchainCycle: mocks.cycle,
+  getCostBasis: mocks.costBasis,
 }));
 afterEach(() => {
   cleanup();
@@ -124,7 +126,11 @@ const snapshotFor = (symbol: string) => ({
 
 function openLevels(
   search: string,
-  { symbol = "BTCUSDT", levels = levelsSample as unknown } = {},
+  {
+    symbol = "BTCUSDT",
+    levels = levelsSample as unknown,
+    costBasis = costBasisSample as unknown,
+  } = {},
 ) {
   mocks.workspace.mockResolvedValue({
     snapshot: snapshotFor(symbol),
@@ -137,6 +143,11 @@ function openLevels(
   if (levels instanceof Error) mocks.levels.mockRejectedValue(levels);
   else mocks.levels.mockResolvedValue(levels);
   mocks.cycle.mockResolvedValue(cycleSample);
+  if (costBasis === "pending")
+    mocks.costBasis.mockImplementation(() => new Promise(() => {}));
+  else if (costBasis instanceof Error)
+    mocks.costBasis.mockRejectedValue(costBasis);
+  else mocks.costBasis.mockResolvedValue(costBasis);
   mocks.submit.mockImplementation(() => new Promise(() => {}));
   render(
     <QueryClientProvider
@@ -151,9 +162,13 @@ function openLevels(
   );
 }
 type Overlay = { id: string; label: string; price: number };
-const lastOverlays = () =>
-  (mocks.chart.mock.calls.at(-1)?.[0] as { overlays?: Overlay[] } | undefined)
-    ?.overlays;
+type Band = { id: string; cohort: string; price: number };
+const lastProps = () =>
+  mocks.chart.mock.calls.at(-1)?.[0] as
+    | { overlays?: Overlay[]; rail?: Band[] }
+    | undefined;
+const lastOverlays = () => lastProps()?.overlays;
+const lastRail = () => lastProps()?.rail;
 
 it("passes the five on-chain model lines to the BTC live Key levels chart", async () => {
   openLevels("?symbol=BTCUSDT&method=levels");
@@ -364,4 +379,103 @@ it("says flows are BTC only for ETH while the tab stays selectable", async () =>
       .getByRole("tab", { name: /method\.flows/ })
       .getAttribute("aria-selected"),
   ).toBe("true");
+});
+
+const toggle = (name: string) => screen.getByRole("button", { name });
+const pressed = (name: string) => toggle(name).getAttribute("aria-pressed");
+const resistance = () =>
+  screen.getByRole("row", { name: /costBasis\.resistance/ }).textContent;
+
+it("shows the Key levels controls with every layer on and the $500 bucket", async () => {
+  openLevels("?symbol=BTCUSDT&method=levels");
+  expect(
+    await screen.findByRole("group", { name: "costBasis.layers" }),
+  ).toBeTruthy();
+  expect(pressed("costBasis.lines")).toBe("true");
+  expect(pressed("costBasis.sth")).toBe("true");
+  expect(pressed("costBasis.lth")).toBe("true");
+  expect(
+    screen.getByRole("group", { name: "costBasis.bucket" }).textContent,
+  ).toBe("$200$500$1000");
+  expect(pressed("$500")).toBe("true");
+  expect(pressed("$200")).toBe("false");
+  // The rail carries both cohorts' $500 peaks.
+  await waitFor(() => expect(lastRail()).toHaveLength(7));
+  expect(lastRail()?.map((b) => b.price)).toEqual([
+    ...costBasisSample.buckets[1].sth.peaks.map((p) => p.price),
+    ...costBasisSample.buckets[1].lth.peaks.map((p) => p.price),
+  ]);
+  // Each band toggle has its legend: total, floor and share in profit.
+  expect(mocks.text).toHaveBeenCalledWith("costBasis.legend", {
+    btc: "3.66M",
+    floor: "$1k",
+    profit: "62%",
+  });
+});
+
+it("hides the cost lines without touching the levels table", async () => {
+  openLevels("?symbol=BTCUSDT&method=levels");
+  await waitFor(() => expect(lastOverlays()).toHaveLength(5));
+  const before = resistance();
+  expect(before).toContain("$86.0k");
+  fireEvent.click(toggle("costBasis.lines"));
+  expect(pressed("costBasis.lines")).toBe("false");
+  expect(lastOverlays() ?? []).toHaveLength(0);
+  expect(resistance()).toBe(before);
+  expect(lastRail()).toHaveLength(7);
+});
+
+it("drops the STH bands from the rail when they are switched off", async () => {
+  openLevels("?symbol=BTCUSDT&method=levels");
+  await waitFor(() => expect(lastRail()).toHaveLength(7));
+  fireEvent.click(toggle("costBasis.sth"));
+  expect(lastRail()?.some((b) => b.cohort === "sth")).toBe(false);
+  expect(lastRail()).toHaveLength(5);
+  fireEvent.click(toggle("costBasis.lth"));
+  expect(lastRail()).toEqual([]);
+});
+
+it("switches the bucket without asking for cost basis again", async () => {
+  openLevels("?symbol=BTCUSDT&method=levels");
+  await waitFor(() => expect(lastRail()).toHaveLength(7));
+  expect(mocks.costBasis).toHaveBeenCalledTimes(1);
+  fireEvent.click(toggle("$1000"));
+  expect(pressed("$1000")).toBe("true");
+  expect(lastRail()?.map((b) => b.price)).toEqual([
+    ...costBasisSample.buckets[2].sth.peaks.map((p) => p.price),
+    ...costBasisSample.buckets[2].lth.peaks.map((p) => p.price),
+  ]);
+  expect(resistance()).toContain("$90.0k");
+  expect(mocks.costBasis).toHaveBeenCalledTimes(1);
+});
+
+it("keeps room for the rail before the cost basis arrives", async () => {
+  openLevels("?symbol=BTCUSDT&method=levels", { costBasis: "pending" });
+  await waitFor(() => expect(mocks.chart).toHaveBeenCalled());
+  expect(lastRail()).toEqual([]);
+  expect(mocks.costBasis).toHaveBeenCalled();
+});
+
+it("gives a failed cost-basis request an empty rail", async () => {
+  openLevels("?symbol=BTCUSDT&method=levels", {
+    costBasis: new Error("down"),
+  });
+  expect(await screen.findByText("costBasis.unavailable")).toBeTruthy();
+  expect(lastRail()).toEqual([]);
+});
+
+it.each([
+  ["ETH", "?symbol=ETHUSDT&method=levels", "ETHUSDT"],
+  [
+    "a saved snapshot",
+    `?symbol=BTCUSDT&method=levels&snapshot=${"a".repeat(64)}`,
+    "BTCUSDT",
+  ],
+])("gives %s no Key levels controls and no rail", async (_, search, symbol) => {
+  openLevels(search, { symbol });
+  await waitFor(() => expect(mocks.chart).toHaveBeenCalled());
+  expect(screen.queryByRole("group", { name: "costBasis.layers" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "costBasis.bucket" })).toBeNull();
+  expect(lastRail()).toBeUndefined();
+  expect(mocks.costBasis).not.toHaveBeenCalled();
 });

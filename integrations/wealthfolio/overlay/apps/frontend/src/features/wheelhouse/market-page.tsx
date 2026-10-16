@@ -16,6 +16,7 @@ import { useLiveMarketRefresh } from "./use-initial-market-refresh";
 import { DemarkDetails } from "./demark-details";
 import { CycleBadge } from "./cycle-badge";
 import { OnchainLevels, lineLabel } from "./onchain-levels";
+import { bandsLegend, railBands, type CostBucket } from "./cost-basis-panel";
 import { FlowsPanel } from "./flows-panel";
 import { RegimeCheck } from "./regime-check";
 import { defaultDemarkConfig } from "./demark-contract";
@@ -27,6 +28,7 @@ import {
   getSnapshot,
   getOnchainCycle,
   getOnchainLevels,
+  getCostBasis,
   getJob,
   getJobEvents,
   submitJob,
@@ -41,6 +43,7 @@ import "./market.css";
 type Method = "td" | "levels" | "fib" | "flows";
 const timeframes: Stream["timeframe"][] = ["5m", "15m", "1h", "4h", "1d"];
 const activeStates = new Set(["queued", "running", "retry_wait"]);
+const buckets: CostBucket[] = [200, 500, 1000];
 
 function Facts({ entries }: { entries: [string, string][] }) {
   return (
@@ -123,6 +126,10 @@ export default function MarketPage() {
       : 20,
   );
   const [visibleBars, setVisibleBars] = useState(0);
+  const [showLines, setShowLines] = useState(true);
+  const [showSth, setShowSth] = useState(true);
+  const [showLth, setShowLth] = useState(true);
+  const [bucket, setBucket] = useState<CostBucket>(500);
   const [sequenceId, setSequenceId] = useState<string | null>(null);
   const selectedId = /^[a-f0-9]{64}$/.test(search.get("snapshot") ?? "")
     ? search.get("snapshot")
@@ -201,6 +208,14 @@ export default function MarketPage() {
     queryKey: ["wh", "onchain", "cycle"],
     queryFn: ({ signal }) => getOnchainCycle(signal),
     refetchInterval: 60000,
+    retry: false,
+    enabled: onchainShown,
+  });
+  // One response carries every bucket, so switching the bucket never asks again.
+  const costBasis = useQuery({
+    queryKey: ["wh", "onchain", "cost-basis"],
+    queryFn: ({ signal }) => getCostBasis(signal),
+    refetchInterval: 300000,
     retry: false,
     enabled: onchainShown,
   });
@@ -332,7 +347,10 @@ export default function MarketPage() {
   };
   const onchainData = onchainLevels.isError ? undefined : onchainLevels.data;
   const overlays: ChartOverlay[] | undefined =
-    onchainShown && onchainData && onchainData.data_state !== "unavailable"
+    onchainShown &&
+    showLines &&
+    onchainData &&
+    onchainData.data_state !== "unavailable"
       ? onchainData.lines.map((line) => {
           const name = lineLabel(text, locale, onchainData, line.name);
           return {
@@ -345,6 +363,17 @@ export default function MarketPage() {
           };
         })
       : undefined;
+  const costBasisData = costBasis.isError ? undefined : costBasis.data;
+  const costBucket =
+    costBasisData && costBasisData.data_state !== "unavailable"
+      ? costBasisData.buckets.find((item) => item.bucket === bucket)
+      : undefined;
+  const costStale = costBasisData?.data_state === "stale";
+  // While the page shows on-chain data the rail is always there, empty until bands arrive, so
+  // the plot never jumps when they do.
+  const rail = onchainShown
+    ? railBands(costBucket, { sth: showSth, lth: showLth })
+    : undefined;
   const latestPoint = analysis?.points.at(-1);
   const tdSequences = [...(analysis?.demark?.sequences ?? [])].reverse();
   const selectedSequence =
@@ -569,6 +598,68 @@ export default function MarketPage() {
                     })}
                   </span>
                 </div>
+                {onchainShown && (
+                  <div className="wh-cb-controls">
+                    <div
+                      className="wh-cb-toggles"
+                      role="group"
+                      aria-label={text("costBasis.layers")}
+                    >
+                      <button
+                        type="button"
+                        aria-pressed={showLines}
+                        onClick={() => setShowLines((on) => !on)}
+                      >
+                        {text("costBasis.lines")}
+                      </button>
+                      <button
+                        type="button"
+                        className="is-sth"
+                        aria-pressed={showSth}
+                        onClick={() => setShowSth((on) => !on)}
+                      >
+                        {text("costBasis.sth")}
+                      </button>
+                      <button
+                        type="button"
+                        className="is-lth"
+                        aria-pressed={showLth}
+                        onClick={() => setShowLth((on) => !on)}
+                      >
+                        {text("costBasis.lth")}
+                      </button>
+                    </div>
+                    <span className="wh-muted">{text("costBasis.bucket")}</span>
+                    <div
+                      className="wh-cb-toggles"
+                      role="group"
+                      aria-label={text("costBasis.bucket")}
+                    >
+                      {buckets.map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          aria-pressed={item === bucket}
+                          onClick={() => setBucket(item)}
+                        >
+                          ${item}
+                        </button>
+                      ))}
+                    </div>
+                    {costBucket && (
+                      <p className="wh-cb-legend">
+                        <span className="is-sth">
+                          {text("costBasis.sth")} ·{" "}
+                          {bandsLegend(text, costBucket, "sth", costStale)}
+                        </span>
+                        <span className="is-lth">
+                          {text("costBasis.lth")} ·{" "}
+                          {bandsLegend(text, costBucket, "lth", costStale)}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
                 {analysis ? (
                   <MarketChart
                     key={`${source}:${symbol}:${timeframe}:${selectedId ?? "live"}`}
@@ -578,6 +669,7 @@ export default function MarketPage() {
                     showDemark={method === "td"}
                     sequence={selectedSequence}
                     overlays={overlays}
+                    rail={rail}
                   />
                 ) : (
                   <div className="wh-empty">
@@ -643,6 +735,11 @@ export default function MarketPage() {
                           ? onchainCycle.error.message
                           : undefined
                       }
+                      costBasis={costBasis.data}
+                      costBasisError={
+                        costBasis.isError ? costBasis.error.message : undefined
+                      }
+                      bucket={bucket}
                     />
                   ) : (
                     <p className="wh-muted">

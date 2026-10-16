@@ -1,9 +1,14 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CycleView, LevelsView } from "./onchain-contract";
-import { cycleSample, levelsSample } from "./onchain-contract";
+import { costBasisSample, cycleSample, levelsSample } from "./onchain-contract";
 import { phrase } from "./i18n";
-import { OnchainLevels, olderUrpdDate, shortDay } from "./onchain-levels";
+import {
+  OnchainLevels,
+  olderUrpdDate,
+  reasonText,
+  shortDay,
+} from "./onchain-levels";
 
 // The shared test setup mocks matchMedia as a narrow screen; each test sets its own width.
 function viewport(wide: boolean) {
@@ -319,4 +324,68 @@ it("treats reasons on a fresh reading as information, not as unavailable", () =>
   expect(screen.queryByText("Cycle unavailable")).toBeNull();
   expect(screen.getByText("Breakout")).toBeTruthy();
   expect(screen.getByText(/URPD distribution unavailable/)).toBeTruthy();
+});
+
+it("puts the levels table and the nearest bands before the cost lines", () => {
+  render(
+    <OnchainLevels
+      levels={levelsSample}
+      cycle={cycleSample}
+      costBasis={costBasisSample}
+      bucket={1000}
+    />,
+  );
+  const headings = screen
+    .getAllByRole("heading", { level: 3 })
+    .map((h) => h.textContent);
+  expect(headings.slice(0, 3)).toEqual([
+    "Cost-basis levels",
+    "Nearest occupied bands",
+    "Cost model lines",
+  ]);
+  // The bucket the page selected is the one shown.
+  expect(screen.getByText("$90.0k")).toBeTruthy();
+});
+
+it("shows a cost-basis request error without hiding the cost lines", () => {
+  render(
+    <OnchainLevels
+      levels={levelsSample}
+      cycle={cycleSample}
+      costBasis={costBasisSample}
+      costBasisError="HTTP 503"
+    />,
+  );
+  expect(screen.getByText("Cost-basis levels unavailable")).toBeTruthy();
+  expect(screen.queryByText("$86.0k")).toBeNull();
+  expect(screen.getByText("Average")).toBeTruthy();
+});
+
+it("reads the per-snapshot URPD reason codes in both languages", () => {
+  const en = (
+    key: Parameters<typeof phrase>[1],
+    vars?: Record<string, string | number>,
+  ) => phrase("en", key, vars);
+  const zh = (
+    key: Parameters<typeof phrase>[1],
+    vars?: Record<string, string | number>,
+  ) => phrase("zh", key, vars);
+  expect(reasonText(en, "urpd_missing:sth:lin200")).toBe(
+    "STH URPD snapshot missing for the $200 bucket",
+  );
+  expect(reasonText(en, "urpd_missing:all:lin1000")).toBe(
+    "ALL URPD snapshot missing for the $1000 bucket",
+  );
+  expect(reasonText(en, "urpd_grid_partial:lin500")).toBe(
+    "some earlier URPD snapshots are missing for the $500 bucket; the grid uses the days available",
+  );
+  expect(reasonText(zh, "urpd_missing:lth:lin500")).toBe(
+    "$500 桶宽缺少 LTH URPD 快照",
+  );
+  expect(reasonText(zh, "urpd_grid_partial:lin200")).toBe(
+    "$200 桶宽缺少部分历史 URPD 快照，网格只用已有日期",
+  );
+  // The shared code without a cohort keeps its own text; unknown codes are shown as received.
+  expect(reasonText(en, "urpd_missing")).toBe("URPD distribution unavailable");
+  expect(reasonText(en, "urpd_empty:lin500")).toBe("urpd_empty:lin500");
 });
