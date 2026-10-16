@@ -13,6 +13,12 @@ describe("on-chain cycle contract", () => {
     expect(parsed.day).toBe(24);
     expect(parsed.changes).toBe(48);
     expect(parsed.components).toHaveLength(3);
+    expect(parsed.components.map((component) => component.supports)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(parsed.components[2].value).toBeLessThan(0);
     expect(parsed.refreshing).toBe(false);
   });
 
@@ -39,6 +45,18 @@ describe("on-chain cycle contract", () => {
   it("rejects an unknown cycle state instead of rendering a guess", () => {
     expect(
       cycleViewSchema.safeParse({ ...cycleSample, state: "bull" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a malformed date or a datetime without an offset", () => {
+    expect(
+      cycleViewSchema.safeParse({ ...cycleSample, since: "2026-9-23" }).success,
+    ).toBe(false);
+    expect(
+      cycleViewSchema.safeParse({
+        ...cycleSample,
+        forming_at: "2026-10-16T00:00:00",
+      }).success,
     ).toBe(false);
   });
 

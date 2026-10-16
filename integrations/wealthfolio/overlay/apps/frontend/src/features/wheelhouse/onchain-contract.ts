@@ -70,7 +70,11 @@ export const levelsViewSchema: z.ZodType<LevelsView, z.ZodTypeDef, unknown> =
     brk_version: z.string().nullable(),
   });
 
-// Hand-written payloads shaped like the service responses; shared by contract and view tests.
+// Hand-written payloads shared by contract and view tests. The cycle components and the
+// breakout episode follow the 2026-10-16 fixture result: depth = 100*ln(W/TMM), spread =
+// 100*ln(STH/TMM), pvs = depth - spread, and supports = sign matches the state's expected sign
+// (breakout expects depth +, pvs +, spread -). The sample lists 2 episodes while `changes` is 48;
+// the real service has changes = len(episodes) - 1 with the full history.
 export const cycleSample: CycleView = {
   data_state: "fresh",
   reasons: [],
@@ -81,18 +85,19 @@ export const cycleSample: CycleView = {
   since: "2026-09-23",
   day: 24,
   components: [
-    { name: "depth", value: 0.042, deadband: 0.01, supports: true },
-    { name: "pvs", value: 0.018, deadband: 0.01, supports: true },
-    { name: "spread", value: -0.003, deadband: 0.01, supports: false },
+    { name: "depth", value: 6.46, deadband: 7.0, supports: true },
+    { name: "pvs", value: 10.43, deadband: 6.8, supports: true },
+    { name: "spread", value: -3.96, deadband: 1.25, supports: true },
   ],
   episodes: [
-    { state: "repair", start: "2026-08-30", end: "2026-09-22", days: 24 },
+    { state: "repair", start: "2026-08-25", end: "2026-09-22", days: 29 },
     { state: "breakout", start: "2026-09-23", end: "2026-10-16", days: 24 },
   ],
   changes: 48,
   brk_version: "0.1.0",
 };
 
+// The line prices are illustrative, not a fixture result.
 export const levelsSample: LevelsView = {
   data_state: "fresh",
   reasons: [],
