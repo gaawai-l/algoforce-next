@@ -417,6 +417,37 @@ describe("on-chain overlays", () => {
       expect(ohlc(view.container)).toContain(stamp(time(0)));
     });
 
+    it("ignores pointer moves over the tick column without a rail", () => {
+      const view = render(railed());
+      const chart = svg(view.container);
+      vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(0, 0, 980, 540),
+      );
+      fireEvent.keyDown(chart, { key: "ArrowLeft" });
+      const selected = ohlc(view.container);
+      expect(selected).toContain(stamp(time(98)));
+      fireEvent.pointerMove(chart, { clientX: RIGHT + 10 });
+      expect(ohlc(view.container)).toBe(selected);
+    });
+
+    it("clears the read-out when the active band leaves the rail", () => {
+      const view = render(railed([sth2]));
+      act(() => screen.getByRole("listitem", { name: /STH K2/ }).focus());
+      expect(screen.getByRole("status").textContent).toContain("STH K2");
+      view.rerender(railed([]));
+      expect(screen.getByRole("status").textContent).toBe("");
+    });
+
+    it("clears the read-out when a refresh moves the active band out of range", () => {
+      const view = render(railed([sth2]));
+      act(() => screen.getByRole("listitem", { name: /STH K2/ }).focus());
+      view.rerender(railed([{ ...sth2, low: 90000, high: 95000 }]));
+      expect(screen.getByRole("status").textContent).toBe("");
+      expect(view.container.querySelector(".wh-rail-spread")).toBeNull();
+      view.rerender(railed([sth2]));
+      expect(screen.getByRole("status").textContent).toBe("");
+    });
+
     it("draws only bands inside the price range and keeps the axis", () => {
       const line = { id: "true_mean", label: "True mean", price: 82200 };
       const base = render(railed([], [line]));

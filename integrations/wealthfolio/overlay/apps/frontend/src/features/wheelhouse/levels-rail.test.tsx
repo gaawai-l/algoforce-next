@@ -128,6 +128,38 @@ describe("LevelsRail", () => {
     expect(onActive).toHaveBeenLastCalledWith(null);
   });
 
+  it("drops the active band when a refresh removes it or moves it out of range", () => {
+    const onActive = vi.fn();
+    const rail = (bands: RailBand[]) => (
+      <svg>
+        <LevelsRail
+          bands={bands}
+          y={y}
+          top={90000}
+          bottom={80000}
+          x={RAIL_X}
+          width={RAIL_WIDTH}
+          plotLeft={16}
+          plotRight={840}
+          onActive={onActive}
+        />
+      </svg>
+    );
+    const view = render(rail([band()]));
+    act(() => screen.getByRole("listitem").focus());
+    expect(onActive).toHaveBeenLastCalledWith(band());
+    view.rerender(rail([band({ low: 95000, high: 99000 })]));
+    expect(onActive).toHaveBeenLastCalledWith(null);
+    expect(view.container.querySelector(".wh-rail-spread")).toBeNull();
+    // Back in range it is not active again on its own.
+    view.rerender(rail([band()]));
+    expect(view.container.querySelector(".wh-rail-spread")).toBeNull();
+    act(() => screen.getByRole("listitem").focus());
+    onActive.mockClear();
+    view.rerender(rail([]));
+    expect(onActive).toHaveBeenCalledWith(null);
+  });
+
   it("keeps arrow keys on a band away from the chart", () => {
     const onKeyDown = vi.fn();
     draw([band()], vi.fn(), onKeyDown);

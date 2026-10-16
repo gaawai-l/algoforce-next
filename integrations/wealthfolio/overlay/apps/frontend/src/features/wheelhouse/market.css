@@ -1170,7 +1170,7 @@
 .wh-market .wh-rail-band:focus-visible {
   outline: none;
   stroke: var(--wh-cyan);
-  stroke-width: 1.5;
+  stroke-width: 3;
 }
 
 /* Key levels controls above the chart: layer toggles, the bucket switch and the band legend. */

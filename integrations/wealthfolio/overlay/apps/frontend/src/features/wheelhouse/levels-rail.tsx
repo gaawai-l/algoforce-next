@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usd } from "./client";
 import { useWheelhouseText, type TextFn } from "./i18n";
 
@@ -74,6 +74,12 @@ export function LevelsRail({
       return { band, y: y1, height: y(Math.max(band.low, bottom)) - y1 };
     });
   const spread = drawn.find((d) => d.band.id === active);
+  // A refresh can remove the active band or move it out of range; drop it so the chart's
+  // read-out never keeps showing a band that is no longer drawn.
+  const gone = active !== null && !spread;
+  useEffect(() => {
+    if (gone) activate(null);
+  }, [gone]);
   return (
     <g role="list" aria-label={text("rail.list")}>
       {spread && (

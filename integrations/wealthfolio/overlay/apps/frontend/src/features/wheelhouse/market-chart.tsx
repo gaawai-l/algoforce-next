@@ -61,7 +61,8 @@ export function MarketChart({
   const missing = text("missing");
   const [selected, setSelected] = useState<number | null>(null);
   const [rangeChoice, setRangeChoice] = useState<RangeChoice | null>(null);
-  const [activeBand, setActiveBand] = useState<RailBand | null>(null);
+  const [activeBandId, setActiveBandId] = useState<string | null>(null);
+  const activeBand = rail?.find((band) => band.id === activeBandId);
   useEffect(() => {
     setRangeChoice(null);
     setSelected(null);
@@ -386,7 +387,7 @@ export function MarketChart({
             width={rw}
             plotLeft={16}
             plotRight={right}
-            onActive={setActiveBand}
+            onActive={(band) => setActiveBandId(band?.id ?? null)}
           />
         )}
         {bars.map((row, i) => {
