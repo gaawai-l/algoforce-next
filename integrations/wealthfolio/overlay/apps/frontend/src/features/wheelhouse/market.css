@@ -1141,3 +1141,56 @@
     font-size: 10px;
   }
 }
+
+/* Flows tab: honest placeholders until the seller-pressure and perp data sources exist. */
+.wh-flows-panel {
+  margin-top: 16px;
+  min-width: 0;
+}
+.wh-flows-switch {
+  display: inline-flex;
+  max-width: 100%;
+  border: 1px solid var(--wh-edge);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.wh-market .wh-flows-switch button {
+  min-height: 36px;
+  padding: 5px 14px;
+  border: 0;
+  border-right: 1px solid var(--wh-edge);
+  border-radius: 0;
+  background: transparent;
+  color: var(--wh-muted);
+  font-size: 12px;
+}
+.wh-market .wh-flows-switch button:last-child {
+  border-right: 0;
+}
+.wh-market .wh-flows-switch button[aria-pressed="true"] {
+  background: #153338;
+  color: var(--wh-cyan);
+}
+.wh-flows-panel .wh-flows-note {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--wh-edge);
+  border-radius: 6px;
+  color: var(--wh-muted);
+  font-size: 12px;
+}
+.wh-flows-panel .wh-flows-note--pending {
+  border-color: #736142;
+  background: #2a241d;
+  color: #efc18d;
+}
+@media (max-width: 600px) {
+  .wh-flows-switch {
+    display: flex;
+  }
+  .wh-market .wh-flows-switch button {
+    flex: 1;
+    min-height: 44px;
+    padding-inline: 8px;
+  }
+}

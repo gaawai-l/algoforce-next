@@ -42,6 +42,7 @@ const en = {
   "method.td": "TD Sequential",
   "method.levels": "Key levels",
   "method.fib": "Fibonacci",
+  "method.flows": "Flows",
   "timeframe.group": "Timeframe",
   "visibleBars": "Visible bars",
   "range.auto": "Auto",
@@ -392,6 +393,12 @@ const en = {
     "On-chain prices are oracle estimates, not Bybit quotes. STH (<150d) means short-term holders: coins last moved less than 150 days ago.",
   "levels.refreshing": "Refreshing on-chain data…",
   "legend.onchain": "Light dashed: on-chain cost lines (oracle prices)",
+  "flows.view": "Flows view",
+  "flows.seller": "Seller pressure",
+  "flows.perp": "Perp states",
+  "flows.sellerPending": "Seller pressure is not implemented yet",
+  "flows.perpPending": "Not connected — perp data source pending",
+  "flows.btcOnly": "Flows are BTC only",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -436,6 +443,7 @@ const zh: Record<MessageKey, string> = {
   "method.td": "TD Sequential",
   "method.levels": "关键价位",
   "method.fib": "斐波那契",
+  "method.flows": "资金流向",
   "timeframe.group": "周期",
   "visibleBars": "可见 K 线",
   "range.auto": "自动",
@@ -774,6 +782,12 @@ const zh: Record<MessageKey, string> = {
     "链上价格为预言机估算值，不是 Bybit 报价。STH (<150d) 指短期持有者：币龄不足 150 天的筹码。",
   "levels.refreshing": "正在刷新链上数据…",
   "legend.onchain": "浅色虚线：链上成本线（预言机价格）",
+  "flows.view": "资金流视图",
+  "flows.seller": "卖压",
+  "flows.perp": "永续状态",
+  "flows.sellerPending": "卖压视图尚未实现",
+  "flows.perpPending": "未连接 — 永续数据源待接入",
+  "flows.btcOnly": "资金流仅支持 BTC",
 };
 
 export const messages = { en, zh };

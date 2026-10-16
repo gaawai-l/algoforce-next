@@ -1,4 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -214,4 +220,70 @@ it("gives the TD Sequential tab no overlays", async () => {
   await waitFor(() => expect(mocks.chart).toHaveBeenCalled());
   expect(lastOverlays() ?? []).toHaveLength(0);
   expect(mocks.levels).not.toHaveBeenCalled();
+});
+
+it("lists four method tabs and ends with Flows", async () => {
+  openLevels("?symbol=BTCUSDT&method=td");
+  const tabs = await screen.findAllByRole("tab");
+  expect(tabs.map((tab) => tab.textContent)).toEqual([
+    "01method.td",
+    "02method.levels",
+    "03method.fib",
+    "04method.flows",
+  ]);
+});
+
+it("moves focus from Fibonacci to Flows with the right arrow key", async () => {
+  openLevels("?symbol=BTCUSDT&method=fib");
+  const fib = await screen.findByRole("tab", { name: /method\.fib/ });
+  fib.focus();
+  fireEvent.keyDown(fib, { key: "ArrowRight" });
+  const flows = screen.getByRole("tab", { name: /method\.flows/ });
+  expect(document.activeElement).toBe(flows);
+  await waitFor(() => expect(flows.getAttribute("aria-selected")).toBe("true"));
+});
+
+it("wraps from Flows to TD Sequential and End jumps to Flows", async () => {
+  openLevels("?symbol=BTCUSDT&method=flows");
+  const flows = await screen.findByRole("tab", { name: /method\.flows/ });
+  fireEvent.keyDown(flows, { key: "ArrowRight" });
+  const td = screen.getByRole("tab", { name: /method\.td/ });
+  expect(document.activeElement).toBe(td);
+  fireEvent.keyDown(td, { key: "End" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("tab", { name: /method\.flows/ }),
+  );
+});
+
+it("shows the Flows panel without timeframe controls or a chart", async () => {
+  openLevels("?symbol=BTCUSDT&method=flows");
+  expect(await screen.findByText("flows.sellerPending")).toBeTruthy();
+  expect(
+    screen
+      .getByRole("tab", { name: /method\.flows/ })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(screen.queryByRole("group", { name: "timeframe.group" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "5M" })).toBeNull();
+  expect(screen.queryByLabelText("visibleBars")).toBeNull();
+  expect(mocks.chart).not.toHaveBeenCalled();
+  expect(mocks.levels).not.toHaveBeenCalled();
+});
+
+it("keeps the timeframe controls on the other tabs", async () => {
+  openLevels("?symbol=BTCUSDT&method=td");
+  expect(
+    await screen.findByRole("group", { name: "timeframe.group" }),
+  ).toBeTruthy();
+});
+
+it("says flows are BTC only for ETH while the tab stays selectable", async () => {
+  openLevels("?symbol=ETHUSDT&method=flows", { symbol: "ETHUSDT" });
+  expect(await screen.findByText("flows.btcOnly")).toBeTruthy();
+  expect(screen.queryByText("flows.sellerPending")).toBeNull();
+  expect(
+    screen
+      .getByRole("tab", { name: /method\.flows/ })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
 });

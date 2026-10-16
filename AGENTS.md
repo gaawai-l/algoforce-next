@@ -48,7 +48,9 @@ make verify-a5
 
 - 英文暗色赛博朋克：近黑底、青色主强调、紫色次强调、克制辉光、可读数据和清晰键盘焦点。标题用 Orbitron，界面文字用 Inter，金融数值用 JetBrains Mono。
 - Overview、Wheel cycles、Risk exposure、Market intelligence 共用一个左侧栏，小屏折叠同一导航。设计修正应用到共享 shell。
-- Market intelligence：市场/标的 → TD Sequential / Key levels / Fibonacci 方法 tabs → 周期控件 → 一张大图与当前方法详情。方法 tabs 与应用导航分开；三方法卡片网格、并排图表和市场简报布局是已否定的方案。
+- Market intelligence：市场/标的 → TD Sequential / Key levels / Fibonacci / Flows 方法 tabs → 周期控件 → 一张大图与当前方法详情。方法 tabs 与应用导航分开；三方法卡片网格、并排图表和市场简报布局是已否定的方案。
+- Flows 是"一张大图"规则的唯一例外：照原站把多张图纵向排列，每张图下方有 What it shows / What extreme values imply / How to read 三栏说明，窄屏下三栏说明全部展开。该 tab 不显示周期控件，各图用自己的 Span 选择。
+- Key levels 的链上密集带画在价格图右侧的刻度轨上，不改变价格轴（P3 实施）。
 
 ## 当前市场数据约定
 

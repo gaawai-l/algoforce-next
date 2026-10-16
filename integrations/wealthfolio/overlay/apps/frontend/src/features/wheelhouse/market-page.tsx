@@ -16,6 +16,7 @@ import { useLiveMarketRefresh } from "./use-initial-market-refresh";
 import { DemarkDetails } from "./demark-details";
 import { CycleBadge } from "./cycle-badge";
 import { OnchainLevels, lineNameKey } from "./onchain-levels";
+import { FlowsPanel } from "./flows-panel";
 import { RegimeCheck } from "./regime-check";
 import { defaultDemarkConfig } from "./demark-contract";
 import {
@@ -37,7 +38,7 @@ import {
 } from "./client";
 import "./market.css";
 
-type Method = "td" | "levels" | "fib";
+type Method = "td" | "levels" | "fib" | "flows";
 const timeframes: Stream["timeframe"][] = ["5m", "15m", "1h", "4h", "1d"];
 const activeStates = new Set(["queued", "running", "retry_wait"]);
 
@@ -61,6 +62,7 @@ export default function MarketPage() {
     { id: "td" as const, name: text("method.td") },
     { id: "levels" as const, name: text("method.levels") },
     { id: "fib" as const, name: text("method.fib") },
+    { id: "flows" as const, name: text("method.flows") },
   ];
   const cache = useQueryClient();
   const [search, setSearch] = useSearchParams();
@@ -502,225 +504,242 @@ export default function MarketPage() {
               </button>
             ))}
           </div>
-          <div className="wh-framebar">
-            <div role="group" aria-label={text("timeframe.group")}>
-              {timeframes.map((tf) => (
-                <button
-                  key={tf}
-                  aria-pressed={tf === timeframe}
-                  onClick={() => setTimeframe(tf)}
-                >
-                  {tf.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            <label className="wh-inline">
-              {text("visibleBars")}
-              <Dropdown
-                aria-label={text("visibleBars")}
-                value={visibleBars}
-                onValueChange={(value) => setVisibleBars(Number(value))}
-              >
-                <DropdownOption value="0">{text("range.auto")}</DropdownOption>
-                <DropdownOption value="50">50</DropdownOption>
-                <DropdownOption value="100">100</DropdownOption>
-                <DropdownOption value="200">200</DropdownOption>
-                <DropdownOption value="500">500</DropdownOption>
-                <DropdownOption value="-1">{text("range.all")}</DropdownOption>
-              </Dropdown>
-            </label>
-            <span className="wh-muted">
-              24/7 · UTC ·{" "}
-              {selectedId ? text("capture.replay") : text("capture.latest")}
-            </span>
-          </div>
-          <section
-            className="wh-analysis"
-            id={`wh-panel-${method}`}
-            role="tabpanel"
-            aria-labelledby={`wh-tab-${method}`}
-          >
-            <div className="wh-chart-area">
-              <div className="wh-chart-title">
-                <h2>{symbol.replace("USDT", " / USDT")}</h2>
-                <span>
-                  {text("chart.closedCount", {
-                    tf: timeframe.toUpperCase(),
-                    count: analysis?.bars.length ?? 0,
-                  })}
-                </span>
+          {method !== "flows" && (
+            <div className="wh-framebar">
+              <div role="group" aria-label={text("timeframe.group")}>
+                {timeframes.map((tf) => (
+                  <button
+                    key={tf}
+                    aria-pressed={tf === timeframe}
+                    onClick={() => setTimeframe(tf)}
+                  >
+                    {tf.toUpperCase()}
+                  </button>
+                ))}
               </div>
-              {analysis ? (
-                <MarketChart
-                  key={`${source}:${symbol}:${timeframe}:${selectedId ?? "live"}`}
-                  analysis={analysis}
-                  visibleBars={visibleBars}
-                  showLevels={method === "levels"}
-                  showDemark={method === "td"}
-                  sequence={selectedSequence}
-                  overlays={overlays}
-                />
-              ) : (
-                <div className="wh-empty">
-                  <p>
-                    {workspace.isLoading || saved.isFetching
-                      ? text("chart.loadingSaved")
-                      : pending?.kind === "refresh" ||
-                          submitting ||
-                          activeStates.has(latestJob?.state ?? "")
-                        ? text("chart.fetching", {
-                            tf: timeframe.toUpperCase(),
-                          })
-                        : text("chart.none", { tf: timeframe.toUpperCase() })}
-                  </p>
-                </div>
-              )}
-              {analysis && (
-                <details className="wh-chart-data">
-                  <summary>{text("chart.timestamps")}</summary>
-                  <div className="wh-provenance">
-                    <div>
-                      <span>{text("stamp.closed")}</span>
-                      <strong>
-                        {stamp(analysis.closed_bar_time, missing)}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>{text("stamp.forming")}</span>
-                      <strong>
-                        {stamp(analysis.forming_bar_time, missing)}
-                      </strong>
-                    </div>
-                    <div>
-                      <span>{text("stamp.acquired")}</span>
-                      <strong>{stamp(analysis.fetched_at, missing)}</strong>
-                    </div>
-                    <div>
-                      <span>{text("stamp.nextClose")}</span>
-                      <strong>
-                        {stamp(analysis.expected_next_close, missing)}
-                      </strong>
-                    </div>
-                  </div>
-                </details>
-              )}
+              <label className="wh-inline">
+                {text("visibleBars")}
+                <Dropdown
+                  aria-label={text("visibleBars")}
+                  value={visibleBars}
+                  onValueChange={(value) => setVisibleBars(Number(value))}
+                >
+                  <DropdownOption value="0">
+                    {text("range.auto")}
+                  </DropdownOption>
+                  <DropdownOption value="50">50</DropdownOption>
+                  <DropdownOption value="100">100</DropdownOption>
+                  <DropdownOption value="200">200</DropdownOption>
+                  <DropdownOption value="500">500</DropdownOption>
+                  <DropdownOption value="-1">
+                    {text("range.all")}
+                  </DropdownOption>
+                </Dropdown>
+              </label>
+              <span className="wh-muted">
+                24/7 · UTC ·{" "}
+                {selectedId ? text("capture.replay") : text("capture.latest")}
+              </span>
             </div>
-            <aside
-              className="wh-inspector"
-              aria-label={text("inspector.label")}
+          )}
+          {method === "flows" ? (
+            <section
+              className="wh-flows-panel"
+              id="wh-panel-flows"
+              role="tabpanel"
+              aria-labelledby="wh-tab-flows"
             >
-              {method === "levels" &&
-                (onchainShown ? (
-                  <OnchainLevels
-                    levels={onchainLevels.data}
-                    cycle={onchainCycle.data}
-                    levelsError={
-                      onchainLevels.isError
-                        ? onchainLevels.error.message
-                        : undefined
-                    }
-                    cycleError={
-                      onchainCycle.isError
-                        ? onchainCycle.error.message
-                        : undefined
-                    }
+              <FlowsPanel symbol={symbol} />
+            </section>
+          ) : (
+            <section
+              className="wh-analysis"
+              id={`wh-panel-${method}`}
+              role="tabpanel"
+              aria-labelledby={`wh-tab-${method}`}
+            >
+              <div className="wh-chart-area">
+                <div className="wh-chart-title">
+                  <h2>{symbol.replace("USDT", " / USDT")}</h2>
+                  <span>
+                    {text("chart.closedCount", {
+                      tf: timeframe.toUpperCase(),
+                      count: analysis?.bars.length ?? 0,
+                    })}
+                  </span>
+                </div>
+                {analysis ? (
+                  <MarketChart
+                    key={`${source}:${symbol}:${timeframe}:${selectedId ?? "live"}`}
+                    analysis={analysis}
+                    visibleBars={visibleBars}
+                    showLevels={method === "levels"}
+                    showDemark={method === "td"}
+                    sequence={selectedSequence}
+                    overlays={overlays}
                   />
                 ) : (
-                  <p className="wh-muted">
-                    {text(
-                      symbol === "BTCUSDT"
-                        ? "levels.latestOnly"
-                        : "levels.btcOnly",
-                    )}
-                  </p>
-                ))}
-              <span className="wh-eyebrow">{text("inspector.eyebrow")}</span>
-              <h2>
-                {method === "levels"
-                  ? text("inspector.levels")
-                  : method === "td"
-                    ? text("inspector.td")
-                    : text("inspector.fib")}
-              </h2>
-              {method === "levels" ? (
-                <>
-                  <p>{text("inspector.levelsBody")}</p>
-                  <Facts
-                    entries={[
-                      [
-                        text("inspector.sma", {
-                          window: analysis?.rules.window ?? windowSize,
-                        }),
-                        money(latestPoint?.sma, missing),
-                      ],
-                      [
-                        text("inspector.priorHigh"),
-                        money(latestPoint?.prior_high, missing),
-                      ],
-                      [
-                        text("inspector.priorLow"),
-                        money(latestPoint?.prior_low, missing),
-                      ],
-                      [
-                        text("inspector.warmup"),
-                        analysis
-                          ? text("inspector.warmupValue", {
-                              state: analysis.warmup_complete
-                                ? text("inspector.warmupComplete")
-                                : text("inspector.warmupIncomplete"),
-                              count: analysis.warmup_required,
+                  <div className="wh-empty">
+                    <p>
+                      {workspace.isLoading || saved.isFetching
+                        ? text("chart.loadingSaved")
+                        : pending?.kind === "refresh" ||
+                            submitting ||
+                            activeStates.has(latestJob?.state ?? "")
+                          ? text("chart.fetching", {
+                              tf: timeframe.toUpperCase(),
                             })
-                          : text("inspector.noDataset"),
-                      ],
-                      [
-                        text("inspector.calculation"),
-                        analysis?.rules.engine_version ?? "baseline-v1",
-                      ],
-                      [
-                        text("inspector.signal"),
-                        text("inspector.notImplemented"),
-                      ],
-                    ]}
-                  />
-                  <p className="wh-muted">{text("inspector.levelsNote")}</p>
-                </>
-              ) : method === "td" ? (
-                <DemarkDetails
-                  result={analysis?.demark}
-                  selectedId={selectedSequence?.sequence_id ?? null}
-                  onSelect={setSequenceId}
-                />
-              ) : (
-                <>
-                  <span className="wh-badge wh-amber">
-                    {text("inspector.fibBadge")}
-                  </span>
-                  <p>{text("inspector.fibBody")}</p>
-                </>
-              )}
-              {analysis && (
-                <>
-                  <h3>{text("quality.title")}</h3>
-                  {analysis.issues.length ? (
-                    <ul>
-                      {analysis.issues.map((issue) => (
-                        <li key={issue}>{issueText(text, issue)}</li>
-                      ))}
-                    </ul>
+                          : text("chart.none", { tf: timeframe.toUpperCase() })}
+                    </p>
+                  </div>
+                )}
+                {analysis && (
+                  <details className="wh-chart-data">
+                    <summary>{text("chart.timestamps")}</summary>
+                    <div className="wh-provenance">
+                      <div>
+                        <span>{text("stamp.closed")}</span>
+                        <strong>
+                          {stamp(analysis.closed_bar_time, missing)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>{text("stamp.forming")}</span>
+                        <strong>
+                          {stamp(analysis.forming_bar_time, missing)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>{text("stamp.acquired")}</span>
+                        <strong>{stamp(analysis.fetched_at, missing)}</strong>
+                      </div>
+                      <div>
+                        <span>{text("stamp.nextClose")}</span>
+                        <strong>
+                          {stamp(analysis.expected_next_close, missing)}
+                        </strong>
+                      </div>
+                    </div>
+                  </details>
+                )}
+              </div>
+              <aside
+                className="wh-inspector"
+                aria-label={text("inspector.label")}
+              >
+                {method === "levels" &&
+                  (onchainShown ? (
+                    <OnchainLevels
+                      levels={onchainLevels.data}
+                      cycle={onchainCycle.data}
+                      levelsError={
+                        onchainLevels.isError
+                          ? onchainLevels.error.message
+                          : undefined
+                      }
+                      cycleError={
+                        onchainCycle.isError
+                          ? onchainCycle.error.message
+                          : undefined
+                      }
+                    />
                   ) : (
-                    <p>{text("quality.none")}</p>
-                  )}
-                  <p className="wh-muted">
-                    {analysis.stream.source} / {analysis.stream.venue}
-                    <br />
-                    {analysis.stream.quote_currency} ·{" "}
-                    {analysis.stream.market_session} ·{" "}
-                    {analysis.stream.timezone}
-                  </p>
-                </>
-              )}
-            </aside>
-          </section>
+                    <p className="wh-muted">
+                      {text(
+                        symbol === "BTCUSDT"
+                          ? "levels.latestOnly"
+                          : "levels.btcOnly",
+                      )}
+                    </p>
+                  ))}
+                <span className="wh-eyebrow">{text("inspector.eyebrow")}</span>
+                <h2>
+                  {method === "levels"
+                    ? text("inspector.levels")
+                    : method === "td"
+                      ? text("inspector.td")
+                      : text("inspector.fib")}
+                </h2>
+                {method === "levels" ? (
+                  <>
+                    <p>{text("inspector.levelsBody")}</p>
+                    <Facts
+                      entries={[
+                        [
+                          text("inspector.sma", {
+                            window: analysis?.rules.window ?? windowSize,
+                          }),
+                          money(latestPoint?.sma, missing),
+                        ],
+                        [
+                          text("inspector.priorHigh"),
+                          money(latestPoint?.prior_high, missing),
+                        ],
+                        [
+                          text("inspector.priorLow"),
+                          money(latestPoint?.prior_low, missing),
+                        ],
+                        [
+                          text("inspector.warmup"),
+                          analysis
+                            ? text("inspector.warmupValue", {
+                                state: analysis.warmup_complete
+                                  ? text("inspector.warmupComplete")
+                                  : text("inspector.warmupIncomplete"),
+                                count: analysis.warmup_required,
+                              })
+                            : text("inspector.noDataset"),
+                        ],
+                        [
+                          text("inspector.calculation"),
+                          analysis?.rules.engine_version ?? "baseline-v1",
+                        ],
+                        [
+                          text("inspector.signal"),
+                          text("inspector.notImplemented"),
+                        ],
+                      ]}
+                    />
+                    <p className="wh-muted">{text("inspector.levelsNote")}</p>
+                  </>
+                ) : method === "td" ? (
+                  <DemarkDetails
+                    result={analysis?.demark}
+                    selectedId={selectedSequence?.sequence_id ?? null}
+                    onSelect={setSequenceId}
+                  />
+                ) : (
+                  <>
+                    <span className="wh-badge wh-amber">
+                      {text("inspector.fibBadge")}
+                    </span>
+                    <p>{text("inspector.fibBody")}</p>
+                  </>
+                )}
+                {analysis && (
+                  <>
+                    <h3>{text("quality.title")}</h3>
+                    {analysis.issues.length ? (
+                      <ul>
+                        {analysis.issues.map((issue) => (
+                          <li key={issue}>{issueText(text, issue)}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>{text("quality.none")}</p>
+                    )}
+                    <p className="wh-muted">
+                      {analysis.stream.source} / {analysis.stream.venue}
+                      <br />
+                      {analysis.stream.quote_currency} ·{" "}
+                      {analysis.stream.market_session} ·{" "}
+                      {analysis.stream.timezone}
+                    </p>
+                  </>
+                )}
+              </aside>
+            </section>
+          )}
           {method === "td" && (
             <RegimeCheck stream={stream} rules={rules} live={!selectedId} />
           )}
