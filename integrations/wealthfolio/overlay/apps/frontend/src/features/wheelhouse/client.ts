@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { demarkConfigSchema, demarkResultSchema } from "./demark-contract";
 import {
+  costBasisViewSchema,
   cycleViewSchema,
   levelsViewSchema,
   sellerPressureSchema,
@@ -208,6 +209,8 @@ export const getOnchainLevels = (signal?: AbortSignal) =>
   query("/onchain/levels", levelsViewSchema, { signal });
 export const getSellerPressure = (signal?: AbortSignal) =>
   query("/onchain/seller-pressure", sellerPressureSchema, { signal });
+export const getCostBasis = (signal?: AbortSignal) =>
+  query("/onchain/cost-basis", costBasisViewSchema, { signal });
 export const getJob = (id: string, signal?: AbortSignal) =>
   query(`/jobs/${encodeURIComponent(id)}`, jobSchema, { signal });
 export const getJobEvents = (id: string, signal?: AbortSignal) =>

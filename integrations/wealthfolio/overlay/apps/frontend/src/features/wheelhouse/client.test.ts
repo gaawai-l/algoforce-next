@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  getCostBasis,
   getOnchainCycle,
   getOnchainLevels,
   getSellerPressure,
   getServiceStatus,
 } from "./client";
-import { cycleSample, levelsSample, pressureSample } from "./onchain-contract";
+import {
+  costBasisSample,
+  cycleSample,
+  levelsSample,
+  pressureSample,
+} from "./onchain-contract";
 
 const validResponse = {
   service: "wheelhouse-python",
@@ -201,6 +207,31 @@ describe("on-chain client", () => {
         ),
     );
     await expect(getSellerPressure()).rejects.toThrow("incompatible");
+  });
+
+  it("reads the cost basis from the read-only endpoint", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(costBasisSample)));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await getCostBasis(new AbortController().signal);
+    expect(view.data_state).toBe("fresh");
+    expect(view.buckets.map((bucket) => bucket.bucket)).toEqual([
+      200, 500, 1000,
+    ]);
+    expect(view.buckets[1].resistance).toEqual([86000, 88000, 96000, 104000]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/wheelhouse/v1/onchain/cost-basis",
+    ]);
+  });
+
+  it("rejects a cost basis payload outside the contract", async () => {
+    const { buckets: _buckets, ...incomplete } = costBasisSample;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify(incomplete))),
+    );
+    await expect(getCostBasis()).rejects.toThrow("incompatible");
   });
 
   it("rejects an on-chain payload outside the contract", async () => {
