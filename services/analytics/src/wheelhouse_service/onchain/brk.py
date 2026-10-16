@@ -26,6 +26,22 @@ DAY1_SERIES = (
     "realized_price",
     "utxos_1d_to_1w_old_realized_price",
 )
+# Time comes from the position, so no timestamp series is fetched.
+HOUR1_SERIES = (
+    "price_close",
+    "sth_realized_profit_cumulative",
+    "sth_realized_loss_cumulative",
+    "lth_realized_profit_cumulative",
+    "lth_realized_loss_cumulative",
+    "utxos_under_1h_old_realized_profit_cumulative",
+    "utxos_under_1h_old_realized_loss_cumulative",
+    "sth_supply_in_loss",
+    "sth_supply_in_profit",
+    "utxos_under_1h_old_supply_in_loss",
+    "utxos_under_1h_old_supply_in_profit",
+)
+# First fill and full refetch of hour1 ask for the last N points (`start=-N`), never for `START`.
+HOUR1_BACKFILL = 3000
 
 Index = Literal["day1", "hour1"]
 
@@ -128,7 +144,11 @@ class BrkClient:
         return body
 
     def series(self, names: Sequence[str], index: Index, start: int | date) -> SeriesBatch:
-        """Fetch `names` from `start` through the latest position, in chunks under MAX_POINTS."""
+        """Fetch `names` from `start` through the latest position, in chunks under MAX_POINTS.
+
+        A negative `start` asks BRK for the last `-start` points; each response still carries the
+        absolute position of its first point.
+        """
         size = max(1, MAX_POINTS // max(1, self._points(index, start)))
         found: dict[str, SeriesData] = {}
         missing: list[str] = []
@@ -148,6 +168,8 @@ class BrkClient:
 
     def _points(self, index: Index, start: int | date) -> int:
         """Points one series returns for `start`, assuming the latest position is now."""
+        if not isinstance(start, date) and start < 0:
+            return -start
         unit = timedelta(days=1) if index == "day1" else timedelta(hours=1)
         latest = (self.clock().astimezone(UTC) - EPOCH) // unit
         if isinstance(start, date):

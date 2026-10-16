@@ -41,7 +41,11 @@ def _error(status: int, code: str, kind: str = "not_found") -> httpx.Response:
 
 
 def _position(start: str) -> int:
-    return int(start) if start.isdigit() else (date.fromisoformat(start) - EPOCH).days
+    """A position (negative means the last N points) or an ISO date."""
+    try:
+        return int(start)
+    except ValueError:
+        return (date.fromisoformat(start) - EPOCH).days
 
 
 def _bulk(params: dict[str, str], missing: Set[str]) -> httpx.Response:
@@ -52,9 +56,14 @@ def _bulk(params: dict[str, str], missing: Set[str]) -> httpx.Response:
     body = []
     for name in names:
         raw = _raw(f"{params['index']}_{name}.json")
-        assert start >= raw["start"], f"fixture {name} starts at {raw['start']}, asked for {start}"
-        body.append({**raw, "start": start, "data": raw["data"][start - raw["start"] :]})
-    if (body[0]["end"] - start) * len(names) * WEIGHT_PER_POINT > WEIGHT_CAP:
+        # A negative start is the last -start points. Either way the body carries the absolute
+        # position of its first row. A fixture holds only what was captured, so a request that
+        # reaches back further than that gets the fixture from its own start.
+        first = max(raw["end"] + start if start < 0 else start, raw["start"])
+        body.append({**raw, "start": first, "data": raw["data"][first - raw["start"] :]})
+    # BRK weighs the points it was asked for, not the fewer a fixture can replay.
+    points = -start if start < 0 else body[0]["end"] - start
+    if points * len(names) * WEIGHT_PER_POINT > WEIGHT_CAP:
         return _error(400, "weight_exceeded", "invalid_request")
     return httpx.Response(200, json=body)
 
@@ -72,9 +81,13 @@ def brk_transport(
     version: str = "0.12.2",
     missing: Set[str] = frozenset(),
     fail_paths: Set[str] = frozenset(),
+    fail_index: Set[str] = frozenset(),
     urpd_dates: Set[date] | None = None,
 ) -> tuple[httpx.MockTransport, Calls]:
-    """A fake BRK serving the fixtures; `urpd_dates=None` means every date has a snapshot."""
+    """A fake BRK serving the fixtures; `urpd_dates=None` means every date has a snapshot.
+
+    Series requests for an index in `fail_index` always get a 503.
+    """
     calls = Calls()
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -86,6 +99,8 @@ def brk_transport(
         if path == "/version":
             return httpx.Response(200, json=version)
         if path == "/api/series/bulk":
+            if params.get("index") in fail_index:
+                return httpx.Response(503)
             return _bulk(params, missing)
         if path.startswith("/api/urpd/"):
             _, _, _, cohort, day = path.split("/")

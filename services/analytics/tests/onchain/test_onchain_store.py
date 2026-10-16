@@ -121,6 +121,35 @@ def test_positions_map_to_utc_from_2009(tmp_path: Path):
     ]
 
 
+def test_read_series_tail_returns_last_rows(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    fixture = load_series("price_close", "hour1")
+    store.merge_series("price_close", "hour1", fixture, FETCHED)
+    everything = store.read_series("price_close", "hour1")
+
+    tail = store.read_series("price_close", "hour1", tail=5)
+    assert tail == everything[-5:]
+    assert tail[-1] == (datetime(2026, 10, 16, 9, tzinfo=UTC), fixture.data[-1])
+    assert [moment for moment, _ in tail] == sorted(moment for moment, _ in tail)
+    # Without `tail`, or with a tail longer than the table, every row comes back.
+    assert store.read_series("price_close", "hour1", tail=None) == everything
+    assert store.read_series("price_close", "hour1", tail=len(everything) + 10) == everything
+    assert store.read_series("price_close", "hour1", tail=0) == []
+    assert store.read_series("missing", "hour1", tail=3) == []
+
+    # Gaps are kept as None, and a tail only reads its own series and index.
+    store.merge_series("gappy", "hour1", series([1.0, None, 3.0], index="hour1"), FETCHED)
+    store.merge_series("gappy", "day1", series([9.0, 9.0, 9.0]), FETCHED)
+    assert store.read_series("gappy", "hour1", tail=2) == [
+        (datetime(2009, 1, 1, 1, tzinfo=UTC), None),
+        (datetime(2009, 1, 1, 2, tzinfo=UTC), 3.0),
+    ]
+
+    # SQLite treats a negative LIMIT as "no limit", so it must not reach the query.
+    with pytest.raises(ValueError, match="tail"):
+        store.read_series("price_close", "hour1", tail=-1)
+
+
 def test_naive_fetch_time_is_rejected(tmp_path: Path):
     store = OnchainStore(tmp_path / "onchain.sqlite3")
     with pytest.raises(ValueError, match="Timezone"):

@@ -5,7 +5,15 @@ import httpx
 import pytest
 from onchain_fixture import FIXTURES, brk_transport, load_series
 
-from wheelhouse_service.onchain.brk import DAY1_SERIES, START, BrkClient, BrkError, Urpd
+from wheelhouse_service.onchain.brk import (
+    DAY1_SERIES,
+    HOUR1_BACKFILL,
+    HOUR1_SERIES,
+    START,
+    BrkClient,
+    BrkError,
+    Urpd,
+)
 
 NOW = datetime(2026, 10, 16, 10, 0, tzinfo=UTC)
 
@@ -80,6 +88,103 @@ def test_chunk_size_follows_the_point_estimate():
     client, requested = hour1_client()
     client.series(DAY1_SERIES, "hour1", START)
     assert requested == [[name] for name in DAY1_SERIES]
+
+
+def test_hour1_series_are_the_eleven_planned_names():
+    assert HOUR1_BACKFILL == 3000
+    assert len(HOUR1_SERIES) == len(set(HOUR1_SERIES)) == 11
+    # Time comes from the position, so no timestamp series is fetched.
+    assert "timestamp" not in HOUR1_SERIES
+    assert "price_close" in HOUR1_SERIES
+
+
+def test_hour1_fixtures_end_at_the_same_hour_with_the_same_gaps():
+    loaded = {name: load_series(name, "hour1") for name in HOUR1_SERIES}
+
+    # Position 155,937 is 2026-10-16T09:00Z; hours without a block are null in every series.
+    assert {(data.start, data.end) for data in loaded.values()} == {(153_338, 155_938)}
+    gaps = {
+        tuple(i for i, value in enumerate(data.data) if value is None) for data in loaded.values()
+    }
+    assert len(gaps) == 1
+    assert len(next(iter(gaps))) == 11
+    assert all(data.data[-1] is not None for data in loaded.values())
+
+
+def test_hour1_backfill_uses_negative_start_and_two_chunks():
+    transport, calls = brk_transport()
+    batch = client_for(transport).series(HOUR1_SERIES, "hour1", -3000)
+
+    # 3,000 points per series: six series are 18,000 points (the cap), so 11 names are 6 + 5.
+    bulk = [params for path, params in calls if path == "/api/series/bulk"]
+    assert len(bulk) == 2
+    assert [params["series"].split(",") for params in bulk] == [
+        list(HOUR1_SERIES[:6]),
+        list(HOUR1_SERIES[6:]),
+    ]
+    assert all(params["index"] == "hour1" and params["start"] == "-3000" for params in bulk)
+    assert set(batch.found) == set(HOUR1_SERIES)
+    assert batch.missing == []
+    # The fixtures hold 2,600 hours, so the replay returns everything it has.
+    for name in HOUR1_SERIES:
+        assert batch.found[name].start == 153_338
+        assert batch.found[name].data == load_series(name, "hour1").data
+
+
+def test_negative_start_points_estimate():
+    # The clock does not matter: a negative start is "the last N points".
+    for now in (NOW, datetime(2030, 1, 1, tzinfo=UTC)):
+        client = BrkClient(clock=lambda now=now: now)
+        assert client._points("hour1", -3000) == 3000
+        assert client._points("day1", -3000) == 3000
+    # A non-negative position still counts up to the latest one: 155,938 - 155,934 + 1.
+    assert BrkClient(clock=lambda: NOW)._points("hour1", 155_934) == 5
+
+
+def test_negative_start_replay_returns_last_rows_at_their_absolute_position():
+    transport, _ = brk_transport()
+    with httpx.Client(transport=transport, base_url="https://brk.test") as http:
+        response = http.get(
+            "/api/series/bulk",
+            params={"series": "price_close,sth_supply_in_loss", "index": "hour1", "start": "-4"},
+        )
+        too_heavy = http.get(
+            "/api/series/bulk",
+            params={
+                "series": ",".join(HOUR1_SERIES[:7]),
+                "index": "hour1",
+                "start": "-3000",
+            },
+        )
+
+    body = response.json()
+    assert [(item["start"], item["end"]) for item in body] == [(155_934, 155_938)] * 2
+    assert body[0]["data"] == load_series("price_close", "hour1").data[-4:]
+    assert body[1]["data"] == load_series("sth_supply_in_loss", "hour1").data[-4:]
+    # 7 series x 3,000 points x 16 weight is over the 320,000 cap, as on the live API.
+    assert too_heavy.status_code == 400
+    assert too_heavy.json()["error"]["code"] == "weight_exceeded"
+
+
+def test_replay_serves_a_request_older_than_the_fixture_from_its_own_start():
+    transport, _ = brk_transport()
+    batch = client_for(transport).series(["price_close"], "hour1", 140_000)
+
+    # The fixture holds 2,600 hours; the body says where its first row really is.
+    assert batch.found["price_close"].start == 153_338
+    assert batch.found["price_close"].data == load_series("price_close", "hour1").data
+
+
+def test_fail_index_fails_only_that_index_with_a_retryable_error():
+    transport, calls = brk_transport(fail_index={"hour1"})
+    client = client_for(transport)
+
+    with pytest.raises(BrkError) as raised:
+        client.series(HOUR1_SERIES, "hour1", -3000)
+    assert (raised.value.code, raised.value.retryable) == ("brk_unavailable", True)
+    assert [params["index"] for _, params in calls] == ["hour1"]
+
+    assert set(client.series(DAY1_SERIES, "day1", 6494).found) == set(DAY1_SERIES)
 
 
 def test_bulk_series_not_found_retries_each_series():

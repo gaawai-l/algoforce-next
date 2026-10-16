@@ -105,12 +105,25 @@ class OnchainStore:
             (name, index, data.version),
         )
 
-    def read_series(self, name: str, index: Index) -> list[tuple[datetime, float | None]]:
+    def read_series(
+        self, name: str, index: Index, tail: int | None = None
+    ) -> list[tuple[datetime, float | None]]:
+        """Every row in time order, or only the last `tail` rows."""
+        if tail is not None and tail < 0:
+            # SQLite treats a negative LIMIT as no limit, which would silently read everything.
+            raise ValueError("tail must not be negative")
         with self.connection() as db:
-            rows = db.execute(
-                "SELECT position, value FROM series WHERE series=? AND idx=? ORDER BY position",
-                (name, index),
-            ).fetchall()
+            if tail is None:
+                rows = db.execute(
+                    "SELECT position, value FROM series WHERE series=? AND idx=? ORDER BY position",
+                    (name, index),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT position, value FROM (SELECT position, value FROM series "
+                    "WHERE series=? AND idx=? ORDER BY position DESC LIMIT ?) ORDER BY position",
+                    (name, index, tail),
+                ).fetchall()
         return [(EPOCH + STEP[index] * row["position"], row["value"]) for row in rows]
 
     def series_version(self, name: str, index: Index) -> int | None:
