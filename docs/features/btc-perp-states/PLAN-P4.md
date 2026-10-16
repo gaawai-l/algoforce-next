@@ -200,7 +200,7 @@
   - `quarantined_days`：参考窗口内，有 `source = archive` 且 `oi` 为 NULL 的行的 UTC 日期数；
   - 覆盖按 §3.2：两条连接的区间取并集，桶完全落在其中才算覆盖；
   - 清算：只取 Binance 的 `X=FILLED`；方向映射按 §3.1；同一 key 取各连接出现次数的最大值；
-  - 必需序列一行都没有时返回 None。
+  - 必需序列一行都没有时，返回缺失的键（与 v3 的签名一致）。
 
 **步骤**
 
@@ -359,7 +359,7 @@
   - `test_backfill_hist_29d_then_archive`（`horizon_days` 设为 31）
   - `test_binance_backoff_does_not_stop_bybit`
   - `test_derives_six_payloads`
-  - `test_build_grid_none_stores_unavailable_marker`
+  - `test_missing_series_stores_unavailable_marker`
   - `test_direction_check_pending_ok_inverted_and_v_units`
   - `test_prune_keeps_120d_and_1h_trade_ids`
 - [ ] **Step 2–4**，提交。commit message：`feat(perps): backfill and derive perp states in a worker`
