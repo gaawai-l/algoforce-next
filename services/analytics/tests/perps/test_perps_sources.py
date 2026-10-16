@@ -5,10 +5,11 @@ import json
 import threading
 import time
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from email.utils import format_datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -54,6 +55,16 @@ def clock_at(hm: str) -> Clock:
     return Clock(datetime.fromtimestamp(at(hm), UTC))
 
 
+def hist_reply(rows: list[dict[str, Any]], query: Mapping[str, str]) -> list[dict[str, Any]]:
+    """openInterestHist as the live endpoint answers: with no endTime the latest `limit` rows,
+    whatever the startTime; with both ends the rows in [startTime, endTime], oldest first."""
+    limit = int(query["limit"])
+    if "endTime" not in query:
+        return rows[-limit:]
+    window = [r for r in rows if int(query["startTime"]) <= r["timestamp"] <= int(query["endTime"])]
+    return window[:limit]
+
+
 class Exchange:
     """The 2026-10-15 fixtures behind the hosts' routes, honouring the paging parameters."""
 
@@ -84,8 +95,7 @@ class Exchange:
             ]
             return httpx.Response(200, json=rows[: int(query["limit"])])
         if (host, path) == (BINANCE_HOST, "/futures/data/openInterestHist"):
-            rows = [row for row in self.hist if row["timestamp"] >= int(query["startTime"])]
-            return httpx.Response(200, json=rows[: int(query["limit"])])
+            return httpx.Response(200, json=hist_reply(self.hist, query))
         if (host, path) == (BYBIT_HOST, "/v5/market/kline"):
             rows = [
                 row
@@ -167,17 +177,49 @@ def test_binance_klines_pages_and_maps_fields():
     assert exchange.requests[0].extensions["timeout"]["read"] == 20.0
 
 
-def test_binance_oi_hist_pages_from_start():
+def test_binance_oi_hist_pages_in_explicit_windows():
     exchange = Exchange()
-    rest = rest_of(exchange, binance_oi_hist=100)
+    rest = rest_of(exchange, clock_at("23:55"), binance_oi_hist=100)
 
     points = rest.binance_oi_hist(T0)
 
     assert [p.t for p in points] == list(range(T0, DAY_END, 300))
     assert points[0] == OiPoint(t=T0, oi=93117.263, source="hist")
-    assert len(exchange.requests) == 3
-    assert exchange.requests[1].url.params["startTime"] == str((T0 + 100 * 300) * 1000)
-    assert exchange.requests[0].url.params["period"] == "5m"
+    # Every request names both ends; the windows hold `limit` periods and tile without a gap.
+    windows = [
+        (int(r.url.params["startTime"]) // 1000, int(r.url.params["endTime"]) // 1000)
+        for r in exchange.requests
+    ]
+    assert windows == [(T0 + 30_000 * i, T0 + 30_000 * i + 99 * 300) for i in range(3)]
+    assert all(b[0] == a[1] + 300 for a, b in zip(windows, windows[1:], strict=False))
+    assert {(r.url.params["period"], r.url.params["limit"]) for r in exchange.requests} == {
+        ("5m", "100")
+    }
+
+
+def test_binance_oi_hist_does_not_rely_on_start_time_alone():
+    # Periods 4-7 have no record: an empty window must not stop or stall the paging.
+    present = [0, 1, 2, 3, 8, 9]
+    rows = [{"timestamp": (T0 + i * 300) * 1000, "sumOpenInterest": str(100 + i)} for i in present]
+    # The mimic is the live endpoint: asked from T0 with no endTime it skips straight to the end.
+    assert [r["sumOpenInterest"] for r in hist_reply(rows, {"startTime": "0", "limit": "4"})] == [
+        "102",
+        "103",
+        "108",
+        "109",
+    ]
+    sent: list[httpx.Request] = []
+    rest = rest_of(
+        scripted(lambda n: httpx.Response(200, json=hist_reply(rows, sent[n].url.params)), sent),
+        Clock(datetime.fromtimestamp(T0 + 9 * 300, UTC)),
+        binance_oi_hist=4,
+    )
+
+    points = rest.binance_oi_hist(T0)
+
+    assert [(p.t, p.oi) for p in points] == [(T0 + i * 300, 100.0 + i) for i in present]
+    assert len(sent) == 3  # periods 0-3, 4-7 (empty), 8-11
+    assert all("endTime" in r.url.params for r in sent)
 
 
 def test_bybit_spot_klines_page_back_and_return_oldest_first():

@@ -38,10 +38,11 @@ PAGE_LIMITS = {
 }
 # Seconds to stay away from a host after an HTTP status (spec §3.8). A longer Retry-After wins.
 BINANCE_BACKOFF = {429: 120, 418: 1800, 403: 1800}
-# The spec lists only Bybit's 403; a 429 is the same signal, so it is treated the same.
+# 403 is the spec's. The 429 is an addition to the §3.8 table: the same rate-limit signal.
 BYBIT_BACKOFF = {403: 600, 429: 600}
 BACKOFF = {BINANCE_HOST: BINANCE_BACKOFF, ARCHIVE_HOST: BINANCE_BACKOFF, BYBIT_HOST: BYBIT_BACKOFF}
-# Bybit answers 200 with these retCodes when the API or the IP limit is exceeded.
+# Bybit answers 200 with these retCodes when the API or the IP limit is exceeded. The spec's
+# table names 10006 and "etc."; 10018 is an addition to it, a documented rate-limit code.
 RATE_LIMIT_RETCODES = frozenset({10006, 10018})
 RETCODE_BACKOFF = 600
 
@@ -143,23 +144,33 @@ class PerpsRest:
         return [found[t] for t in sorted(found)]
 
     def binance_oi_hist(self, start: int) -> list[OiPoint]:
-        """The OI history rows stamped from `start` on, oldest first, up to the latest."""
+        """The OI history rows stamped from `start` up to now, oldest first.
+
+        With only a `startTime` the endpoint returns the latest `limit` rows, not the ones after
+        it, so this asks for consecutive windows of `limit` periods with both ends given (`endTime`
+        is inclusive), each starting one period after the previous window's end.
+        """
         limit = self._limits["binance_oi_hist"]
+        now = self._clock().timestamp()
         found: dict[int, OiPoint] = {}
         cursor = start
-        while True:
+        while cursor <= now:
+            last = cursor + (limit - 1) * BAR
             rows = self._binance(
                 "/futures/data/openInterestHist",
-                {"symbol": SYMBOL, "period": "5m", "startTime": cursor * 1000, "limit": limit},
+                {
+                    "symbol": SYMBOL,
+                    "period": "5m",
+                    "startTime": cursor * 1000,
+                    "endTime": last * 1000,
+                    "limit": limit,
+                },
             )
             with _malformed(BINANCE_HOST):
-                page = {
-                    int(row["timestamp"]) // 1000: float(row["sumOpenInterest"]) for row in rows
-                }
-            found.update({t: OiPoint(t=t, oi=oi, source="hist") for t, oi in page.items()})
-            if len(rows) < limit or max(page) < cursor:
-                break
-            cursor = max(page) + BAR
+                for row in rows:
+                    t = int(row["timestamp"]) // 1000
+                    found[t] = OiPoint(t=t, oi=float(row["sumOpenInterest"]), source="hist")
+            cursor = last + BAR
         return [found[t] for t in sorted(found)]
 
     def binance_oi_archive(self, day: date) -> tuple[list[OiPoint], bool] | None:
