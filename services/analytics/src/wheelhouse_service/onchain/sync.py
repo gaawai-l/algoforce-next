@@ -1,16 +1,17 @@
-"""Hourly BRK refresh: keeps the private series store current and derives cycle and levels."""
+"""Hourly BRK refresh: keeps the private series store current and derives the on-chain views."""
 
 import json
 import logging
 import time
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from threading import Event, Thread
 
 from ..market import timestamp
-from .brk import DAY1_SERIES, START, BrkClient, BrkError, Urpd
+from .brk import DAY1_SERIES, HOUR1_BACKFILL, HOUR1_SERIES, START, BrkClient, BrkError, Index, Urpd
 from .cycle import classify
 from .levels import last_complete, model_lines
+from .pressure import LOOKBACK, seller_pressure
 from .store import OnchainStore
 
 logger = logging.getLogger("wheelhouse.onchain")
@@ -22,6 +23,9 @@ CYCLE_SERIES = (
     "true_market_mean",
     "price_close",
 )
+# Where a full fetch of each index starts. hour1 asks for its last points: from a date it would ask
+# for years of hourly data.
+BACKFILL: dict[Index, int | date] = {"day1": START, "hour1": -HOUR1_BACKFILL}
 URPD_COHORT = "all"
 URPD_AGG = "lin500"
 # Refreshes are due at HH:12 UTC.
@@ -94,17 +98,28 @@ class OnchainSync:
             self.thread.join(timeout=STOP_TIMEOUT_SECONDS)
 
     def _refresh(self, at: datetime, clock: Callable[[], datetime]) -> BrkError | None:
-        """Run one refresh; return the URPD-stage error when only that stage failed."""
+        """Run one refresh; return the error of the hour1 or URPD stage when only those failed."""
         version = self.client.version()
         missing: set[str] = set()
         if version != self.store.state()["brk_version"]:
             # Every series is rebuilt in one transaction; the old data stays readable until then.
             self.store.set_state(refreshing="true")
-            self._replace(DAY1_SERIES, at, missing)
+            self._replace(DAY1_SERIES, "day1", at, missing)
         else:
-            self._increment(at, missing)
+            self._increment(DAY1_SERIES, "day1", at, missing)
         # The series stage is done, so nothing is being rebuilt any more.
         self.store.set_state(brk_version=version, refreshing="false")
+
+        # hour1 follows its series' own versions rather than BRK's: any series that changed is
+        # fetched again in full. A failure here leaves the day1 modules and URPD untouched.
+        hour1_missing: set[str] = set()
+        hour1_error: BrkError | None = None
+        try:
+            self._increment(HOUR1_SERIES, "hour1", at, hour1_missing)
+        except BrkError as exc:
+            hour1_error = exc
+            # What a failed request could not tell stands as it was, and so does the pressure.
+            hour1_missing = self._stored_hour1_missing()
 
         urpd_error: BrkError | None = None
         try:
@@ -116,14 +131,24 @@ class OnchainSync:
             urpd = self._recent_urpd(at)
 
         done = clock()
-        self._derive(urpd, done)
+        self._derive(urpd, done, None if hour1_error else hour1_missing)
         absent = [name for name in DAY1_SERIES if name in missing]
+        absent_hour1 = [name for name in HOUR1_SERIES if name in hour1_missing]
+        # `price_close` is in both indexes, so day1 reasons keep their form and hour1 ones add it.
         reasons = [f"series_missing:{name}" for name in absent]
+        reasons += [f"series_missing:hour1:{name}" for name in absent_hour1]
         if urpd is None:
             reasons.append("urpd_missing")
-        self.store.set_state(missing_series=json.dumps(absent), reasons=json.dumps(reasons))
-        if urpd_error is not None:
-            return urpd_error
+        self.store.set_state(
+            missing_series=json.dumps(
+                [f"day1:{name}" for name in absent] + [f"hour1:{name}" for name in absent_hour1]
+            ),
+            reasons=json.dumps(reasons),
+        )
+        errors = [error for error in (hour1_error, urpd_error) if error is not None]
+        if errors:
+            # Retrying soon is worth it when any one of the failed stages can be retried.
+            return next((error for error in errors if error.retryable), errors[0])
         self.store.set_state(
             last_success_at=timestamp(done),
             last_error=None,
@@ -131,35 +156,42 @@ class OnchainSync:
         )
         return None
 
-    def _replace(self, names: Sequence[str], at: datetime, missing: set[str]) -> None:
-        """Re-fetch `names` from START and replace them, except series that come back empty."""
-        batch = self.client.series(names, "day1", START)
+    def _replace(self, names: Sequence[str], index: Index, at: datetime, missing: set[str]) -> None:
+        """Re-fetch `names` in full and replace them, except series that come back empty."""
+        batch = self.client.series(names, index, BACKFILL[index])
         usable = {name: data for name, data in batch.found.items() if data.data}
         # An empty series would wipe the stored history, so keep the old one and report it.
         missing.update(batch.missing)
         missing.update(set(batch.found) - set(usable))
         if usable:
-            self.store.replace_series(usable, "day1", at)
+            self.store.replace_series(usable, index, at)
 
-    def _increment(self, at: datetime, missing: set[str]) -> None:
+    def _increment(
+        self, names: Sequence[str], index: Index, at: datetime, missing: set[str]
+    ) -> None:
         refetch: set[str] = set()
         starts: dict[int, list[str]] = {}
-        for name in DAY1_SERIES:
-            last = self.store.last_position(name, "day1")
+        for name in names:
+            last = self.store.last_position(name, index)
             if last is None:
                 refetch.add(name)
             else:
                 starts.setdefault(max(last - OVERLAP, 0), []).append(name)
-        for start, names in starts.items():
-            batch = self.client.series(names, "day1", start)
+        for start, group in starts.items():
+            batch = self.client.series(group, index, start)
             missing.update(batch.missing)
             for name, data in batch.found.items():
-                if data.version == self.store.series_version(name, "day1"):
-                    self.store.merge_series(name, "day1", data, at)
+                if data.version == self.store.series_version(name, index):
+                    self.store.merge_series(name, index, data, at)
                 else:
                     refetch.add(name)
         if refetch:
-            self._replace([name for name in DAY1_SERIES if name in refetch], at, missing)
+            self._replace([name for name in names if name in refetch], index, at, missing)
+
+    def _stored_hour1_missing(self) -> set[str]:
+        """The hour1 series the last run found missing."""
+        entries: list[str] = json.loads(self.store.state()["missing_series"] or "[]")
+        return {entry.removeprefix("hour1:") for entry in entries if entry.startswith("hour1:")}
 
     def _urpd(self, at: datetime) -> Urpd | None:
         """Today's snapshot, or yesterday's while today's does not exist yet."""
@@ -177,7 +209,8 @@ class OnchainSync:
         oldest = at.astimezone(UTC).date() - timedelta(days=1)
         return stored if stored is not None and stored.date >= oldest else None
 
-    def _derive(self, urpd: Urpd | None, at: datetime) -> None:
+    def _derive(self, urpd: Urpd | None, at: datetime, hour1_missing: set[str] | None) -> None:
+        """Derive every view; `hour1_missing` is None when the hour1 stage failed."""
         rows = {name: self.store.read_series(name, "day1") for name in DAY1_SERIES}
 
         w, sth, tmm, close = (
@@ -195,15 +228,32 @@ class OnchainSync:
         last = last_complete(rows)
         if last is None:
             self.store.clear_derived("levels")
+        else:
+            as_of, values = last
+            levels = {
+                "as_of": as_of.isoformat(),
+                "urpd_date": urpd.date.isoformat() if urpd else None,
+                "onchain_close": urpd.close if urpd else None,
+                "lines": [line.model_dump() for line in model_lines(values, urpd)],
+            }
+            self.store.save_derived("levels", json.dumps(levels, allow_nan=False), at)
+
+        if hour1_missing is None:
+            # The stored pressure stays, with the time it was computed, until hour1 is fetched.
             return
-        as_of, values = last
-        levels = {
-            "as_of": as_of.isoformat(),
-            "urpd_date": urpd.date.isoformat() if urpd else None,
-            "onchain_close": urpd.close if urpd else None,
-            "lines": [line.model_dump() for line in model_lines(values, urpd)],
-        }
-        self.store.save_derived("levels", json.dumps(levels, allow_nan=False), at)
+        pressure = None
+        if not hour1_missing:
+            # An absent series is not a zero: with any of them gone there is no pressure at all.
+            pressure = seller_pressure(
+                {
+                    name: self.store.read_series(name, "hour1", tail=LOOKBACK + 1)
+                    for name in HOUR1_SERIES
+                }
+            )
+        if pressure is None:
+            self.store.clear_derived("pressure")
+        else:
+            self.store.save_derived("pressure", pressure.model_dump_json(), at)
 
     def _fail(self, at: datetime, code: str, *, retry: bool, brk: bool) -> None:
         """Record a failed run; `last_success_at` keeps meaning the last complete refresh."""

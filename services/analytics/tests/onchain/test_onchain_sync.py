@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
@@ -10,8 +11,15 @@ import httpx
 import pytest
 from onchain_fixture import brk_transport, load_urpd
 
-from wheelhouse_service.onchain.brk import DAY1_SERIES, START, BrkClient
+from wheelhouse_service.onchain.brk import (
+    DAY1_SERIES,
+    HOUR1_BACKFILL,
+    HOUR1_SERIES,
+    START,
+    BrkClient,
+)
 from wheelhouse_service.onchain.cycle import Cycle
+from wheelhouse_service.onchain.pressure import Pressure
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import OnchainSync
 
@@ -63,6 +71,12 @@ def levels_of(store: OnchainStore) -> dict[str, Any]:
     return levels
 
 
+def pressure_of(store: OnchainStore) -> Pressure:
+    derived = store.derived("pressure")
+    assert derived is not None
+    return Pressure.model_validate_json(derived[0])
+
+
 def strings(value: str | None) -> list[str]:
     assert value is not None
     parsed: list[str] = json.loads(value)
@@ -73,6 +87,22 @@ def bulk_calls(calls: list[tuple[str, dict[str, str]]]) -> list[dict[str, str]]:
     return [params for path, params in calls if path == "/api/series/bulk"]
 
 
+def day1_calls(calls: list[tuple[str, dict[str, str]]]) -> list[dict[str, str]]:
+    return [params for params in bulk_calls(calls) if params["index"] == "day1"]
+
+
+def hour1_calls(calls: list[tuple[str, dict[str, str]]]) -> list[dict[str, str]]:
+    """The hour1 series requests. None of them may start at a date: that would ask for years."""
+    found = [params for params in bulk_calls(calls) if params["index"] == "hour1"]
+    for params in found:
+        assert re.fullmatch(r"-?\d+", params["start"]), params
+    return found
+
+
+def requested(calls: list[dict[str, str]]) -> set[str]:
+    return {name for params in calls for name in params["series"].split(",")}
+
+
 def test_first_run_backfills_and_derives(tmp_path: Path):
     store = OnchainStore(tmp_path / "onchain.sqlite")
     transport, calls = brk_transport()
@@ -80,10 +110,9 @@ def test_first_run_backfills_and_derives(tmp_path: Path):
     assert run(store, transport, NOW) is True
 
     assert calls[0][0] == "/version"
-    assert all(params["start"] == START.isoformat() for params in bulk_calls(calls))
-    assert {name for params in bulk_calls(calls) for name in params["series"].split(",")} == set(
-        DAY1_SERIES
-    )
+    assert all(params["start"] == START.isoformat() for params in day1_calls(calls))
+    assert requested(day1_calls(calls)) == set(DAY1_SERIES)
+    assert requested(hour1_calls(calls)) == set(HOUR1_SERIES)
     cycle = cycle_of(store)
     assert (cycle.state, cycle.as_of) == ("breakout", date(2026, 10, 16))
     levels = levels_of(store)
@@ -135,8 +164,8 @@ def test_incremental_run_starts_three_positions_back(tmp_path: Path):
     incremental, calls = brk_transport()
     assert run(store, incremental, later) is True
 
-    bulk = bulk_calls(calls)
-    assert {name for params in bulk for name in params["series"].split(",")} == set(DAY1_SERIES)
+    bulk = day1_calls(calls)
+    assert requested(bulk) == set(DAY1_SERIES)
     for params in bulk:
         for name in params["series"].split(","):
             assert params["start"] == str(starts[name])
@@ -158,15 +187,17 @@ def test_series_version_change_refetches_only_that_series(tmp_path: Path):
     assert stored is not None
 
     def bump(name: str, item: dict[str, Any]) -> None:
-        if name == "price_close":
+        # `price_close` is also an hour1 series; only the day1 one changes version here.
+        if name == "price_close" and item["index"] == "day1":
             item["version"] = stored + 1
 
     later = datetime(2026, 10, 16, 11, 30, tzinfo=UTC)
     inner, calls = brk_transport()
     assert run(store, rewritten(inner, bump), later) is True
 
-    refetch = [params for params in bulk_calls(calls) if params["start"] == START.isoformat()]
+    refetch = [params for params in day1_calls(calls) if params["start"] == START.isoformat()]
     assert [params["series"] for params in refetch] == ["price_close"]
+    assert all(params["start"] != str(-HOUR1_BACKFILL) for params in hour1_calls(calls))
     assert store.series_version("price_close", "day1") == stored + 1
     # Replaced as a whole, so the planted row is gone; the other series were only merged.
     assert len(store.read_series("price_close", "day1")) == 5037
@@ -245,7 +276,7 @@ def test_urpd_failure_after_replacement_still_derives_and_does_not_repeat_it(tmp
     healthy, calls = brk_transport(version="0.13.0")
     assert run(store, healthy, third) is True
 
-    assert all(params["start"] != START.isoformat() for params in bulk_calls(calls))
+    assert all(params["start"] != START.isoformat() for params in day1_calls(calls))
     assert store.state()["last_error"] is None
     assert instant(store.state()["last_success_at"]) == third
 
@@ -373,7 +404,7 @@ def test_empty_full_refetch_keeps_old_series(tmp_path: Path):
     assert store.read_series("realized_price", "day1") == before
     assert store.series_version("realized_price", "day1") == version
     state = store.state()
-    assert strings(state["missing_series"]) == ["realized_price"]
+    assert strings(state["missing_series"]) == ["day1:realized_price"]
     assert "series_missing:realized_price" in strings(state["reasons"])
     assert state["brk_version"] == "0.13.0"
     assert state["refreshing"] == "false"
@@ -409,12 +440,260 @@ def test_missing_series_clears_levels_but_keeps_cycle(tmp_path: Path):
     assert run(store, transport, NOW) is True
 
     state = store.state()
-    assert strings(state["missing_series"]) == ["lth_realized_price"]
+    assert strings(state["missing_series"]) == ["day1:lth_realized_price"]
     assert strings(state["reasons"]) == ["series_missing:lth_realized_price"]
     assert store.derived("levels") is None
     assert store.read_series("lth_realized_price", "day1") == []
     assert cycle_of(store).state == "breakout"
     assert state["last_error"] is None
+
+
+def test_first_run_backfills_hour1_from_minus_3000(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, calls = brk_transport()
+
+    assert run(store, transport, NOW) is True
+
+    hour1 = hour1_calls(calls)
+    assert all(params["start"] == str(-HOUR1_BACKFILL) for params in hour1)
+    assert requested(hour1) == set(HOUR1_SERIES)
+    # 11 series of 3,000 points are over the weight cap in one request, so they are split in two.
+    assert len(hour1) == 2
+    assert [store.last_position(name, "hour1") for name in HOUR1_SERIES] == [155937] * 11
+    pressure = pressure_of(store)
+    assert pressure.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
+    derived = store.derived("pressure")
+    assert derived is not None and derived[1] == NOW
+    state = store.state()
+    assert strings(state["missing_series"]) == []
+    assert strings(state["reasons"]) == []
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == NOW
+
+
+def test_hour1_added_to_existing_day1_store_does_not_refetch_day1(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    # What a store written before hour1 existed looks like.
+    with store.connection() as db:
+        db.execute("DELETE FROM series WHERE idx='hour1'")
+        db.execute("DELETE FROM series_meta WHERE idx='hour1'")
+        db.execute("DELETE FROM derived WHERE kind='pressure'")
+    day1 = {name: store.read_series(name, "day1") for name in DAY1_SERIES}
+
+    later = datetime(2026, 10, 16, 11, 30, tzinfo=UTC)
+    upgraded, calls = brk_transport()
+    assert run(store, upgraded, later) is True
+
+    assert all(params["start"] != START.isoformat() for params in day1_calls(calls))
+    assert all(params["start"] == str(-HOUR1_BACKFILL) for params in hour1_calls(calls))
+    assert requested(hour1_calls(calls)) == set(HOUR1_SERIES)
+    assert {name: store.read_series(name, "day1") for name in DAY1_SERIES} == day1
+    assert pressure_of(store).last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
+    assert instant(store.state()["last_success_at"]) == later
+
+
+def test_incremental_hour1_starts_three_back(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    # One series is behind, and another ends with NULLs; both must be covered by the overlap.
+    with store.connection() as db:
+        db.execute(
+            "DELETE FROM series WHERE series='sth_supply_in_loss' AND idx='hour1' "
+            "AND position>155930"
+        )
+        db.execute(
+            "UPDATE series SET value=NULL WHERE series='price_close' AND idx='hour1' "
+            "AND position>155934"
+        )
+    starts = {name: store.last_position(name, "hour1") - 3 for name in HOUR1_SERIES}
+    assert starts["sth_supply_in_loss"] == 155927
+    assert starts["price_close"] == 155934
+    assert starts["sth_supply_in_profit"] == 155934
+
+    later = datetime(2026, 10, 16, 11, 30, tzinfo=UTC)
+    incremental, calls = brk_transport()
+    assert run(store, incremental, later) is True
+
+    hour1 = hour1_calls(calls)
+    assert requested(hour1) == set(HOUR1_SERIES)
+    for params in hour1:
+        for name in params["series"].split(","):
+            assert params["start"] == str(starts[name])
+    assert [store.last_position(name, "hour1") for name in HOUR1_SERIES] == [155937] * 11
+    assert store.read_series("price_close", "hour1")[-1][1] is not None
+    assert store.read_series("sth_supply_in_loss", "hour1")[-1][1] is not None
+    derived = store.derived("pressure")
+    assert derived is not None and derived[1] == later
+
+
+def test_hour1_series_version_change_refetches_from_minus_3000(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    with store.connection() as db:
+        db.execute("INSERT INTO series VALUES('sth_supply_in_loss','hour1',1000,1.0,'x')")
+        db.execute("INSERT INTO series VALUES('sth_supply_in_profit','hour1',1000,1.0,'x')")
+    stored = store.series_version("sth_supply_in_loss", "hour1")
+    assert stored is not None
+
+    def bump(name: str, item: dict[str, Any]) -> None:
+        if name == "sth_supply_in_loss":
+            item["version"] = stored + 1
+
+    later = datetime(2026, 10, 16, 11, 30, tzinfo=UTC)
+    inner, calls = brk_transport()
+    assert run(store, rewritten(inner, bump), later) is True
+
+    refetch = [p for p in hour1_calls(calls) if p["start"] == str(-HOUR1_BACKFILL)]
+    assert [params["series"] for params in refetch] == ["sth_supply_in_loss"]
+    assert all(params["start"] != START.isoformat() for params in day1_calls(calls))
+    assert store.series_version("sth_supply_in_loss", "hour1") == stored + 1
+    # Replaced as a whole, so the planted row is gone; the other series were only merged.
+    assert len(store.read_series("sth_supply_in_loss", "hour1")) == 2600
+    assert len(store.read_series("sth_supply_in_profit", "hour1")) == 2601
+    assert pressure_of(store).last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
+
+
+def test_hour1_stage_failure_keeps_cycle_and_levels(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    pressure = store.derived("pressure")
+    assert pressure is not None
+
+    second = NOW + timedelta(hours=1)
+    failing, calls = brk_transport(fail_index={"hour1"})
+    assert run(store, failing, second) is True
+
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["next_due"]) == second + timedelta(minutes=5)
+    # Not a full success, so the last success is unchanged.
+    assert instant(state["last_success_at"]) == NOW
+    # An hour1 failure is not a series failure: the shared reasons stay clean.
+    assert strings(state["reasons"]) == []
+    assert state["refreshing"] == "false"
+    # The day1 stage and URPD still ran and were derived from.
+    cycle = store.derived("cycle")
+    assert cycle is not None and cycle[1] == second
+    levels = store.derived("levels")
+    assert levels is not None and levels[1] == second
+    assert levels_of(store)["urpd_date"] == "2026-10-16"
+    assert any(path.startswith("/api/urpd") for path, _ in calls)
+    # The old pressure stays as it was, with the time it was computed.
+    assert store.derived("pressure") == pressure
+
+    third = second + timedelta(minutes=5)
+    healthy, _ = brk_transport()
+    assert run(store, healthy, third) is True
+
+    assert store.state()["last_error"] is None
+    assert instant(store.state()["last_success_at"]) == third
+    derived = store.derived("pressure")
+    assert derived is not None and derived[1] == third
+
+
+def test_hour1_stage_failure_on_first_run_leaves_no_pressure(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    failing, _ = brk_transport(fail_index={"hour1"})
+
+    assert run(store, failing, NOW) is True
+
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["next_due"]) == NOW + timedelta(minutes=5)
+    assert state["last_success_at"] is None
+    assert strings(state["reasons"]) == []
+    assert cycle_of(store).state == "breakout"
+    assert {line["name"] for line in levels_of(store)["lines"]} == LINES
+    assert store.derived("pressure") is None
+
+
+def test_hour1_failure_keeps_the_hour1_missing_reason(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={"sth_supply_in_loss"})
+    run(store, partial, NOW)
+    assert strings(store.state()["reasons"]) == ["series_missing:hour1:sth_supply_in_loss"]
+
+    second = NOW + timedelta(hours=1)
+    failing, _ = brk_transport(fail_index={"hour1"})
+    assert run(store, failing, second) is True
+
+    # Whether `sth_supply_in_loss` exists is not known from a failed request, so the last answer
+    # stands, together with the pressure it led to.
+    state = store.state()
+    assert strings(state["missing_series"]) == ["hour1:sth_supply_in_loss"]
+    assert strings(state["reasons"]) == ["series_missing:hour1:sth_supply_in_loss"]
+    assert store.derived("pressure") is None
+
+
+def test_a_retryable_stage_failure_decides_the_retry_delay(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport(fail_paths={"/api/urpd"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/series/bulk" and request.url.params["index"] == "hour1":
+            return httpx.Response(400)
+        return inner.handler(request)
+
+    assert run(store, httpx.MockTransport(handler), NOW) is True
+
+    # hour1 is rejected for good, but the URPD outage is worth retrying soon.
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["next_due"]) == NOW + timedelta(minutes=5)
+    assert cycle_of(store).state == "breakout"
+
+
+def test_missing_hour1_series_clears_pressure_only(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("pressure") is not None
+
+    second = NOW + timedelta(hours=1)
+    partial, _ = brk_transport(missing={"sth_supply_in_loss"})
+    assert run(store, partial, second) is True
+
+    state = store.state()
+    assert strings(state["missing_series"]) == ["hour1:sth_supply_in_loss"]
+    assert strings(state["reasons"]) == ["series_missing:hour1:sth_supply_in_loss"]
+    assert state["last_error"] is None
+    assert store.derived("pressure") is None
+    # The data already stored is kept, and the other modules carry on.
+    assert len(store.read_series("sth_supply_in_loss", "hour1")) == 2600
+    cycle = store.derived("cycle")
+    assert cycle is not None and cycle[1] == second
+    levels = store.derived("levels")
+    assert levels is not None and levels[1] == second
+    assert {line["name"] for line in levels_of(store)["lines"]} == LINES
+
+    third = second + timedelta(hours=1)
+    healthy, _ = brk_transport()
+    assert run(store, healthy, third) is True
+
+    assert strings(store.state()["missing_series"]) == []
+    assert strings(store.state()["reasons"]) == []
+    assert pressure_of(store).last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
+
+
+def test_missing_hour1_series_on_first_run_leaves_no_pressure(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={"price_close"})
+
+    assert run(store, partial, NOW) is True
+
+    # `price_close` is both a day1 and an hour1 series, and the reasons tell the two apart.
+    state = store.state()
+    assert strings(state["missing_series"]) == ["day1:price_close", "hour1:price_close"]
+    assert strings(state["reasons"]) == [
+        "series_missing:price_close",
+        "series_missing:hour1:price_close",
+    ]
+    assert store.derived("pressure") is None
 
 
 def test_non_retryable_error_waits_for_next_slot(tmp_path: Path):
