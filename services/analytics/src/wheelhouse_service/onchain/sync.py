@@ -58,15 +58,20 @@ class OnchainSync:
             return False
         started = time.perf_counter()
         try:
-            self._refresh(at, clock)
+            urpd_error = self._refresh(at, clock)
         except BrkError as exc:
             self._fail(clock(), exc.code, retry=exc.retryable, brk=True)
         except Exception:
             # Never log the exception: it may carry values. A fixed code is enough here.
             self._fail(clock(), "sync_failed", retry=False, brk=False)
         else:
-            duration_ms = round((time.perf_counter() - started) * 1000)
-            logger.info("onchain_sync_ok duration_ms=%d", duration_ms)
+            if urpd_error is not None:
+                # Only the URPD stage failed, so the shared reasons (and with them the cycle view)
+                # stay clean; `last_error` still records it.
+                self._fail(clock(), urpd_error.code, retry=urpd_error.retryable, brk=False)
+            else:
+                duration_ms = round((time.perf_counter() - started) * 1000)
+                logger.info("onchain_sync_ok duration_ms=%d", duration_ms)
         return True
 
     def start(self) -> None:
@@ -88,7 +93,8 @@ class OnchainSync:
         if self.thread:
             self.thread.join(timeout=STOP_TIMEOUT_SECONDS)
 
-    def _refresh(self, at: datetime, clock: Callable[[], datetime]) -> None:
+    def _refresh(self, at: datetime, clock: Callable[[], datetime]) -> BrkError | None:
+        """Run one refresh; return the URPD-stage error when only that stage failed."""
         version = self.client.version()
         missing: set[str] = set()
         if version != self.store.state()["brk_version"]:
@@ -104,10 +110,10 @@ class OnchainSync:
         try:
             urpd = self._urpd(at)
         except BrkError as exc:
-            # The series are fresh whatever happens to URPD, so still derive from them, with the
-            # latest snapshot on hand. The run is then recorded as failed.
+            # The series are fresh whatever happens to URPD, so still derive from them, with a
+            # recent stored snapshot if there is one. The run is then recorded as failed.
             urpd_error = exc
-            urpd = self.store.latest_urpd(URPD_COHORT, URPD_AGG)
+            urpd = self._recent_urpd(at)
 
         done = clock()
         self._derive(urpd, done)
@@ -117,12 +123,13 @@ class OnchainSync:
             reasons.append("urpd_missing")
         self.store.set_state(missing_series=json.dumps(absent), reasons=json.dumps(reasons))
         if urpd_error is not None:
-            raise urpd_error
+            return urpd_error
         self.store.set_state(
             last_success_at=timestamp(done),
             last_error=None,
             next_due=timestamp(next_slot(done)),
         )
+        return None
 
     def _replace(self, names: Sequence[str], at: datetime, missing: set[str]) -> None:
         """Re-fetch `names` from START and replace them, except series that come back empty."""
@@ -163,6 +170,12 @@ class OnchainSync:
                 self.store.save_urpd(urpd, at)
                 return urpd
         return None
+
+    def _recent_urpd(self, at: datetime) -> Urpd | None:
+        """The stored snapshot, unless it is older than yesterday: that would pass for current."""
+        stored = self.store.latest_urpd(URPD_COHORT, URPD_AGG)
+        oldest = at.astimezone(UTC).date() - timedelta(days=1)
+        return stored if stored is not None and stored.date >= oldest else None
 
     def _derive(self, urpd: Urpd | None, at: datetime) -> None:
         rows = {name: self.store.read_series(name, "day1") for name in DAY1_SERIES}

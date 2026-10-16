@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 import pytest
-from onchain_fixture import brk_transport
+from onchain_fixture import brk_transport, load_urpd
 
 from wheelhouse_service.onchain.brk import DAY1_SERIES, START, BrkClient
 from wheelhouse_service.onchain.cycle import Cycle
@@ -228,6 +228,8 @@ def test_urpd_failure_after_replacement_still_derives_and_does_not_repeat_it(tmp
     state = store.state()
     assert state["last_error"] == "brk_unavailable"
     assert instant(state["next_due"]) == second + timedelta(minutes=5)
+    # A URPD failure is not a series failure: the shared reasons stay clean.
+    assert strings(state["reasons"]) == []
     # The series were replaced, so the new version is recorded and nothing is refreshing.
     assert state["brk_version"] == "0.13.0"
     assert state["refreshing"] == "false"
@@ -261,7 +263,8 @@ def test_urpd_outage_uses_latest_stored_snapshot(tmp_path: Path):
     assert state["last_error"] == "brk_unavailable"
     assert instant(state["next_due"]) == second + timedelta(minutes=5)
     assert instant(state["last_success_at"]) == NOW
-    assert strings(state["reasons"]) == ["brk_unavailable"]
+    # The error is on `last_error`; the shared reasons are not touched by a URPD-stage failure.
+    assert strings(state["reasons"]) == []
     levels = levels_of(store)
     assert levels["urpd_date"] == "2026-10-15"
     assert levels["onchain_close"] == 82154.25
@@ -278,6 +281,41 @@ def test_urpd_outage_uses_latest_stored_snapshot(tmp_path: Path):
     assert store.state()["last_error"] is None
 
 
+@pytest.mark.parametrize(
+    ("snapshot_day", "accepted"),
+    [
+        (date(2026, 10, 16), True),
+        (date(2026, 10, 15), True),
+        (date(2026, 10, 14), False),
+        (date(2026, 10, 13), False),
+    ],
+)
+def test_urpd_outage_accepts_only_a_snapshot_from_the_last_two_days(
+    tmp_path: Path, snapshot_day: date, accepted: bool
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    store.save_urpd(load_urpd("all").model_copy(update={"date": snapshot_day}), NOW)
+    outage, _ = brk_transport(fail_paths={"/api/urpd"})
+
+    assert run(store, outage, NOW) is True
+
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["next_due"]) == NOW + timedelta(minutes=5)
+    levels = levels_of(store)
+    if accepted:
+        assert levels["urpd_date"] == snapshot_day.isoformat()
+        assert levels["onchain_close"] == 82154.25
+        assert {line["name"] for line in levels["lines"]} == LINES
+        assert strings(state["reasons"]) == []
+    else:
+        # An older snapshot is treated as no snapshot: no median, and no date that looks current.
+        assert levels["urpd_date"] is None
+        assert levels["onchain_close"] is None
+        assert {line["name"] for line in levels["lines"]} == LINES - {"median"}
+        assert strings(state["reasons"]) == ["urpd_missing"]
+
+
 def test_urpd_outage_without_snapshot_gives_four_lines(tmp_path: Path):
     store = OnchainStore(tmp_path / "onchain.sqlite")
     outage, _ = brk_transport(fail_paths={"/api/urpd"})
@@ -289,7 +327,7 @@ def test_urpd_outage_without_snapshot_gives_four_lines(tmp_path: Path):
     assert instant(state["next_due"]) == NOW + timedelta(minutes=5)
     assert state["last_success_at"] is None
     assert state["refreshing"] == "false"
-    assert strings(state["reasons"]) == ["urpd_missing", "brk_unavailable"]
+    assert strings(state["reasons"]) == ["urpd_missing"]
     assert cycle_of(store).state == "breakout"
     levels = levels_of(store)
     assert levels["urpd_date"] is None

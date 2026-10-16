@@ -1,5 +1,5 @@
 import threading
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -169,6 +169,48 @@ def test_missing_urpd_only_shows_in_reasons(tmp_path: Path):
     assert day1["data_state"] == "fresh"
     assert (urpd["data_state"], urpd["last_at"]) == ("unavailable", None)
     assert urpd["reasons"] == ["urpd_missing"]
+
+
+def test_urpd_outage_does_not_leak_into_the_cycle(tmp_path: Path):
+    path = synced(tmp_path, fail_paths={"/api/urpd"})
+    with TestClient(router_app(path, NOW)) as http:
+        cycle = http.get(f"{PREFIX}/cycle").json()
+        levels = http.get(f"{PREFIX}/levels").json()
+        status = http.get(f"{PREFIX}/status").json()
+
+    # The cycle does not use URPD: a URPD-only failure must not make it look unavailable.
+    assert cycle["data_state"] == "fresh"
+    assert cycle["reasons"] == []
+    assert cycle["state"] == "breakout"
+    assert levels["data_state"] == "fresh"
+    assert levels["reasons"] == ["urpd_missing"]
+    assert {line["name"] for line in levels["lines"]} == LINES - {"median"}
+    # The failure itself stays visible on the status endpoint.
+    assert status["last_error"] == "brk_unavailable"
+    day1, urpd = status["datasets"]
+    assert (day1["data_state"], day1["reasons"]) == ("fresh", [])
+    assert (urpd["data_state"], urpd["reasons"]) == ("unavailable", ["urpd_missing"])
+
+
+def test_urpd_outage_with_a_recent_snapshot_keeps_its_date(tmp_path: Path):
+    path = synced(tmp_path, urpd_dates={date(2026, 10, 15)})
+    later = NOW + timedelta(hours=1)
+    outage, _ = brk_transport(fail_paths={"/api/urpd"})
+    client = BrkClient(httpx.Client(transport=outage), clock=lambda: later)
+    OnchainSync(OnchainStore(path), client).run_once(now=later)
+
+    with TestClient(router_app(path, later)) as http:
+        cycle = http.get(f"{PREFIX}/cycle").json()
+        levels = http.get(f"{PREFIX}/levels").json()
+        status = http.get(f"{PREFIX}/status").json()
+
+    assert cycle["reasons"] == []
+    assert levels["reasons"] == []
+    assert levels["urpd_date"] == "2026-10-15"
+    assert {line["name"] for line in levels["lines"]} == LINES
+    assert status["last_error"] == "brk_unavailable"
+    # The snapshot is a day behind the series, and the status says so.
+    assert status["datasets"][1]["data_state"] == "stale"
 
 
 def test_missing_cycle_series_only_concerns_the_cycle(tmp_path: Path):
