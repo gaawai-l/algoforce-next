@@ -8,7 +8,7 @@ from pydantic import AwareDatetime
 from ..market import Model
 from .cycle import Component, CycleState, Episode
 from .levels import ModelLine
-from .pressure import Levels, LossPoint, PressurePoint
+from .pressure import PressureLevels, PressureLossPoint, PressurePoint, QcCode
 
 DataState = Literal["fresh", "stale", "unavailable"]
 # Hourly data adds `delayed`: late, but not yet old enough to call stale.
@@ -96,13 +96,15 @@ class SellerPressureView(Model):
     forming_at: AwareDatetime | None
     last_at: AwareDatetime | None
     # Only the most recent points; the levels below always come from the whole computation.
-    loss: list[LossPoint]
+    loss: list[PressureLossPoint]
     share: list[PressurePoint]
     supply: list[PressurePoint]
     price: list[PressurePoint]
     # Null when there is no data: an absent threshold is not zero.
-    loss_levels: Levels | None
-    share_levels: Levels | None
-    supply_levels: Levels | None
+    loss_levels: PressureLevels | None
+    share_levels: PressureLevels | None
+    supply_levels: PressureLevels | None
     xgap: int | None
+    # The QC checks that failed; empty when they all pass or there is no data.
+    qc: list[QcCode]
     brk_version: str | None

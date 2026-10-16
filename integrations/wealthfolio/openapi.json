@@ -3655,45 +3655,6 @@
         ],
         "title": "LedgerEvent"
       },
-      "Levels": {
-        "properties": {
-          "p95": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "P95"
-          },
-          "p75": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "P75"
-          },
-          "n": {
-            "type": "integer",
-            "title": "N"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "p95",
-          "p75",
-          "n"
-        ],
-        "title": "Levels",
-        "description": "P95 and P75 of one chart over the last 720 clock hours, and how many values they use."
-      },
       "LevelsView": {
         "properties": {
           "data_state": {
@@ -3796,31 +3757,6 @@
           "brk_version"
         ],
         "title": "LevelsView"
-      },
-      "LossPoint": {
-        "properties": {
-          "at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "At"
-          },
-          "lth": {
-            "type": "number",
-            "title": "Lth"
-          },
-          "sth": {
-            "type": "number",
-            "title": "Sth"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "at",
-          "lth",
-          "sth"
-        ],
-        "title": "LossPoint"
       },
       "Lot": {
         "properties": {
@@ -4470,6 +4406,70 @@
           "observed_at"
         ],
         "title": "Position"
+      },
+      "PressureLevels": {
+        "properties": {
+          "p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95"
+          },
+          "p75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P75"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "p95",
+          "p75",
+          "n"
+        ],
+        "title": "PressureLevels",
+        "description": "P95 and P75 of one chart over the last 720 clock hours, and how many values they use."
+      },
+      "PressureLossPoint": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "lth": {
+            "type": "number",
+            "title": "Lth"
+          },
+          "sth": {
+            "type": "number",
+            "title": "Sth"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "at",
+          "lth",
+          "sth"
+        ],
+        "title": "PressureLossPoint"
       },
       "PressurePoint": {
         "properties": {
@@ -5138,7 +5138,7 @@
           },
           "loss": {
             "items": {
-              "$ref": "#/components/schemas/LossPoint"
+              "$ref": "#/components/schemas/PressureLossPoint"
             },
             "type": "array",
             "title": "Loss"
@@ -5167,7 +5167,7 @@
           "loss_levels": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Levels"
+                "$ref": "#/components/schemas/PressureLevels"
               },
               {
                 "type": "null"
@@ -5177,7 +5177,7 @@
           "share_levels": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Levels"
+                "$ref": "#/components/schemas/PressureLevels"
               },
               {
                 "type": "null"
@@ -5187,7 +5187,7 @@
           "supply_levels": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Levels"
+                "$ref": "#/components/schemas/PressureLevels"
               },
               {
                 "type": "null"
@@ -5204,6 +5204,18 @@
               }
             ],
             "title": "Xgap"
+          },
+          "qc": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "hour_gap",
+                "intraday_legs",
+                "sth_supply"
+              ]
+            },
+            "type": "array",
+            "title": "Qc"
           },
           "brk_version": {
             "anyOf": [
@@ -5233,6 +5245,7 @@
           "share_levels",
           "supply_levels",
           "xgap",
+          "qc",
           "brk_version"
         ],
         "title": "SellerPressureView"

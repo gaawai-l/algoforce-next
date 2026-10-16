@@ -529,6 +529,32 @@ def test_incremental_hour1_starts_three_back(tmp_path: Path):
     assert derived is not None and derived[1] == later
 
 
+def test_pressure_is_stamped_when_the_hour1_stage_finished(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport()
+    hour1_done = datetime(2026, 10, 16, 9, 59, tzinfo=UTC)
+    done = hour1_done + timedelta(minutes=2)
+    ticks = [datetime(2026, 10, 16, 9, 12, tzinfo=UTC)]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # The hour1 requests end just before the hour boundary, and a slow URPD fetch crosses it.
+        if request.url.path == "/api/series/bulk" and request.url.params["index"] == "hour1":
+            ticks.append(hour1_done)
+        elif request.url.path.startswith("/api/urpd"):
+            ticks.append(done)
+        return inner.handler(request)
+
+    sync = sync_for(store, httpx.MockTransport(handler), ticks[0])
+    assert sync._refresh(ticks[0], lambda: ticks[-1]) is None
+
+    pressure = store.derived("pressure")
+    assert pressure is not None and pressure[1] == hour1_done
+    cycle, levels = store.derived("cycle"), store.derived("levels")
+    assert cycle is not None and cycle[1] == done
+    assert levels is not None and levels[1] == done
+    assert instant(store.state()["last_success_at"]) == done
+
+
 def test_hour1_series_version_change_refetches_from_minus_3000(tmp_path: Path):
     store = OnchainStore(tmp_path / "onchain.sqlite")
     transport, _ = brk_transport()

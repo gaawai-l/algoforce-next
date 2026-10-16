@@ -1332,18 +1332,6 @@ export interface components {
             /** Reason */
             reason: string;
         };
-        /**
-         * Levels
-         * @description P95 and P75 of one chart over the last 720 clock hours, and how many values they use.
-         */
-        Levels: {
-            /** P95 */
-            p95: number | null;
-            /** P75 */
-            p75: number | null;
-            /** N */
-            n: number;
-        };
         /** LevelsView */
         LevelsView: {
             /**
@@ -1367,18 +1355,6 @@ export interface components {
             lines: components["schemas"]["ModelLine"][];
             /** Brk Version */
             brk_version: string | null;
-        };
-        /** LossPoint */
-        LossPoint: {
-            /**
-             * At
-             * Format: date-time
-             */
-            at: string;
-            /** Lth */
-            lth: number;
-            /** Sth */
-            sth: number;
         };
         /** Lot */
         Lot: {
@@ -1610,6 +1586,30 @@ export interface components {
              * Format: date-time
              */
             observed_at: string;
+        };
+        /**
+         * PressureLevels
+         * @description P95 and P75 of one chart over the last 720 clock hours, and how many values they use.
+         */
+        PressureLevels: {
+            /** P95 */
+            p95: number | null;
+            /** P75 */
+            p75: number | null;
+            /** N */
+            n: number;
+        };
+        /** PressureLossPoint */
+        PressureLossPoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Lth */
+            lth: number;
+            /** Sth */
+            sth: number;
         };
         /** PressurePoint */
         PressurePoint: {
@@ -1856,18 +1856,20 @@ export interface components {
             /** Last At */
             last_at: string | null;
             /** Loss */
-            loss: components["schemas"]["LossPoint"][];
+            loss: components["schemas"]["PressureLossPoint"][];
             /** Share */
             share: components["schemas"]["PressurePoint"][];
             /** Supply */
             supply: components["schemas"]["PressurePoint"][];
             /** Price */
             price: components["schemas"]["PressurePoint"][];
-            loss_levels: components["schemas"]["Levels"] | null;
-            share_levels: components["schemas"]["Levels"] | null;
-            supply_levels: components["schemas"]["Levels"] | null;
+            loss_levels: components["schemas"]["PressureLevels"] | null;
+            share_levels: components["schemas"]["PressureLevels"] | null;
+            supply_levels: components["schemas"]["PressureLevels"] | null;
             /** Xgap */
             xgap: number | null;
+            /** Qc */
+            qc: ("hour_gap" | "intraday_legs" | "sth_supply")[];
             /** Brk Version */
             brk_version: string | null;
         };

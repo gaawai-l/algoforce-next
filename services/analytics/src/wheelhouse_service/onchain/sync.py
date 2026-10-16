@@ -62,17 +62,17 @@ class OnchainSync:
             return False
         started = time.perf_counter()
         try:
-            urpd_error = self._refresh(at, clock)
+            stage_error = self._refresh(at, clock)
         except BrkError as exc:
             self._fail(clock(), exc.code, retry=exc.retryable, brk=True)
         except Exception:
             # Never log the exception: it may carry values. A fixed code is enough here.
             self._fail(clock(), "sync_failed", retry=False, brk=False)
         else:
-            if urpd_error is not None:
-                # Only the URPD stage failed, so the shared reasons (and with them the cycle view)
-                # stay clean; `last_error` still records it.
-                self._fail(clock(), urpd_error.code, retry=urpd_error.retryable, brk=False)
+            if stage_error is not None:
+                # Only the hour1 or URPD stage failed, so the shared reasons (and with them the
+                # cycle view) stay clean; `last_error` still records it.
+                self._fail(clock(), stage_error.code, retry=stage_error.retryable, brk=False)
             else:
                 duration_ms = round((time.perf_counter() - started) * 1000)
                 logger.info("onchain_sync_ok duration_ms=%d", duration_ms)
@@ -114,8 +114,12 @@ class OnchainSync:
         # fetched again in full. A failure here leaves the day1 modules and URPD untouched.
         hour1_missing: set[str] = set()
         hour1_error: BrkError | None = None
+        hour1_done: datetime | None = None
         try:
             self._increment(HOUR1_SERIES, "hour1", at, hour1_missing)
+            # The pressure is as of now: the URPD fetch below can take long enough to cross the
+            # hour, and the last row would then look closed when it was computed.
+            hour1_done = clock()
         except BrkError as exc:
             hour1_error = exc
             # What a failed request could not tell stands as it was, and so does the pressure.
@@ -131,7 +135,7 @@ class OnchainSync:
             urpd = self._recent_urpd(at)
 
         done = clock()
-        self._derive(urpd, done, None if hour1_error else hour1_missing)
+        self._derive(urpd, done, hour1_missing, hour1_done)
         absent = [name for name in DAY1_SERIES if name in missing]
         absent_hour1 = [name for name in HOUR1_SERIES if name in hour1_missing]
         # `price_close` is in both indexes, so day1 reasons keep their form and hour1 ones add it.
@@ -209,8 +213,14 @@ class OnchainSync:
         oldest = at.astimezone(UTC).date() - timedelta(days=1)
         return stored if stored is not None and stored.date >= oldest else None
 
-    def _derive(self, urpd: Urpd | None, at: datetime, hour1_missing: set[str] | None) -> None:
-        """Derive every view; `hour1_missing` is None when the hour1 stage failed."""
+    def _derive(
+        self,
+        urpd: Urpd | None,
+        at: datetime,
+        hour1_missing: set[str],
+        hour1_at: datetime | None,
+    ) -> None:
+        """Derive every view; stamp the pressure `hour1_at`, None when the hour1 stage failed."""
         rows = {name: self.store.read_series(name, "day1") for name in DAY1_SERIES}
 
         w, sth, tmm, close = (
@@ -238,7 +248,7 @@ class OnchainSync:
             }
             self.store.save_derived("levels", json.dumps(levels, allow_nan=False), at)
 
-        if hour1_missing is None:
+        if hour1_at is None:
             # The stored pressure stays, with the time it was computed, until hour1 is fetched.
             return
         pressure = None
@@ -253,7 +263,7 @@ class OnchainSync:
         if pressure is None:
             self.store.clear_derived("pressure")
         else:
-            self.store.save_derived("pressure", pressure.model_dump_json(), at)
+            self.store.save_derived("pressure", pressure.model_dump_json(), hour1_at)
 
     def _fail(self, at: datetime, code: str, *, retry: bool, brk: bool) -> None:
         """Record a failed run; `last_success_at` keeps meaning the last complete refresh."""

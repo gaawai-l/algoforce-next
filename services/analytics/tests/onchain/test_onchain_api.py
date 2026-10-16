@@ -11,9 +11,9 @@ from onchain_fixture import brk_transport
 
 from wheelhouse_service.http import create_app
 from wheelhouse_service.onchain.api import create_router
-from wheelhouse_service.onchain.brk import BrkClient
+from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
 from wheelhouse_service.onchain.models import day1_state, hour1_state
-from wheelhouse_service.onchain.pressure import Pressure
+from wheelhouse_service.onchain.pressure import Pressure, seller_pressure
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import OnchainSync
 
@@ -380,6 +380,7 @@ def test_pressure_view_after_sync(tmp_path: Path):
     assert view["share_levels"] == stored.share_levels.model_dump()
     assert view["supply_levels"] == stored.supply_levels.model_dump()
     assert view["xgap"] == stored.xgap
+    assert view["qc"] == stored.qc == []
     assert datetime.fromisoformat(view["loss"][-1]["at"]) == LAST_ROW
     assert set(view["loss"][0]) == {"at", "lth", "sth"}
 
@@ -445,7 +446,49 @@ def test_pressure_unavailable_with_200_and_no_zero(tmp_path: Path):
         assert view[group] == []
     for levels in ("loss_levels", "share_levels", "supply_levels"):
         assert view[levels] is None
+    assert view["qc"] == []
     assert seen == []
+
+
+def test_pressure_view_passes_failed_qc_checks_through(tmp_path: Path):
+    path = synced(tmp_path, at=HOUR1_SYNC)
+    store = OnchainStore(path)
+    stored = Pressure.model_validate_json((store.derived("pressure") or ("", NOW))[0])
+    failed = stored.model_copy(update={"qc": ["intraday_legs"]})
+    store.save_derived("pressure", failed.model_dump_json(), HOUR1_SYNC)
+
+    view = pressure_of(path, datetime(2026, 10, 16, 9, 30, tzinfo=UTC))
+
+    assert view["qc"] == ["intraday_legs"]
+    assert view["data_state"] == "fresh"
+
+
+def test_no_block_hour_does_not_delay_the_pressure_view(tmp_path: Path):
+    path = synced(tmp_path, at=HOUR1_SYNC)
+    store = OnchainStore(path)
+    # BRK had no block in the hour before its newest one: every series is null there, so that hour
+    # and the newest one are dropped while BRK itself is current.
+    gap = LAST_ROW - timedelta(hours=1)
+    rows = {
+        name: [(at, None if at == gap else value) for at, value in store.read_series(name, "hour1")]
+        for name in HOUR1_SERIES
+    }
+    pressure = seller_pressure(rows)
+    assert pressure is not None
+    assert pressure.latest_at == LAST_ROW
+    assert pressure.last_at == LAST_ROW - timedelta(hours=2)
+    store.save_derived("pressure", pressure.model_dump_json(), HOUR1_SYNC)
+    now = LAST_ROW + timedelta(minutes=30)
+
+    with TestClient(router_app(path, now)) as http:
+        view = http.get(f"{PREFIX}/seller-pressure").json()
+        hour1 = http.get(f"{PREFIX}/status").json()["datasets"][2]
+
+    assert view["data_state"] == "fresh"
+    assert datetime.fromisoformat(view["last_at"]) == LAST_ROW - timedelta(hours=2)
+    assert hour1["data_state"] == "fresh"
+    # The status still names the last row the charts show.
+    assert datetime.fromisoformat(hour1["last_at"]) == LAST_ROW - timedelta(hours=2)
 
 
 def test_hour1_outage_keeps_the_pressure_view_unavailable_with_a_reason(tmp_path: Path):

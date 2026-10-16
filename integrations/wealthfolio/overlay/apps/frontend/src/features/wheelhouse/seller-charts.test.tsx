@@ -10,7 +10,13 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { messages } from "./i18n";
 import { pressureSample, type SellerPressureView } from "./onchain-contract";
-import { SellerCharts, compactUsd, percent, usdPrice } from "./seller-charts";
+import {
+  SellerCharts,
+  compactUsd,
+  percent,
+  sigUsd,
+  usdPrice,
+} from "./seller-charts";
 
 const mocks = vi.hoisted(() => ({ pressure: vi.fn() }));
 vi.mock("./client", async (original) => ({
@@ -57,6 +63,7 @@ const unavailable = (reasons: string[]): SellerPressureView => ({
   share_levels: null,
   supply_levels: null,
   xgap: null,
+  qc: [],
   brk_version: null,
 });
 
@@ -345,16 +352,48 @@ it("treats a failure with an empty message as a failure", async () => {
 });
 
 it.each([
-  ["delayed", "Data is delayed · last update 2026-10-16 08:00 UTC"],
-  ["stale", "Data is stale · last update 2026-10-16 08:00 UTC"],
+  ["delayed", "Data is delayed · data to 2026-10-16 08:00 UTC"],
+  ["stale", "Data is stale · data to 2026-10-16 08:00 UTC"],
 ] as const)(
   "warns when the data is %s but keeps the charts",
   async (state, notice) => {
     const { container } = show({ ...pressureSample(), data_state: state });
     expect(await screen.findByText(notice)).toBeTruthy();
     expect(container.querySelectorAll("svg")).toHaveLength(3);
+    // The hour that was forming then has long closed: it was partial, not forming now.
+    expect(
+      screen.getByText(/last hour was partial when computed/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/includes the forming hour/)).toBeNull();
   },
 );
+
+it("names the failed QC checks in a warning line", async () => {
+  const { container, unmount } = show({
+    ...pressureSample(),
+    qc: ["intraday_legs"],
+  });
+  const line = await screen.findByText(
+    "QC 1 failed: intraday legs on every hour",
+  );
+  expect(line.className).toBe("wh-onchain-warn");
+  expect(container.querySelectorAll("svg")).toHaveLength(3);
+  unmount();
+
+  show({ ...pressureSample(), qc: ["hour_gap", "sth_supply"] });
+  expect(
+    await screen.findByText(
+      "QC 2 failed: no hourly gap over 2 hours, STH supply on every hour",
+    ),
+  ).toBeTruthy();
+});
+
+it("shows no QC line when every check passes", async () => {
+  const { container } = show(pressureSample());
+  await screen.findByText(/Resolution 1h/);
+  expect(screen.queryByText(/QC/)).toBeNull();
+  expect(container.querySelector(".wh-onchain-warn")).toBeNull();
+});
 
 it("shows no warning for fresh data", async () => {
   show(pressureSample());
@@ -391,6 +430,21 @@ it("shows the price as unavailable when the latest hour has no price", async () 
   ).toContain("BTC/USD Unavailable");
 });
 
+it("keeps a tapped reading when the finger lifts and clears it when the mouse leaves", async () => {
+  const { container } = show(pressureSample());
+  await screen.findByText(/Resolution 1h/);
+  const svg = chart(container, "share").querySelector("svg")!;
+  const legend = () =>
+    chart(container, "share").querySelector(".wh-seller-legend")?.textContent ??
+    "";
+  fireEvent.keyDown(svg, { key: "ArrowLeft" });
+  expect(legend()).toContain("2026-10-16 07:00 UTC");
+  fireEvent.pointerLeave(svg, { pointerType: "touch" });
+  expect(legend()).toContain("2026-10-16 07:00 UTC");
+  fireEvent.pointerLeave(svg, { pointerType: "mouse" });
+  expect(legend()).toContain("Latest");
+});
+
 it("reads a point in UTC from the keyboard", async () => {
   const { container } = show(pressureSample());
   await screen.findByText(/Resolution 1h/);
@@ -409,24 +463,43 @@ it("reads a point in UTC from the keyboard", async () => {
   expect(legend()).toContain("41.9%");
 });
 
-it("queries under the shared key and refreshes every minute", async () => {
+it("queries under the shared key and refreshes every five minutes", async () => {
   const { client } = show(pressureSample());
   await screen.findByText(/Resolution 1h/);
   const query = client
     .getQueryCache()
     .find({ queryKey: ["wh", "onchain", "seller-pressure"] });
   expect(query).toBeTruthy();
-  expect(query?.observers[0].options.refetchInterval).toBe(60000);
+  expect(query?.observers[0].options.refetchInterval).toBe(300000);
   await waitFor(() => expect(mocks.pressure).toHaveBeenCalledOnce());
 });
 
-it("formats amounts and percents the way the plan fixes them", () => {
+it("formats chart 1 amounts with three significant digits, as d3 .3s does", () => {
+  for (const [value, shown] of [
+    [37_600_000, "$37.6M"],
+    [9_390_000, "$9.39M"],
+    [85_200, "$85.2k"],
+    [252_000, "$252k"],
+    [17_900_000, "$17.9M"],
+    [1_983_300, "$1.98M"],
+    [8_540_500, "$8.54M"],
+    [41_345_525, "$41.3M"],
+    [10_050_150, "$10.1M"],
+    [999, "$999"],
+    [0, "$0"],
+    // rounded to three digits before the unit is picked, so never "$1000k"
+    [999_950, "$1.00M"],
+    [999_500, "$1.00M"],
+    [99_950, "$100k"],
+  ] as const)
+    expect(sigUsd(value)).toBe(shown);
+});
+
+it("formats axis amounts, percents and prices the way the plan fixes them", () => {
   expect(compactUsd(41_345_525, 1)).toBe("$41.3M");
   expect(compactUsd(10_050_150, 1)).toBe("$10.1M");
-  expect(compactUsd(1_983_300, 2)).toBe("$1.98M");
-  expect(compactUsd(8_540_500, 2)).toBe("$8.54M");
-  // rounding up must not leave "1000.00K"
-  expect(compactUsd(999_996, 2)).toBe("$1.00M");
+  // rounding up must not leave "1000.0K"
+  expect(compactUsd(999_960, 1)).toBe("$1.0M");
   expect(compactUsd(0, 1)).toBe("$0.0");
   expect(percent(0.41893330324776934)).toBe("41.9%");
   expect(percent(0.5611976039771673)).toBe("56.1%");

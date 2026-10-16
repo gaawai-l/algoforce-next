@@ -44,14 +44,25 @@ const SCALES: [number, string][] = [
   [1e6, "M"],
   [1e3, "K"],
 ];
-// $41.3M with one decimal for thresholds, $1.98M with two for current values. The unit is picked
-// from the rounded value so 999,996 reads $1.00M, never $1000.00K.
+// Axis labels: $41.3M with one decimal. The unit is picked from the rounded value so 999,960
+// reads $1.0M, never $1000.0K.
 export function compactUsd(value: number, decimals: number) {
   const abs = Math.abs(value);
   const [divisor, unit] = SCALES.find(
     ([d]) => Number((abs / d).toFixed(decimals)) >= 1,
   ) ?? [1, ""];
   return `${value < 0 ? "−" : ""}$${(abs / divisor).toFixed(decimals)}${unit}`;
+}
+const SI = ["", "k", "M", "B"];
+// Chart 1 amounts as the original prints them (d3 ".3s"): three significant digits and a lowercase
+// SI suffix, the unit picked after rounding so 999,950 reads $1.00M. The original shows billions
+// as B. The amounts are whole hundreds of dollars, so nothing lies between $0 and $1.
+export function sigUsd(value: number) {
+  if (value === 0) return "$0";
+  const [digits, power] = Math.abs(value).toExponential(2).split("e");
+  const tier = Math.min(SI.length - 1, Math.floor(Number(power) / 3));
+  const scaled = Number(digits) * 10 ** (Number(power) - tier * 3);
+  return `${value < 0 ? "−" : ""}$${scaled.toPrecision(3)}${SI[tier]}`;
 }
 export const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
 // The original rounds the price to one decimal.
@@ -435,7 +446,10 @@ function Plot({
       data-points={rows.length}
       onPointerMove={at}
       onPointerDown={at}
-      onPointerLeave={() => onHover(null)}
+      // A finger lifting also leaves; only a mouse that moves away clears the reading.
+      onPointerLeave={(event) => {
+        if (event.pointerType === "mouse") onHover(null);
+      }}
       onKeyDown={key}
       onBlur={() => onHover(null)}
     >
@@ -519,10 +533,10 @@ function Panel({
     [price, rows],
   );
   const axis = key === "loss" ? axisUsd : axisPercent;
-  const amount = (value: number, decimals: number) =>
-    key === "loss" ? compactUsd(value, decimals) : percent(value);
+  const amount = (value: number) =>
+    key === "loss" ? sigUsd(value) : percent(value);
   const level = (value: number | null | undefined) =>
-    value == null ? missing : amount(value, 1);
+    value == null ? missing : amount(value);
   const hint = (name: "seller.extremeHint" | "seller.warningHint") =>
     levels ? text(name, { n: levels.n }) : undefined;
   const index = hover != null && hover < rows.length ? hover : null;
@@ -534,12 +548,12 @@ function Panel({
           {
             tone: "sky",
             label: text("seller.loss.lth"),
-            value: amount(row.parts[0], 2),
+            value: amount(row.parts[0]),
           },
           {
             tone: "rose",
             label: text("seller.loss.sth"),
-            value: amount(row.parts[1], 2),
+            value: amount(row.parts[1]),
           },
         ]
       : [
@@ -548,7 +562,7 @@ function Panel({
             label: text(
               key === "share" ? "seller.share.label" : "seller.supply.label",
             ),
-            value: amount(row.parts[0], 2),
+            value: amount(row.parts[0]),
           },
         ]
     : [];
@@ -722,7 +736,8 @@ export function SellerCharts() {
   const pressure = useQuery({
     queryKey: ["wh", "onchain", "seller-pressure"],
     queryFn: ({ signal }) => getSellerPressure(signal),
-    refetchInterval: 60000,
+    // The worker derives once an hour; polling more often only resends the same payload.
+    refetchInterval: 300000,
     retry: false,
   });
   const data = pressure.data;
@@ -762,18 +777,30 @@ export function SellerCharts() {
     );
 
   const time = data.last_at ? utcStamp(Date.parse(data.last_at)) : "";
+  const late = data.data_state === "delayed" || data.data_state === "stale";
   return (
     <div className="wh-seller">
       <p className="wh-seller-meta">
         {text("seller.meta", { time: time || text("missing") })}
-        {data.forming_at ? <span> · {text("seller.forming")}</span> : null}
+        {data.forming_at ? (
+          // Once the data is late, the hour that was forming has closed since.
+          <span> · {text(late ? "seller.formingOld" : "seller.forming")}</span>
+        ) : null}
       </p>
-      {data.data_state === "delayed" || data.data_state === "stale" ? (
+      {late ? (
         <p className="wh-onchain-warn">
           {text(
             data.data_state === "delayed" ? "seller.delayed" : "seller.stale",
             { time: time || text("missing") },
           )}
+        </p>
+      ) : null}
+      {data.qc.length ? (
+        <p className="wh-onchain-warn">
+          {text("seller.qc", {
+            count: data.qc.length,
+            list: data.qc.map((code) => text(`seller.qc.${code}`)).join(", "),
+          })}
         </p>
       ) : null}
       {data.refreshing ? (

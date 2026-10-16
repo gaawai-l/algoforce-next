@@ -97,6 +97,7 @@ export const sellerPressureSchema: z.ZodType<
   share_levels: pressureLevels.nullable(),
   supply_levels: pressureLevels.nullable(),
   xgap: z.number().int().nullable(),
+  qc: z.array(z.enum(["hour_gap", "intraday_legs", "sth_supply"])),
   brk_version: z.string().nullable(),
 });
 
@@ -207,6 +208,7 @@ export function pressureSample(): SellerPressureView {
       n: 716,
     },
     xgap: 2,
+    qc: [],
     brk_version: "0.1.0",
   };
 }

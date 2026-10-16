@@ -148,6 +148,9 @@ def create_router(
 
         day1_last = max(days, default=None)
         hour1_last = current_pressure[0].last_at if current_pressure else None
+        # Freshness follows the newest hour BRK has, which an hour without a block can leave out
+        # of the charts; `last_at` still names the last row they show.
+        hour1_latest = current_pressure[0].latest_at if current_pressure else None
 
         return OnchainStatus(
             brk_version=state["brk_version"],
@@ -171,7 +174,7 @@ def create_router(
                 ),
                 dataset(
                     "hour1",
-                    hour1_state(hour1_last, now),
+                    hour1_state(hour1_latest or hour1_last, now),
                     hour1_last,
                     only(reasons, PRESSURE_REASONS),
                     "brk_unavailable",
@@ -260,11 +263,13 @@ def create_router(
                 share_levels=None,
                 supply_levels=None,
                 xgap=None,
+                qc=[],
                 brk_version=state["brk_version"],
             )
         result, computed_at = stored
         return SellerPressureView(
-            data_state=hour1_state(result.last_at, now),
+            # The newest hour BRK has, even when it was dropped from the charts.
+            data_state=hour1_state(result.latest_at or result.last_at, now),
             reasons=reasons,
             refreshing=refreshing,
             # The last row was still open when this was computed, however long ago that was.
@@ -278,6 +283,7 @@ def create_router(
             share_levels=result.share_levels,
             supply_levels=result.supply_levels,
             xgap=result.xgap,
+            qc=result.qc,
             brk_version=state["brk_version"],
         )
 

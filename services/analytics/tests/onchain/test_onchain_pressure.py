@@ -134,6 +134,12 @@ def test_parity_with_original_page_at_0800():
     assert result.xgap == 0
 
 
+def test_qc_passes_on_the_parity_input():
+    result = seller_pressure(fixture_rows(datetime(2026, 10, 16, 8, tzinfo=UTC)))
+    assert result is not None
+    assert result.qc == []
+
+
 def test_lookback_ignores_rows_beyond_2600():
     full = fixture_rows(datetime(2026, 10, 16, 9, tzinfo=UTC))
     assert all(len(points) == LOOKBACK for points in full.values())
@@ -338,6 +344,72 @@ def test_empty_when_nothing_can_be_kept():
         cols[PRICE][hour] = None
     assert seller_pressure(rows_of(cols)) is None
     assert seller_pressure(rows_of(columns(1))) is None
+
+
+def test_qc_hour_gap_fails_only_on_a_step_over_three_hours():
+    # One hour without a block drops two rows: kept rows three hours apart, which passes.
+    one = columns(12)
+    no_block(one, 5)
+    assert computed(one).qc == []
+    # Two in a row leave a 4-hour hole between the kept rows at hours 4 and 8.
+    two = columns(12)
+    no_block(two, 5)
+    no_block(two, 6)
+    result = computed(two)
+    kept = [p.at for p in result.price]
+    assert kept[kept.index(at(4)) + 1] == at(8)
+    assert result.qc == ["hour_gap"]
+
+
+def test_qc_intraday_legs_fails_when_an_under_1h_cumulative_is_null():
+    cols = columns(10)
+    cols[YOUNG_LOSS][5] = None
+    result = computed(cols)
+    assert result.xgap == 2
+    assert result.qc == ["intraday_legs"]
+
+
+def test_qc_sth_supply_fails_on_a_null_on_a_kept_row():
+    cols = columns(10)
+    cols[STH_IN_PROFIT][5] = None
+    assert computed(cols).qc == ["sth_supply"]
+    # A null on a row that is not kept does not count, and the under-1h supply is not checked.
+    dropped = columns(10)
+    dropped[PRICE][5] = None
+    dropped[STH_IN_LOSS][5] = None
+    dropped[YOUNG_IN_LOSS][7] = None
+    assert computed(dropped).qc == []
+
+
+def test_qc_lists_failures_in_check_order():
+    cols = columns(12)
+    cols[STH_IN_LOSS][10] = None
+    cols[YOUNG_PROFIT][2] = None
+    no_block(cols, 5)
+    no_block(cols, 6)
+    assert computed(cols).qc == ["hour_gap", "intraday_legs", "sth_supply"]
+
+
+def test_latest_at_is_the_newest_priced_row_before_the_row_gate():
+    # The hour without a block drops itself and the next one, the newest hour BRK has.
+    cols = columns(10)
+    no_block(cols, 8)
+    result = computed(cols)
+    assert result.last_at == at(7)
+    assert result.latest_at == at(9)
+    assert result.latest_at - result.last_at == 2 * HOUR
+    # A trailing hour without a price is not newer data.
+    unpriced = columns(10)
+    unpriced[PRICE][9] = None
+    assert computed(unpriced).latest_at == at(8)
+
+
+def test_payload_stored_before_qc_still_loads():
+    stored = computed(columns(5)).model_dump(mode="json")
+    del stored["qc"], stored["latest_at"]
+    old = Pressure.model_validate(stored)
+    assert old.qc == []
+    assert old.latest_at is None
 
 
 def test_quantile_r7():

@@ -3,9 +3,10 @@
 import math
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-from typing import NamedTuple
+from itertools import pairwise
+from typing import Literal, NamedTuple
 
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, Field
 
 from ..market import Model
 from .brk import HOUR1_SERIES
@@ -17,6 +18,8 @@ WINDOW = timedelta(hours=720)
 HOUR = timedelta(hours=1)
 # Realized flows are rounded to whole units of this many dollars.
 QUANTUM = 100
+# The widest step between kept rows that passes QC: an hour without a block drops two rows.
+MAX_STEP = timedelta(hours=3)
 
 PRICE = "price_close"
 STH_PROFIT = "sth_realized_profit_cumulative"
@@ -31,9 +34,11 @@ YOUNG_IN_LOSS = "utxos_under_1h_old_supply_in_loss"
 YOUNG_IN_PROFIT = "utxos_under_1h_old_supply_in_profit"
 
 Series = dict[datetime, float | None]
+# The original page's self-checks that concern seller pressure, in its order.
+QcCode = Literal["hour_gap", "intraday_legs", "sth_supply"]
 
 
-class Levels(Model):
+class PressureLevels(Model):
     """P95 and P75 of one chart over the last 720 clock hours, and how many values they use."""
 
     p95: float | None
@@ -41,7 +46,7 @@ class Levels(Model):
     n: int
 
 
-class LossPoint(Model):
+class PressureLossPoint(Model):
     at: AwareDatetime
     lth: float
     sth: float
@@ -54,15 +59,20 @@ class PressurePoint(Model):
 
 class Pressure(Model):
     last_at: AwareDatetime
-    loss: list[LossPoint]
+    loss: list[PressureLossPoint]
     share: list[PressurePoint]
     supply: list[PressurePoint]
     price: list[PressurePoint]
-    loss_levels: Levels
-    share_levels: Levels
-    supply_levels: Levels
+    loss_levels: PressureLevels
+    share_levels: PressureLevels
+    supply_levels: PressureLevels
     kept: int
     xgap: int
+    # The two fields below have defaults so that payloads stored before them stay readable until
+    # the next derivation. `qc` lists the checks that failed; empty when all pass.
+    qc: list[QcCode] = Field(default_factory=list)
+    # The newest hour with a price, kept or not: BRK is current even when that hour was dropped.
+    latest_at: AwareDatetime | None = None
 
 
 class _Row(NamedTuple):
@@ -105,12 +115,14 @@ def _leg(cumulative: Series, at: datetime) -> float | None:
     return max(0.0, now - before)
 
 
-def _levels(points: Sequence[tuple[datetime, float]]) -> Levels:
+def _levels(points: Sequence[tuple[datetime, float]]) -> PressureLevels:
     if not points:
-        return Levels(p95=None, p75=None, n=0)
+        return PressureLevels(p95=None, p75=None, n=0)
     oldest = points[-1][0] - WINDOW
     values = sorted(value for at, value in points if at > oldest)
-    return Levels(p95=quantile_r7(values, 0.95), p75=quantile_r7(values, 0.75), n=len(values))
+    return PressureLevels(
+        p95=quantile_r7(values, 0.95), p75=quantile_r7(values, 0.75), n=len(values)
+    )
 
 
 def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pressure | None:
@@ -166,7 +178,7 @@ def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pre
         return None
 
     loss = [
-        LossPoint(at=r.at, lth=float(r.lth_loss * QUANTUM), sth=float(r.sth_loss * QUANTUM))
+        PressureLossPoint(at=r.at, lth=float(r.lth_loss * QUANTUM), sth=float(r.sth_loss * QUANTUM))
         for r in kept
     ]
     loss_totals = [(r.at, float((r.lth_loss + r.sth_loss) * QUANTUM)) for r in kept]
@@ -190,6 +202,17 @@ def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pre
         if old_loss + old_profit > 0:
             supply.append((r.at, old_loss / (old_loss + old_profit)))
 
+    qc: list[QcCode] = []
+    if any(b.at - a.at > MAX_STEP for a, b in pairwise(kept)):
+        qc.append("hour_gap")
+    if xgap:
+        qc.append("intraday_legs")
+    if any(
+        series[STH_IN_LOSS].get(r.at) is None or series[STH_IN_PROFIT].get(r.at) is None
+        for r in kept
+    ):
+        qc.append("sth_supply")
+
     return Pressure(
         last_at=kept[-1].at,
         loss=loss,
@@ -201,4 +224,6 @@ def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pre
         supply_levels=_levels(supply),
         kept=len(kept),
         xgap=xgap,
+        qc=qc,
+        latest_at=max(at for at, value in series[PRICE].items() if value is not None),
     )

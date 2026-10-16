@@ -127,6 +127,7 @@ describe("on-chain seller pressure contract", () => {
       expect(series).toHaveLength(2200);
     }
     expect(parsed.data_state).toBe("fresh");
+    expect(parsed.qc).toEqual([]);
     expect(parsed.last_at).toBe(parsed.forming_at);
     expect(parsed.loss.at(-1)).toMatchObject({
       lth: 1_983_300,
@@ -183,6 +184,17 @@ describe("on-chain seller pressure contract", () => {
     ).toBe(false);
   });
 
+  it("accepts the known QC codes and rejects any other", () => {
+    const qc = ["hour_gap", "intraday_legs", "sth_supply"];
+    expect(sellerPressureSchema.parse({ ...pressureSample(), qc }).qc).toEqual(
+      qc,
+    );
+    expect(
+      sellerPressureSchema.safeParse({ ...pressureSample(), qc: ["aligned"] })
+        .success,
+    ).toBe(false);
+  });
+
   it("keeps an unavailable snapshot null instead of coercing it to zero", () => {
     const empty = {
       data_state: "unavailable",
@@ -198,6 +210,7 @@ describe("on-chain seller pressure contract", () => {
       share_levels: null,
       supply_levels: null,
       xgap: null,
+      qc: [],
       brk_version: null,
     };
     const parsed = sellerPressureSchema.parse(empty);
