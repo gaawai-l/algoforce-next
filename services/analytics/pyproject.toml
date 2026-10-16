@@ -34,4 +34,9 @@ line-length = 100
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.setuptools.package-data]
-wheelhouse_service = ["migrations/*.sql", "portfolio/migrations/*.sql", "onchain/migrations/*.sql"]
+wheelhouse_service = [
+    "migrations/*.sql",
+    "portfolio/migrations/*.sql",
+    "onchain/migrations/*.sql",
+    "perps/migrations/*.sql",
+]
