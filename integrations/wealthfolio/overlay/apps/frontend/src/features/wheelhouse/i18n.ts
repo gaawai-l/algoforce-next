@@ -344,6 +344,21 @@ const en = {
   "regime.status.simulated": "Simulated",
   "regime.refreshFailed": "Refresh failed",
   "regime.boardGroup": "Regime board",
+  "cycle.label": "Cycle · {{state}} · day {{day}}",
+  "cycle.state.advance": "Advance",
+  "cycle.state.breakout": "Breakout",
+  "cycle.state.pressure": "Pressure",
+  "cycle.state.repair": "Repair",
+  "cycle.state.breakdown": "Breakdown",
+  "cycle.state.capitulation": "Capitulation",
+  "cycle.date": "{{day}} {{month}}",
+  "cycle.since": "since {{date}}",
+  "cycle.forming": "includes today (forming)",
+  "cycle.stale": "stale · as of {{date}}",
+  "cycle.unavailable": "Cycle unavailable",
+  "cycle.open": "Show the cycle in Key levels",
+  "cycle.reason.brk_unavailable": "on-chain data source unavailable",
+  "cycle.reason.seriesMissing": "missing series {{name}}",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -679,6 +694,21 @@ const zh: Record<MessageKey, string> = {
   "regime.status.simulated": "模拟",
   "regime.refreshFailed": "刷新失败",
   "regime.boardGroup": "看板",
+  "cycle.label": "周期 · {{state}} · 第 {{day}} 天",
+  "cycle.state.advance": "上行",
+  "cycle.state.breakout": "突破",
+  "cycle.state.pressure": "承压",
+  "cycle.state.repair": "修复",
+  "cycle.state.breakdown": "破位",
+  "cycle.state.capitulation": "投降",
+  "cycle.date": "{{month}}{{day}}日",
+  "cycle.since": "自 {{date}} 起",
+  "cycle.forming": "含今日（形成中）",
+  "cycle.stale": "已过期 · 截至 {{date}}",
+  "cycle.unavailable": "周期不可用",
+  "cycle.open": "在关键位中查看周期",
+  "cycle.reason.brk_unavailable": "链上数据源不可用",
+  "cycle.reason.seriesMissing": "缺少序列 {{name}}",
 };
 
 export const messages = { en, zh };

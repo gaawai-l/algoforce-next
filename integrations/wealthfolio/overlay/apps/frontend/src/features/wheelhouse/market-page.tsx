@@ -14,6 +14,7 @@ import { issueText, labeled, useWheelhouseText } from "./i18n";
 import { MarketChart } from "./market-chart";
 import { useLiveMarketRefresh } from "./use-initial-market-refresh";
 import { DemarkDetails } from "./demark-details";
+import { CycleBadge } from "./cycle-badge";
 import { RegimeCheck } from "./regime-check";
 import { defaultDemarkConfig } from "./demark-contract";
 import {
@@ -86,6 +87,18 @@ export default function MarketPage() {
   const setTimeframe = (value: Stream["timeframe"]) =>
     updateQuery("timeframe", value);
   const setMethod = (value: Method) => updateQuery("method", value);
+  // The header cycle badge opens Key levels and then scrolls to its on-chain cycle panel.
+  const [scrollToCycle, setScrollToCycle] = useState(false);
+  useEffect(() => {
+    if (!scrollToCycle || method !== "levels") return;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById("wh-onchain-cycle")?.scrollIntoView({
+        block: "start",
+      });
+      setScrollToCycle(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [scrollToCycle, method]);
   useEffect(() => {
     const next = new URLSearchParams(search);
     if (next.get("source") === "fixture") next.delete("snapshot");
@@ -367,6 +380,14 @@ export default function MarketPage() {
                 <small>USDT</small>
               </strong>
             </div>
+            <CycleBadge
+              symbol={symbol}
+              live={!selectedId}
+              onOpen={() => {
+                setMethod("levels");
+                setScrollToCycle(true);
+              }}
+            />
           </div>
           <div className="wh-meta">
             <span className="wh-badge">{text(source === "bybit" ? "badge.bybitSpot" : "badge.perpetual")}</span>
