@@ -4,13 +4,14 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 
 from wheelhouse_service.onchain.brk import Urpd
 from wheelhouse_service.onchain.costbasis import (
     BUCKETS,
+    LINE_ORDER,
     Band,
     Bucket,
     BucketCostBasis,
@@ -414,6 +415,17 @@ def test_select_components_uses_bic_without_peaks() -> None:
     assert best_fit is not None
     assert select_components(xs, ws, peaks=0, rows=rows) == best_fit[0]
     assert len(select_components(xs, ws, peaks=3, rows=rows)) == min(4, 3)
+    # The penalty uses the domain rows, not the positive ones: over 1000 rows it picks k = 1.
+    one = fit_gmm(xs, ws, 1)
+    assert one is not None
+    assert one[0] != best_fit[0]
+    assert select_components(xs, ws, peaks=0, rows=1000) == one[0]
+    # Fewer than 2 rows count as 2, so the penalty never takes log 0.
+    assert select_components(xs, ws, peaks=0, rows=0) == best_fit[0]
+
+
+def test_line_order_lists_every_line_once() -> None:
+    assert set(LINE_ORDER) == set(get_args(LineName)) and len(LINE_ORDER) == 5
 
 
 def test_gmm_zero_density_falls_back() -> None:

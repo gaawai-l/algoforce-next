@@ -388,6 +388,7 @@ def cost_basis(
     by_name = {line.name: line.price for line in lines}
     for name in LINE_ORDER:
         price = float(math.floor(by_name[name] + 0.5))
+        # Redundant with the slices clipped to the domain; kept for fidelity with the page.
         if low <= price <= high:
             candidates.append(
                 Candidate(kind="line", price=price, line=name, cohort=None, index=None, edge=None)
