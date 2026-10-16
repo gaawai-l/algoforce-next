@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import AwareDatetime
 
 from ..market import Model
+from .costbasis import BucketCostBasis
 from .cycle import Component, CycleState, Episode
 from .levels import ModelLine
 from .pressure import PressureLevels, PressureLossPoint, PressurePoint, QcCode
@@ -85,6 +86,22 @@ class LevelsView(Model):
     urpd_date: date | None
     onchain_close: float | None
     lines: list[ModelLine]
+    brk_version: str | None
+
+
+class CostBasisView(Model):
+    # Follows the older of the snapshot's day and the lines' day.
+    data_state: DataState
+    reasons: list[str]
+    refreshing: bool
+    # The start of the latest day that was still open when its data was fetched; otherwise null.
+    forming_at: AwareDatetime | None
+    urpd_date: date | None
+    lines_as_of: date | None
+    snapshot_at: AwareDatetime | None
+    computed_at: AwareDatetime | None
+    # Only the bucket widths whose snapshots are all stored; the reasons name the rest.
+    buckets: list[BucketCostBasis]
     brk_version: str | None
 
 

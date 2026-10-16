@@ -463,6 +463,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/onchain/cost-basis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cost Basis */
+        get: operations["cost_basis_api_wheelhouse_v1_onchain_cost_basis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/onchain/seller-pressure": {
         parameters: {
             query?: never;
@@ -555,6 +572,15 @@ export interface components {
             quote?: components["schemas"]["Quote-Input"] | null;
             fx?: components["schemas"]["FxRate"] | null;
         };
+        /** Band */
+        Band: {
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
+            /** Candidates */
+            candidates: components["schemas"]["Candidate"][];
+        };
         /** Bar */
         Bar: {
             /**
@@ -612,6 +638,68 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** BucketCostBasis */
+        BucketCostBasis: {
+            /**
+             * Bucket
+             * @enum {integer}
+             */
+            bucket: 200 | 500 | 1000;
+            /** Domain Low */
+            domain_low: number;
+            /** Domain High */
+            domain_high: number;
+            /** Spot */
+            spot: number;
+            sth: components["schemas"]["CohortClusters"];
+            lth: components["schemas"]["CohortClusters"];
+            /** Above */
+            above: components["schemas"]["Band"][];
+            /** Below */
+            below: components["schemas"]["Band"][];
+            /** Resistance */
+            resistance: number[];
+            /** Support */
+            support: number[];
+        };
+        /**
+         * Candidate
+         * @description A price level counted in a band: a rounded model line, or a component's mu, mu - sigma
+         *     or mu + sigma.
+         */
+        Candidate: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "line" | "component";
+            /** Price */
+            price: number;
+            /** Line */
+            line: ("true_mean" | "short_term" | "average" | "long_term" | "median") | null;
+            /** Cohort */
+            cohort: ("sth" | "lth") | null;
+            /** Index */
+            index: number | null;
+            /** Edge */
+            edge: ("low" | "mid" | "high") | null;
+        };
+        /** CohortClusters */
+        CohortClusters: {
+            /**
+             * Cohort
+             * @enum {string}
+             */
+            cohort: "sth" | "lth";
+            /** Total */
+            total: number;
+            /** In Profit */
+            in_profit: number | null;
+            /** Peaks */
+            peaks: components["schemas"]["Peak"][];
+            /** Components */
+            components: components["schemas"]["GmmComponent"][];
+        };
         /** Component */
         Component: {
             /**
@@ -625,6 +713,32 @@ export interface components {
             deadband: number;
             /** Supports */
             supports: boolean;
+        };
+        /** CostBasisView */
+        CostBasisView: {
+            /**
+             * Data State
+             * @enum {string}
+             */
+            data_state: "fresh" | "stale" | "unavailable";
+            /** Reasons */
+            reasons: string[];
+            /** Refreshing */
+            refreshing: boolean;
+            /** Forming At */
+            forming_at: string | null;
+            /** Urpd Date */
+            urpd_date: string | null;
+            /** Lines As Of */
+            lines_as_of: string | null;
+            /** Snapshot At */
+            snapshot_at: string | null;
+            /** Computed At */
+            computed_at: string | null;
+            /** Buckets */
+            buckets: components["schemas"]["BucketCostBasis"][];
+            /** Brk Version */
+            brk_version: string | null;
         };
         /** Cycle */
         Cycle: {
@@ -1115,6 +1229,17 @@ export interface components {
             /** Source */
             source: string;
         };
+        /** GmmComponent */
+        GmmComponent: {
+            /** Mu */
+            mu: number;
+            /** Sigma */
+            sigma: number;
+            /** Share */
+            share: number;
+            /** Btc */
+            btc: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1492,6 +1617,19 @@ export interface components {
             last_error: string | null;
             /** Datasets */
             datasets: components["schemas"]["DatasetStatus"][];
+        };
+        /** Peak */
+        Peak: {
+            /** Price */
+            price: number;
+            /** Width */
+            width: number;
+            /** Btc */
+            btc: number;
+            /** Share */
+            share: number;
+            /** Strength */
+            strength: number;
         };
         /** Point */
         Point: {
@@ -3066,6 +3204,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LevelsView"];
+                };
+            };
+        };
+    };
+    cost_basis_api_wheelhouse_v1_onchain_cost_basis_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostBasisView"];
                 };
             };
         };

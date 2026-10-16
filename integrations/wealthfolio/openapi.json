@@ -1141,6 +1141,27 @@
         }
       }
     },
+    "/api/wheelhouse/v1/onchain/cost-basis": {
+      "get": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Cost Basis",
+        "operationId": "cost_basis_api_wheelhouse_v1_onchain_cost_basis_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostBasisView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/onchain/seller-pressure": {
       "get": {
         "tags": [
@@ -1398,6 +1419,33 @@
         ],
         "title": "Annotation"
       },
+      "Band": {
+        "properties": {
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/Candidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "low",
+          "high",
+          "candidates"
+        ],
+        "title": "Band"
+      },
       "Bar": {
         "properties": {
           "open_time": {
@@ -1522,6 +1570,219 @@
         ],
         "title": "Batch"
       },
+      "BucketCostBasis": {
+        "properties": {
+          "bucket": {
+            "type": "integer",
+            "enum": [
+              200,
+              500,
+              1000
+            ],
+            "title": "Bucket"
+          },
+          "domain_low": {
+            "type": "number",
+            "title": "Domain Low"
+          },
+          "domain_high": {
+            "type": "number",
+            "title": "Domain High"
+          },
+          "spot": {
+            "type": "number",
+            "title": "Spot"
+          },
+          "sth": {
+            "$ref": "#/components/schemas/CohortClusters"
+          },
+          "lth": {
+            "$ref": "#/components/schemas/CohortClusters"
+          },
+          "above": {
+            "items": {
+              "$ref": "#/components/schemas/Band"
+            },
+            "type": "array",
+            "title": "Above"
+          },
+          "below": {
+            "items": {
+              "$ref": "#/components/schemas/Band"
+            },
+            "type": "array",
+            "title": "Below"
+          },
+          "resistance": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Resistance"
+          },
+          "support": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Support"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "bucket",
+          "domain_low",
+          "domain_high",
+          "spot",
+          "sth",
+          "lth",
+          "above",
+          "below",
+          "resistance",
+          "support"
+        ],
+        "title": "BucketCostBasis"
+      },
+      "Candidate": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "line",
+              "component"
+            ],
+            "title": "Kind"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "true_mean",
+                  "short_term",
+                  "average",
+                  "long_term",
+                  "median"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "cohort": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "sth",
+                  "lth"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cohort"
+          },
+          "index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index"
+          },
+          "edge": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "mid",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edge"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "price",
+          "line",
+          "cohort",
+          "index",
+          "edge"
+        ],
+        "title": "Candidate",
+        "description": "A price level counted in a band: a rounded model line, or a component's mu, mu - sigma\nor mu + sigma."
+      },
+      "CohortClusters": {
+        "properties": {
+          "cohort": {
+            "type": "string",
+            "enum": [
+              "sth",
+              "lth"
+            ],
+            "title": "Cohort"
+          },
+          "total": {
+            "type": "number",
+            "title": "Total"
+          },
+          "in_profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "In Profit"
+          },
+          "peaks": {
+            "items": {
+              "$ref": "#/components/schemas/Peak"
+            },
+            "type": "array",
+            "title": "Peaks"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/GmmComponent"
+            },
+            "type": "array",
+            "title": "Components"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cohort",
+          "total",
+          "in_profit",
+          "peaks",
+          "components"
+        ],
+        "title": "CohortClusters"
+      },
       "Component": {
         "properties": {
           "name": {
@@ -1555,6 +1816,123 @@
           "supports"
         ],
         "title": "Component"
+      },
+      "CostBasisView": {
+        "properties": {
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "refreshing": {
+            "type": "boolean",
+            "title": "Refreshing"
+          },
+          "forming_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forming At"
+          },
+          "urpd_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urpd Date"
+          },
+          "lines_as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines As Of"
+          },
+          "snapshot_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot At"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/BucketCostBasis"
+            },
+            "type": "array",
+            "title": "Buckets"
+          },
+          "brk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brk Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data_state",
+          "reasons",
+          "refreshing",
+          "forming_at",
+          "urpd_date",
+          "lines_as_of",
+          "snapshot_at",
+          "computed_at",
+          "buckets",
+          "brk_version"
+        ],
+        "title": "CostBasisView"
       },
       "Cycle": {
         "properties": {
@@ -2986,6 +3364,35 @@
         ],
         "title": "FxRate"
       },
+      "GmmComponent": {
+        "properties": {
+          "mu": {
+            "type": "number",
+            "title": "Mu"
+          },
+          "sigma": {
+            "type": "number",
+            "title": "Sigma"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share"
+          },
+          "btc": {
+            "type": "number",
+            "title": "Btc"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mu",
+          "sigma",
+          "share",
+          "btc"
+        ],
+        "title": "GmmComponent"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4114,6 +4521,40 @@
           "datasets"
         ],
         "title": "OnchainStatus"
+      },
+      "Peak": {
+        "properties": {
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "width": {
+            "type": "number",
+            "title": "Width"
+          },
+          "btc": {
+            "type": "number",
+            "title": "Btc"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share"
+          },
+          "strength": {
+            "type": "number",
+            "title": "Strength"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "price",
+          "width",
+          "btc",
+          "share",
+          "strength"
+        ],
+        "title": "Peak"
       },
       "Point": {
         "properties": {

@@ -1,3 +1,4 @@
+import json
 import threading
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -12,6 +13,7 @@ from onchain_fixture import brk_transport
 from wheelhouse_service.http import create_app
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
+from wheelhouse_service.onchain.costbasis import StoredCostBasis
 from wheelhouse_service.onchain.models import day1_state, hour1_state
 from wheelhouse_service.onchain.pressure import Pressure, seller_pressure
 from wheelhouse_service.onchain.store import OnchainStore
@@ -20,6 +22,8 @@ from wheelhouse_service.onchain.sync import OnchainSync
 PREFIX = "/api/wheelhouse/v1/onchain"
 NOW = datetime(2026, 10, 16, 10, 40, tzinfo=UTC)
 LINES = {"true_mean", "short_term", "average", "long_term", "median"}
+# The cost-basis golden sample: its URPD set has every cohort and bucket width.
+GOLDEN = Path(__file__).parent / "fixtures" / "brk-2026-10-16T1829Z"
 
 
 def blocked_client() -> tuple[BrkClient, list[str]]:
@@ -321,6 +325,7 @@ def test_capability_and_get_only_schema(tmp_path: Path):
         f"{PREFIX}/cycle",
         f"{PREFIX}/levels",
         f"{PREFIX}/seller-pressure",
+        f"{PREFIX}/cost-basis",
     }
     assert all(methods == {"get"} for methods in onchain.values())
 
@@ -574,3 +579,249 @@ def test_status_lists_hour1_dataset(tmp_path: Path):
     datasets = read(datetime(2026, 10, 16, 13, 0, tzinfo=UTC))
     assert [item["data_state"] for item in datasets] == ["fresh", "fresh", "delayed"]
     assert [item["reasons"] for item in datasets] == [[], [], []]
+
+
+D = date(2026, 10, 16)
+
+
+def moment(day: int, hour: int = 0, minute: int = 0) -> datetime:
+    return datetime(2026, 10, day, hour, minute, tzinfo=UTC)
+
+
+def cost_basis_of(path: Path, now: datetime = NOW) -> dict[str, Any]:
+    with TestClient(router_app(path, now)) as http:
+        response = http.get(f"{PREFIX}/cost-basis")
+    assert response.status_code == 200
+    body: dict[str, Any] = response.json()
+    return body
+
+
+def store_cost_basis(
+    path: Path,
+    *,
+    urpd_date: date,
+    lines_as_of: date,
+    snapshot_at: datetime,
+    computed_at: datetime,
+    reasons: tuple[str, ...] = (),
+) -> None:
+    """Store a derived cost basis directly, the way the sync worker would have left it."""
+    stored = StoredCostBasis(
+        urpd_date=urpd_date,
+        lines_as_of=lines_as_of,
+        snapshot_at=snapshot_at,
+        buckets=[],
+        reasons=list(reasons),
+    )
+    OnchainStore(path).save_derived("costbasis", stored.model_dump_json(), computed_at)
+
+
+def test_cost_basis_view_from_golden_fixture(tmp_path: Path):
+    path = synced(tmp_path, urpd_dir=GOLDEN)
+    view = cost_basis_of(path)
+
+    assert view["data_state"] == "fresh"
+    assert view["reasons"] == []
+    assert view["refreshing"] is False
+    assert view["urpd_date"] == "2026-10-16"
+    assert view["lines_as_of"] == "2026-10-16"
+    assert datetime.fromisoformat(view["snapshot_at"]) == NOW
+    assert datetime.fromisoformat(view["computed_at"]) == NOW
+    assert view["brk_version"] == "0.12.2"
+    buckets = {bucket["bucket"]: bucket for bucket in view["buckets"]}
+    assert list(buckets) == [200, 500, 1000]
+
+    # The day1 rows are the P1 fixture's, not the golden sample's, so only table 2 and the bands
+    # are compared; the cluster tables are pinned against the oracle in the cost-basis tests.
+    expected = json.loads((GOLDEN / "expected-500.json").read_text())
+    assert buckets[500]["resistance"] == [86000, 88000, 96000, 104000]
+    assert buckets[500]["support"] == [76000, 74000, 70000, 64000]
+    assert buckets[500]["resistance"] == expected["resistance"]
+    assert buckets[500]["support"] == expected["support"]
+    for side in ("above", "below"):
+        assert [(band["low"], band["high"]) for band in buckets[500][side]] == [
+            (band["low"], band["high"]) for band in expected[side]
+        ]
+
+
+@pytest.mark.parametrize(
+    ("urpd_date", "lines_as_of", "snapshot_at", "computed_at", "now", "forming", "state"),
+    [
+        pytest.param(
+            D,
+            D,
+            moment(16, 10),
+            moment(16, 10, 1),
+            moment(16, 10, 40),
+            moment(16),
+            "fresh",
+            id="same-day",
+        ),
+        # The next day, in the grace period: the 16th was never seen closed, so it still forms.
+        pytest.param(
+            D,
+            D,
+            moment(16, 10),
+            moment(16, 10, 1),
+            moment(17, 0, 30),
+            moment(16),
+            "fresh",
+            id="next-day",
+        ),
+        # Reused after an outage: fetched at 23:12 on the 16th, so the day was open then.
+        pytest.param(
+            D,
+            D,
+            moment(16, 23, 12),
+            moment(17, 0, 30),
+            moment(17, 0, 40),
+            moment(16),
+            "fresh",
+            id="reused",
+        ),
+        # Fetched at 02:30 on the 17th, the 16th was final: nothing forms, and the day is stale.
+        pytest.param(
+            D, D, moment(17, 2, 30), moment(17, 2, 31), moment(17, 2, 40), None, "stale", id="final"
+        ),
+        # Today's snapshot with yesterday's lines: the snapshot is the one still forming, and
+        # freshness follows the older date, which the grace period still covers.
+        pytest.param(
+            date(2026, 10, 17),
+            D,
+            moment(17, 0, 10),
+            moment(17, 0, 30),
+            moment(17, 0, 40),
+            moment(17),
+            "fresh",
+            id="mixed-snapshot",
+        ),
+        # A final snapshot of the 15th with lines of the 16th that still form.
+        pytest.param(
+            date(2026, 10, 15),
+            D,
+            moment(16, 2, 30),
+            moment(16, 10),
+            moment(16, 10, 40),
+            moment(16),
+            "stale",
+            id="mixed-lines",
+        ),
+        # Both still form: the later date wins.
+        pytest.param(
+            date(2026, 10, 15),
+            D,
+            moment(15, 23),
+            moment(16, 10),
+            moment(16, 10, 40),
+            moment(16),
+            "stale",
+            id="both",
+        ),
+    ],
+)
+def test_cost_basis_forming(
+    tmp_path: Path,
+    urpd_date: date,
+    lines_as_of: date,
+    snapshot_at: datetime,
+    computed_at: datetime,
+    now: datetime,
+    forming: datetime | None,
+    state: str,
+):
+    path = tmp_path / "onchain.sqlite"
+    store_cost_basis(
+        path,
+        urpd_date=urpd_date,
+        lines_as_of=lines_as_of,
+        snapshot_at=snapshot_at,
+        computed_at=computed_at,
+    )
+    view = cost_basis_of(path, now)
+
+    if forming is None:
+        assert view["forming_at"] is None
+    else:
+        assert datetime.fromisoformat(view["forming_at"]) == forming
+    # Freshness follows the older of the two dates.
+    assert view["data_state"] == state == day1_state(min(urpd_date, lines_as_of), now)
+
+
+def test_cost_basis_unavailable_before_sync(tmp_path: Path):
+    client, seen = blocked_client()
+    app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client)
+    with TestClient(app) as http:
+        response = http.get(f"{PREFIX}/cost-basis")
+
+    assert response.status_code == 200
+    view = response.json()
+    assert view["data_state"] == "unavailable"
+    assert view["reasons"] == ["brk_unavailable"]
+    assert view["refreshing"] is False
+    # Missing data is absent, never an empty-looking zero.
+    assert view["forming_at"] is None
+    assert view["urpd_date"] is None
+    assert view["lines_as_of"] is None
+    assert view["snapshot_at"] is None
+    assert view["computed_at"] is None
+    assert view["buckets"] == []
+    assert view["brk_version"] is None
+    assert seen == []
+
+
+def test_cost_basis_reasons_filtered(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    store_cost_basis(
+        path,
+        urpd_date=D,
+        lines_as_of=D,
+        snapshot_at=moment(16, 10),
+        computed_at=moment(16, 10, 1),
+        reasons=("urpd_missing:sth:lin200",),
+    )
+    OnchainStore(path).set_state(
+        reasons=json.dumps(
+            [
+                "series_missing:true_market_mean",
+                "series_missing:hour1:sth_supply_in_loss",
+                "series_missing:utxos_1d_to_1w_old_realized_price",
+                "urpd_missing",
+                "brk_unavailable",
+            ]
+        )
+    )
+    view = cost_basis_of(path)
+
+    # The pressure's and the cycle's codes are not the cost basis's business. The shared ones come
+    # first, then the codes stored with the result.
+    assert view["reasons"] == [
+        "series_missing:true_market_mean",
+        "urpd_missing",
+        "brk_unavailable",
+        "urpd_missing:sth:lin200",
+    ]
+
+
+def test_status_urpd_reasons_include_snapshot_codes(tmp_path: Path):
+    path = synced(tmp_path, urpd_dir=GOLDEN, urpd_missing={("sth", "lin200")})
+    with TestClient(router_app(path, NOW)) as http:
+        day1, urpd, hour1 = http.get(f"{PREFIX}/status").json()["datasets"]
+        view = http.get(f"{PREFIX}/cost-basis").json()
+
+    assert urpd["reasons"] == ["urpd_missing:sth:lin200"]
+    assert view["reasons"] == ["urpd_missing:sth:lin200"]
+    assert [bucket["bucket"] for bucket in view["buckets"]] == [500, 1000]
+    assert day1["reasons"] == []
+    assert hour1["reasons"] == []
+
+
+def test_cost_basis_read_does_not_touch_network(tmp_path: Path):
+    synced(tmp_path, urpd_dir=GOLDEN)
+    client, seen = blocked_client()
+    app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client)
+    with TestClient(app) as http:
+        view = http.get(f"{PREFIX}/cost-basis").json()
+
+    assert view["urpd_date"] == "2026-10-16"
+    assert len(view["buckets"]) == 3
+    assert seen == []

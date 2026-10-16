@@ -3,7 +3,7 @@
 import json
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -12,9 +12,11 @@ from pydantic import AwareDatetime
 
 from ..market import Model
 from .brk import DAY1_SERIES, HOUR1_SERIES, BrkClient
+from .costbasis import StoredCostBasis
 from .cycle import Cycle
 from .levels import LINE_SERIES, ModelLine
 from .models import (
+    CostBasisView,
     CycleView,
     DatasetStatus,
     HourState,
@@ -38,6 +40,12 @@ CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unav
 LEVELS_REASONS = (
     *(f"series_missing:{name}" for name in LINE_SERIES.values()),
     "urpd_missing",
+    "brk_unavailable",
+)
+# The snapshot-level codes are stored with the result, not shared: see `StoredCostBasis.reasons`.
+COST_BASIS_SHARED = (
+    "urpd_missing",
+    *(f"series_missing:{name}" for name in LINE_SERIES.values()),
     "brk_unavailable",
 )
 
@@ -113,6 +121,12 @@ def create_router(
         derived = db().derived("levels")
         return None if derived is None else StoredLevels.model_validate_json(derived[0])
 
+    def stored_cost_basis() -> tuple[StoredCostBasis, datetime] | None:
+        derived = db().derived("costbasis")
+        if derived is None:
+            return None
+        return StoredCostBasis.model_validate_json(derived[0]), derived[1]
+
     def stored_pressure() -> tuple[Pressure, datetime] | None:
         derived = db().derived("pressure")
         return None if derived is None else (Pressure.model_validate_json(derived[0]), derived[1])
@@ -124,6 +138,7 @@ def create_router(
         reasons = stored_reasons(state)
         current_cycle = stored_cycle()
         current_levels = stored_levels()
+        current_cost_basis = stored_cost_basis()
         current_pressure = stored_pressure()
 
         days = [current_cycle.as_of] if current_cycle else []
@@ -169,7 +184,8 @@ def create_router(
                     "urpd",
                     day1_state(urpd_date, now),
                     None if urpd_date is None else day_start(urpd_date),
-                    only(reasons, URPD_REASONS),
+                    only(reasons, URPD_REASONS)
+                    + (current_cost_basis[0].reasons if current_cost_basis else []),
                     "urpd_missing",
                 ),
                 dataset(
@@ -238,6 +254,46 @@ def create_router(
             reasons=reasons,
             refreshing=refreshing,
             forming_at=forming_at(result.as_of, now),
+            brk_version=state["brk_version"],
+        )
+
+    @router.get("/cost-basis", response_model=CostBasisView)
+    def cost_basis() -> CostBasisView:
+        now = clock()
+        state = db().state()
+        reasons = only(stored_reasons(state), COST_BASIS_SHARED)
+        refreshing = state["refreshing"] == "true"
+        stored = stored_cost_basis()
+        if stored is None:
+            return CostBasisView(
+                data_state="unavailable",
+                reasons=reasons or ["brk_unavailable"],
+                refreshing=refreshing,
+                forming_at=None,
+                urpd_date=None,
+                lines_as_of=None,
+                snapshot_at=None,
+                computed_at=None,
+                buckets=[],
+                brk_version=state["brk_version"],
+            )
+        result, computed_at = stored
+        # A day is still forming when the data for it was fetched before it ended.
+        forming = [
+            day
+            for day, fetched_at in (
+                (result.urpd_date, result.snapshot_at),
+                (result.lines_as_of, computed_at),
+            )
+            if fetched_at < day_start(day + timedelta(days=1))
+        ]
+        return CostBasisView(
+            **result.model_dump(exclude={"reasons"}),
+            data_state=day1_state(min(result.urpd_date, result.lines_as_of), now),
+            reasons=[*reasons, *result.reasons],
+            refreshing=refreshing,
+            forming_at=day_start(max(forming)) if forming else None,
+            computed_at=computed_at,
             brk_version=state["brk_version"],
         )
 
