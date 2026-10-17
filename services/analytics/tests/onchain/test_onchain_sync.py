@@ -24,12 +24,13 @@ from wheelhouse_service.onchain.brk import (
     HOUR1_SERIES,
     START,
     BrkClient,
+    SeriesData,
 )
 from wheelhouse_service.onchain.costbasis import BUCKETS, MIN_PRICE, PAST_DAYS, StoredCostBasis
 from wheelhouse_service.onchain.cycle import Cycle
 from wheelhouse_service.onchain.levels import median_cost
 from wheelhouse_service.onchain.models import closed_day
-from wheelhouse_service.onchain.pressure import Pressure
+from wheelhouse_service.onchain.pressure import Pressure, lookback
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import URPD_SET, OnchainSync, closed_days
 from wheelhouse_service.rules import Rules
@@ -1754,3 +1755,90 @@ def test_v1_night_makes_no_closed_day_requests(tmp_path: Path):
     assert len(requests) == 18
     assert stored_days(store) == v1_keep(at_t(2), T)
     assert levels_of(store)["urpd_date"] == T.isoformat()
+
+
+def add_older_hours(store: OnchainStore, hours: int, at: datetime) -> None:
+    """Put `hours` hours before each stored hour1 series, each a copy of its oldest row."""
+    for name in HOUR1_SERIES:
+        stored = store.read_series(name, "hour1")
+        first = (stored[0][0] - datetime.combine(EPOCH, time(), tzinfo=UTC)) // timedelta(hours=1)
+        version = store.series_version(name, "hour1")
+        assert version is not None
+        older = SeriesData(
+            version=version,
+            index="hour1",
+            start=first - hours,
+            end=first,
+            stamp=at,
+            data=[stored[0][1]] * hours,
+        )
+        store.merge_series(name, "hour1", older, at)
+
+
+def test_o2_reaches_the_derived_pressure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def derived(rules: Rules) -> tuple[Pressure, list[int]]:
+        store = OnchainStore(tmp_path / f"{'-'.join(sorted(rules)) or 'v1'}.sqlite")
+        transport, _ = brk_transport()
+        sync = sync_for(store, transport, NOW, rules)
+        assert sync.run_once(now=NOW)
+        # The fixture holds 2600 hours; with more stored, a read is as long as it is allowed to be.
+        add_older_hours(store, 400, NOW)
+        lengths: list[int] = []
+        read = store.read_series
+
+        def spy(name: str, index: Any, tail: int | None = None) -> list[tuple[datetime, Any]]:
+            rows = read(name, index, tail)
+            if index == "hour1":
+                lengths.append(len(rows))
+            return rows
+
+        monkeypatch.setattr(store, "read_series", spy)
+        sync.derive_from_store()
+        return pressure_of(store), lengths
+
+    o2_rules: Rules = frozenset({"O2"})
+    (v1, v1_lengths), (o2, o2_lengths) = derived(frozenset()), derived(o2_rules)
+
+    assert v1_lengths == [lookback(frozenset()) + 1] * len(HOUR1_SERIES) == [2601] * 11
+    assert o2_lengths == [lookback(o2_rules) + 1] * len(HOUR1_SERIES) == [2881] * 11
+    assert (v1.rules, o2.rules) == ([], ["O2"])
+    assert v1.last_at == o2.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
+    # Each point carries its own thresholds and level under O2 only.
+    assert all(p.p95 is None and p.level is None for p in v1.loss)
+    last = o2.loss[-1]
+    assert last.p95 is not None and last.p75 is not None and last.level is not None
+    assert (o2.loss_levels.p95, o2.loss_levels.p75) == (last.p95, last.p75)
+    assert v1.loss_run is None and isinstance(o2.loss_run, int)
+
+
+def test_o1_closes_the_pressure_as_of_the_hour1_stage(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport()
+    hour1_done = datetime(2026, 10, 16, 9, 59, tzinfo=UTC)
+    done = hour1_done + timedelta(minutes=2)
+    ticks = [datetime(2026, 10, 16, 9, 12, tzinfo=UTC)]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # The hour1 requests end just before 10:00, and a slow URPD fetch crosses it.
+        if request.url.path == "/api/series/bulk" and request.url.params["index"] == "hour1":
+            ticks.append(hour1_done)
+        elif request.url.path.startswith("/api/urpd"):
+            ticks.append(done)
+        return inner.handler(request)
+
+    sync = sync_for(store, httpx.MockTransport(handler), ticks[0], frozenset({"O1", "O2"}))
+    assert sync._refresh(ticks[0], lambda: ticks[-1]) is None
+
+    pressure = pressure_of(store)
+    # 09:00 was still forming when hour1 was read, though no longer when the round ended.
+    assert (pressure.rules, pressure.last_at) == (
+        ["O1", "O2"],
+        datetime(2026, 10, 16, 9, tzinfo=UTC),
+    )
+    assert pressure.closed_at == datetime(2026, 10, 16, 8, tzinfo=UTC)
+    assert pressure.loss[-1].level is None and pressure.loss[-2].level is not None
+    # Deriving again from the store keeps the time it was computed, and so the same closed row.
+    sync.derive_from_store()
+    assert pressure_of(store) == pressure
+    derived = store.derived("pressure")
+    assert derived is not None and derived[1] == hour1_done

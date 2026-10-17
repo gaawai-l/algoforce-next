@@ -216,11 +216,16 @@ describe("on-chain seller pressure contract", () => {
       brk_version: null,
       rules: [],
       rules_pending: false,
+      closed_at: null,
+      loss_run: null,
+      share_run: null,
+      supply_run: null,
     };
     const parsed = sellerPressureSchema.parse(empty);
     expect(parsed.loss_levels).toBeNull();
     expect(parsed.xgap).toBeNull();
     expect(parsed.last_at).toBeNull();
+    expect(parsed.loss_run).toBeNull();
     const nullLevel = sellerPressureSchema.parse({
       ...pressureSample(),
       share_levels: { p95: null, p75: null, n: 0 },
@@ -230,6 +235,7 @@ describe("on-chain seller pressure contract", () => {
 
   it("accepts O3 points: null values with their marks", () => {
     const sample = pressureSample();
+    const unrolled = { p95: null, p75: null, level: null };
     const parsed = sellerPressureSchema.parse({
       ...sample,
       loss: [
@@ -239,6 +245,7 @@ describe("on-chain seller pressure contract", () => {
           sth: 0,
           no_block: true,
           gap: false,
+          ...unrolled,
         },
         {
           at: "2026-10-16T08:00:00Z",
@@ -246,10 +253,17 @@ describe("on-chain seller pressure contract", () => {
           sth: 5,
           no_block: false,
           gap: true,
+          ...unrolled,
         },
       ],
       share: [
-        { at: "2026-10-16T07:00:00Z", value: null, no_block: true, gap: false },
+        {
+          at: "2026-10-16T07:00:00Z",
+          value: null,
+          no_block: true,
+          gap: false,
+          ...unrolled,
+        },
       ],
       rules: ["O3"],
     });
@@ -264,6 +278,69 @@ describe("on-chain seller pressure contract", () => {
       sample.price,
     ])
       expect(series.some((point) => point.no_block || point.gap)).toBe(false);
+  });
+
+  it("accepts O1 and O2: each point's thresholds and level, closed_at and runs", () => {
+    const sample = pressureSample();
+    const point = (
+      at: string,
+      level: "extreme" | "warning" | "none" | null,
+    ) => ({
+      at,
+      value: 0.5,
+      no_block: false,
+      gap: false,
+      p95: 0.45,
+      p75: 0.3,
+      level,
+    });
+    const parsed = sellerPressureSchema.parse({
+      ...sample,
+      share: [
+        point("2026-10-16T07:00:00Z", "extreme"),
+        // The forming hour has thresholds from closed hours but no level yet.
+        point("2026-10-16T08:00:00Z", null),
+      ],
+      closed_at: "2026-10-16T07:00:00Z",
+      loss_run: 0,
+      share_run: 3,
+      supply_run: null,
+      rules: ["O1", "O2"],
+    });
+    expect(parsed.share[0]).toMatchObject({ p95: 0.45, level: "extreme" });
+    expect(parsed.share[1].level).toBeNull();
+    expect([parsed.loss_run, parsed.share_run, parsed.supply_run]).toEqual([
+      0,
+      3,
+      null,
+    ]);
+    expect(parsed.closed_at).toBe("2026-10-16T07:00:00Z");
+    // Under v1 none of it is set.
+    for (const series of [sample.loss, sample.share, sample.supply])
+      expect(series.some((p) => p.p95 !== null || p.level !== null)).toBe(
+        false,
+      );
+    expect(sample.closed_at).toBeNull();
+  });
+
+  it("rejects an unknown level, a fractional run and a point without thresholds", () => {
+    const sample = pressureSample();
+    const share = sample.share.slice(-1);
+    expect(
+      sellerPressureSchema.safeParse({
+        ...sample,
+        share: [{ ...share[0], level: "high" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      sellerPressureSchema.safeParse({ ...sample, loss_run: 1.5 }).success,
+    ).toBe(false);
+    expect(
+      sellerPressureSchema.safeParse({
+        ...sample,
+        share: [{ at: share[0].at, value: 0.4, no_block: false, gap: false }],
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects a point without its marks", () => {

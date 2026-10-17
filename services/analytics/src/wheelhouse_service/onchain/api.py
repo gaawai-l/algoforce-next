@@ -355,6 +355,10 @@ def create_router(
                 brk_version=state["brk_version"],
                 rules=[],
                 rules_pending=False,
+                closed_at=None,
+                loss_run=None,
+                share_run=None,
+                supply_run=None,
             )
         result, computed_at = stored
         return SellerPressureView(
@@ -377,6 +381,10 @@ def create_router(
             brk_version=state["brk_version"],
             rules=result.rules,
             rules_pending=pending("pressure", result.rules),
+            closed_at=result.closed_at,
+            loss_run=result.loss_run,
+            share_run=result.share_run,
+            supply_run=result.supply_run,
         )
 
     return router

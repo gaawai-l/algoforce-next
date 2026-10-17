@@ -1,10 +1,13 @@
 """Seller pressure from the hourly BRK series, following the rules of the original page (v1).
 
 O3 keeps the rows that v1 drops: an hour without a block carries the hour before over, and a value a
-series gap leaves unknown is null instead of costing its row.
+series gap leaves unknown is null instead of costing its row. O1 leaves the row still forming out of
+the thresholds and the current reading. O2 gives every hour its own thresholds from the hours before
+it, a level against them and, back from the current reading, a run.
 """
 
 import math
+from bisect import bisect_left, insort
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from itertools import pairwise
@@ -14,13 +17,18 @@ from pydantic import AwareDatetime, Field
 
 from ..market import Model
 from ..rules import Rule, Rules
+from ..stats import quantile_r7
 from .brk import HOUR1_SERIES
 
-# Only the most recent hours count, whatever else the store holds.
-LOOKBACK = 2600
+# Only the most recent hours count, whatever else the store holds: see `lookback`.
+V1_LOOKBACK = 2600
+# The most hours the seller pressure view sends; under O2 each of them needs a window before it.
+SHOWN_HOURS = 2160
 # Levels look at the clock hours up to and including the last row of each chart.
 WINDOW = timedelta(hours=720)
 HOUR = timedelta(hours=1)
+# Under O2 an hour with fewer values than this in the window before it has no thresholds.
+MIN_SAMPLES = 168
 # Realized flows are rounded to whole units of this many dollars.
 QUANTUM = 100
 # The widest step between kept rows that passes QC: an hour without a block drops two rows.
@@ -43,10 +51,15 @@ YOUNG_IN_PROFIT = "utxos_under_1h_old_supply_in_profit"
 Series = dict[datetime, float | None]
 # The original page's self-checks that concern seller pressure, in its order.
 QcCode = Literal["hour_gap", "intraday_legs", "sth_supply"]
+# O2: a value at or over its P95 is extreme, at or over its P75 a warning.
+Level = Literal["extreme", "warning", "none"]
 
 
 class PressureLevels(Model):
-    """P95 and P75 of one chart over the last 720 clock hours, and how many values they use."""
+    """P95 and P75 of one chart over the last 720 clock hours, and how many values they use.
+
+    Under O2 they are the start hour's: the 720 hours before it, the hour itself left out.
+    """
 
     p95: float | None
     p75: float | None
@@ -62,6 +75,12 @@ class PressureLossPoint(Model):
     # `gap`: a series the value needs is null. Both default to False, so stored payloads still load.
     no_block: bool = False
     gap: bool = False
+    # O2 only, else null; the defaults keep stored payloads readable. The thresholds come from the
+    # 720 hours before this one. The level is null when they or the value are, and under O1 while
+    # the hour is still forming.
+    p95: float | None = None
+    p75: float | None = None
+    level: Level | None = None
 
 
 class PressurePoint(Model):
@@ -71,6 +90,10 @@ class PressurePoint(Model):
     value: float | None
     no_block: bool = False
     gap: bool = False
+    # As on PressureLossPoint; always null on the price.
+    p95: float | None = None
+    p75: float | None = None
+    level: Level | None = None
 
 
 class Pressure(Model):
@@ -92,6 +115,14 @@ class Pressure(Model):
     latest_at: AwareDatetime | None = None
     # The rules it was derived under; payloads stored before rules existed read as none.
     rules: list[Rule] = []
+    # O1 only: the newest row that had closed when this was computed, the current reading. Null
+    # when none had, and without O1, where the current reading is the last row.
+    closed_at: AwareDatetime | None = None
+    # O2 only: the clock hours in a row at warning or above, back from the current reading. Null
+    # when the current reading has no level, which is not 0.
+    loss_run: int | None = None
+    share_run: int | None = None
+    supply_run: int | None = None
 
 
 class _Row(NamedTuple):
@@ -106,20 +137,18 @@ class _Row(NamedTuple):
     no_block: bool = False
 
 
-def quantile_r7(sorted_values: Sequence[float], q: float) -> float | None:
-    """The R-7 quantile of ascending values: linear between the neighbours at (n - 1) * q."""
-    n = len(sorted_values)
-    if n == 0:
-        return None
-    if q <= 0 or n < 2:
-        return sorted_values[0]
-    if q >= 1:
-        return sorted_values[-1]
-    position = (n - 1) * q
-    below = math.floor(position)
-    return sorted_values[below] + (sorted_values[below + 1] - sorted_values[below]) * (
-        position - below
-    )
+class _Thresholds(NamedTuple):
+    p95: float | None
+    p75: float | None
+    n: int
+
+
+def lookback(rules: Rules) -> int:
+    """How many of the most recent hours count, whatever else the store holds.
+
+    Under O2 the oldest hour on show needs its own window of hours before it.
+    """
+    return SHOWN_HOURS + WINDOW // HOUR if "O2" in rules else V1_LOOKBACK
 
 
 def _units(dollars: float) -> int:
@@ -143,14 +172,108 @@ def _leg(cumulative: Series, at: datetime) -> float | None:
     return max(0.0, now - before)
 
 
-def _levels(points: Sequence[tuple[datetime, float | None]]) -> PressureLevels:
-    """The window ends at the chart's last point; a null value is not in the sample."""
-    if not points:
+def _last(points: Sequence[tuple[datetime, float | None]]) -> datetime | None:
+    return points[-1][0] if points else None
+
+
+def _levels(
+    points: Sequence[tuple[datetime, float | None]], end: datetime | None
+) -> PressureLevels:
+    """The window is the 720 clock hours up to and including `end`; a null value is not in it.
+
+    v1 ends it at the chart's last point, O1 at the current reading. None means no window at all.
+    """
+    if end is None:
         return PressureLevels(p95=None, p75=None, n=0)
-    oldest = points[-1][0] - WINDOW
-    values = sorted(value for at, value in points if at > oldest and value is not None)
+    oldest = end - WINDOW
+    values = sorted(value for at, value in points if oldest < at <= end and value is not None)
     return PressureLevels(
         p95=quantile_r7(values, 0.95), p75=quantile_r7(values, 0.75), n=len(values)
+    )
+
+
+def _rolling(
+    samples: Sequence[tuple[datetime, float]], hours: Sequence[datetime]
+) -> list[_Thresholds]:
+    """O2: the thresholds of each of the ascending `hours`, from the samples in [h - 720h, h).
+
+    The samples are in time order. A sorted window slides along them, so each hour only adds the
+    samples it gains and removes those it loses. With fewer than MIN_SAMPLES both are null.
+    """
+    window: list[float] = []
+    added = removed = 0
+    out: list[_Thresholds] = []
+    for hour in hours:
+        while added < len(samples) and samples[added][0] < hour:
+            insort(window, samples[added][1])
+            added += 1
+        while removed < added and samples[removed][0] < hour - WINDOW:
+            del window[bisect_left(window, samples[removed][1])]
+            removed += 1
+        if len(window) < MIN_SAMPLES:
+            out.append(_Thresholds(None, None, len(window)))
+        else:
+            p95, p75 = quantile_r7(window, 0.95), quantile_r7(window, 0.75)
+            out.append(_Thresholds(p95, p75, len(window)))
+    return out
+
+
+def _level(value: float | None, thresholds: _Thresholds) -> Level | None:
+    if value is None or thresholds.p95 is None or thresholds.p75 is None:
+        return None
+    if value >= thresholds.p95:
+        return "extreme"
+    return "warning" if value >= thresholds.p75 else "none"
+
+
+def _run(levels: dict[datetime, Level | None], start: datetime) -> int | None:
+    """The clock hours in a row at warning or above, back from `start`; null when it has no level.
+
+    A missing row or a null value has no level, so either ends the run.
+    """
+    if levels.get(start) is None:
+        return None
+    run, at = 0, start
+    while levels.get(at) in ("warning", "extreme"):
+        run += 1
+        at -= HOUR
+    return run
+
+
+def _roll[P: (PressureLossPoint, PressurePoint)](
+    points: list[P], values: Sequence[float | None], start: datetime | None
+) -> tuple[list[P], PressureLevels, int | None]:
+    """O2: the points with their thresholds and levels, the start hour's thresholds and the run.
+
+    `values` are those of `points`. Only the points up to `start`, the current reading, are
+    samples and have a level: under O1 those after it are still forming, and with `start` None no
+    row has closed.
+    """
+
+    def counted(at: datetime) -> bool:
+        return start is not None and at <= start
+
+    samples = [
+        (point.at, value)
+        for point, value in zip(points, values, strict=True)
+        if value is not None and counted(point.at)
+    ]
+    hours = sorted({point.at for point in points} | ({start} if start is not None else set()))
+    thresholds = dict(zip(hours, _rolling(samples, hours), strict=True))
+    levels: dict[datetime, Level | None] = {}
+    rolled: list[P] = []
+    for point, value in zip(points, values, strict=True):
+        own = thresholds[point.at]
+        level = _level(value, own) if counted(point.at) else None
+        levels[point.at] = level
+        rolled.append(point.model_copy(update={"p95": own.p95, "p75": own.p75, "level": level}))
+    if start is None:
+        return rolled, PressureLevels(p95=None, p75=None, n=0), None
+    current = thresholds[start]
+    return (
+        rolled,
+        PressureLevels(p95=current.p95, p75=current.p75, n=current.n),
+        _run(levels, start),
     )
 
 
@@ -185,7 +308,7 @@ def _less(leg: float | None, young: float) -> float | None:
 
 
 def seller_pressure(
-    rows: dict[str, list[tuple[datetime, float | None]]], *, rules: Rules
+    rows: dict[str, list[tuple[datetime, float | None]]], *, rules: Rules, computed_at: datetime
 ) -> Pressure | None:
     """The three seller pressure charts, or None when no row can be kept.
 
@@ -194,12 +317,15 @@ def seller_pressure(
     kept only when the price and the four realized cumulatives are known for it and for the hour
     before. Under O3 every hour after the first is kept: an hour without a block carries the hour
     before over, and what a null leaves unknown is null and marked as a gap.
+
+    `computed_at` is when the rows were read: under O1 a row has closed once its hour is over by
+    then. v1 does not use it.
     """
-    o3 = "O3" in rules
+    o1, o2, o3 = "O1" in rules, "O2" in rules, "O3" in rules
     stamps = [at for name in HOUR1_SERIES for at, _ in rows[name]]
     if not stamps:
         return None
-    first = max(stamps) - HOUR * (LOOKBACK - 1)
+    first = max(stamps) - HOUR * (lookback(rules) - 1)
     series: dict[str, Series] = {
         name: {at: value for at, value in rows[name] if at >= first} for name in HOUR1_SERIES
     }
@@ -303,6 +429,24 @@ def seller_pressure(
         elif o3:
             supply.append(PressurePoint(at=r.at, value=None, no_block=r.no_block))
 
+    # The current reading: under O1 the newest closed row, which may be none; else the last row.
+    closed_at = (
+        next((r.at for r in reversed(kept) if computed_at >= r.at + HOUR), None) if o1 else None
+    )
+    start = closed_at if o1 else kept[-1].at
+    loss_run = share_run = supply_run = None
+    if o2:
+        loss, loss_levels, loss_run = _roll(loss, [value for _, value in loss_totals], start)
+        share, share_levels, share_run = _roll(share, [p.value for p in share], start)
+        supply, supply_levels, supply_run = _roll(supply, [p.value for p in supply], start)
+    else:
+        share_values = [(p.at, p.value) for p in share]
+        supply_values = [(p.at, p.value) for p in supply]
+        # v1's window ends at each chart's last point, O1's at the current reading.
+        loss_levels = _levels(loss_totals, start if o1 else _last(loss_totals))
+        share_levels = _levels(share_values, start if o1 else _last(share_values))
+        supply_levels = _levels(supply_values, start if o1 else _last(supply_values))
+
     qc: list[QcCode] = []
     max_step = O3_MAX_STEP if o3 else MAX_STEP
     if any(b.at - a.at > max_step for a, b in pairwise(kept)):
@@ -327,11 +471,15 @@ def seller_pressure(
             PressurePoint(at=r.at, value=r.price, no_block=r.no_block, gap=r.price is None)
             for r in kept
         ],
-        loss_levels=_levels(loss_totals),
-        share_levels=_levels([(p.at, p.value) for p in share]),
-        supply_levels=_levels([(p.at, p.value) for p in supply]),
+        loss_levels=loss_levels,
+        share_levels=share_levels,
+        supply_levels=supply_levels,
         kept=len(kept),
         xgap=xgap,
         qc=qc,
         latest_at=max([*priced, kept[-1].at]),
+        closed_at=closed_at,
+        loss_run=loss_run,
+        share_run=share_run,
+        supply_run=supply_run,
     )

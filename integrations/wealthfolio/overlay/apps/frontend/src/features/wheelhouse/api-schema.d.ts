@@ -1953,6 +1953,8 @@ export interface components {
         /**
          * PressureLevels
          * @description P95 and P75 of one chart over the last 720 clock hours, and how many values they use.
+         *
+         *     Under O2 they are the start hour's: the 720 hours before it, the hour itself left out.
          */
         PressureLevels: {
             /** P95 */
@@ -1983,6 +1985,12 @@ export interface components {
              * @default false
              */
             gap: boolean;
+            /** P95 */
+            p95: number | null;
+            /** P75 */
+            p75: number | null;
+            /** Level */
+            level: ("extreme" | "warning" | "none") | null;
         };
         /** PressurePoint */
         PressurePoint: {
@@ -2003,6 +2011,12 @@ export interface components {
              * @default false
              */
             gap: boolean;
+            /** P95 */
+            p95: number | null;
+            /** P75 */
+            p75: number | null;
+            /** Level */
+            level: ("extreme" | "warning" | "none") | null;
         };
         /** PrevCountdown */
         PrevCountdown: {
@@ -2277,6 +2291,14 @@ export interface components {
             rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
             /** Rules Pending */
             rules_pending: boolean;
+            /** Closed At */
+            closed_at: string | null;
+            /** Loss Run */
+            loss_run: number | null;
+            /** Share Run */
+            share_run: number | null;
+            /** Supply Run */
+            supply_run: number | null;
         };
         /** ServiceStatus */
         ServiceStatus: {

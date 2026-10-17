@@ -500,10 +500,37 @@ def test_pressure_view_after_sync(tmp_path: Path):
     assert view["xgap"] == stored.xgap
     assert view["qc"] == stored.qc == []
     assert datetime.fromisoformat(view["loss"][-1]["at"]) == LAST_ROW
-    assert set(view["loss"][0]) == {"at", "lth", "sth", "no_block", "gap"}
-    # Under v1 no point is without a block or behind a gap.
+    assert set(view["loss"][0]) == {"at", "lth", "sth", "no_block", "gap", "p95", "p75", "level"}
+    # Under v1 no point is without a block or behind a gap, and none has thresholds of its own.
     for group in ("loss", "share", "supply", "price"):
         assert not any(point["no_block"] or point["gap"] for point in view[group])
+        assert not any(point["p95"] or point["p75"] or point["level"] for point in view[group])
+    assert view["closed_at"] is None
+    assert (view["loss_run"], view["share_run"], view["supply_run"]) == (None, None, None)
+
+
+def test_pressure_view_passes_o1_o2_through(tmp_path: Path):
+    rules: Rules = frozenset({"O1", "O2"})
+    path = synced(tmp_path, at=HOUR1_SYNC, rules=rules)
+    with TestClient(
+        router_app(path, datetime(2026, 10, 16, 9, 30, tzinfo=UTC), rules=rules)
+    ) as http:
+        view = http.get(f"{PREFIX}/seller-pressure").json()
+    stored = Pressure.model_validate_json((OnchainStore(path).derived("pressure") or ("", NOW))[0])
+
+    assert (view["rules"], view["rules_pending"]) == (["O1", "O2"], False)
+    # 09:00 is still forming at 09:12: it is drawn, and the current reading is 08:00.
+    assert datetime.fromisoformat(view["forming_at"]) == LAST_ROW
+    assert datetime.fromisoformat(view["closed_at"]) == LAST_ROW - timedelta(hours=1)
+    assert view["loss"][-1]["level"] is None and view["loss"][-1]["p95"] is not None
+    assert view["loss"][-2]["level"] in {"extreme", "warning", "none"}
+    for group in ("loss", "share", "supply"):
+        assert view[group] == [
+            point.model_dump(mode="json") for point in getattr(stored, group)[-PAYLOAD_POINTS:]
+        ]
+        assert view[f"{group}_run"] == getattr(stored, f"{group}_run")
+        assert view[f"{group}_levels"] == getattr(stored, f"{group}_levels").model_dump()
+    assert isinstance(view["loss_run"], int)
 
 
 def test_pressure_view_freshness_follows_the_clock(tmp_path: Path):
@@ -596,7 +623,7 @@ def test_no_block_hour_does_not_delay_the_pressure_view(tmp_path: Path):
         name: [(at, None if at == gap else value) for at, value in store.read_series(name, "hour1")]
         for name in HOUR1_SERIES
     }
-    pressure = seller_pressure(rows, rules=frozenset())
+    pressure = seller_pressure(rows, rules=frozenset(), computed_at=HOUR1_SYNC)
     assert pressure is not None
     assert pressure.latest_at == LAST_ROW
     assert pressure.last_at == LAST_ROW - timedelta(hours=2)
@@ -624,6 +651,8 @@ def test_hour1_outage_keeps_the_pressure_view_unavailable_with_a_reason(tmp_path
     assert pressure["reasons"] == ["brk_unavailable"]
     assert pressure["loss"] == []
     assert pressure["loss_levels"] is None
+    assert pressure["closed_at"] is None
+    assert (pressure["loss_run"], pressure["share_run"], pressure["supply_run"]) == (None,) * 3
     # day1 was fine, and the hour1 outage does not reach it.
     assert cycle["data_state"] == "fresh"
     assert cycle["reasons"] == []

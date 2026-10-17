@@ -34,7 +34,7 @@ from .costbasis import (
 from .cycle import classify
 from .levels import ModelLine, last_complete, model_lines
 from .models import closed_day, final_from
-from .pressure import LOOKBACK, seller_pressure
+from .pressure import lookback, seller_pressure
 from .store import OnchainStore
 
 logger = logging.getLogger("wheelhouse.onchain")
@@ -455,14 +455,17 @@ class OnchainSync:
         pressure = None
         # Only the rules the payload records are applied.
         rules = rules_for_view("pressure", self.rules)
+        applied = frozenset(rules)
         if not hour1_missing:
             # An absent series is not a zero: with any of them gone there is no pressure at all.
+            # Under O1 a row has closed once its hour was over when hour1 was read.
             pressure = seller_pressure(
                 {
-                    name: self.store.read_series(name, "hour1", tail=LOOKBACK + 1)
+                    name: self.store.read_series(name, "hour1", tail=lookback(applied) + 1)
                     for name in HOUR1_SERIES
                 },
-                rules=frozenset(rules),
+                rules=applied,
+                computed_at=hour1_at,
             )
         if pressure is None:
             self.store.clear_derived("pressure")

@@ -151,3 +151,10 @@ class SellerPressureView(Model):
     brk_version: str | None
     rules: list[Rule]
     rules_pending: bool
+    # O1: the current reading, the newest row closed when this was computed. Null without O1,
+    # where the current reading is the last row, when no row had closed, and when there is no data.
+    closed_at: AwareDatetime | None
+    # O2: the hours in a row at warning or above, back from the current reading; null otherwise.
+    loss_run: int | None
+    share_run: int | None
+    supply_run: int | None

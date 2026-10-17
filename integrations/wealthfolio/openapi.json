@@ -5636,7 +5636,7 @@
           "n"
         ],
         "title": "PressureLevels",
-        "description": "P95 and P75 of one chart over the last 720 clock hours, and how many values they use."
+        "description": "P95 and P75 of one chart over the last 720 clock hours, and how many values they use.\n\nUnder O2 they are the start hour's: the 720 hours before it, the hour itself left out."
       },
       "PressureLossPoint": {
         "properties": {
@@ -5676,6 +5676,44 @@
             "type": "boolean",
             "title": "Gap",
             "default": false
+          },
+          "p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95"
+          },
+          "p75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P75"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "extreme",
+                  "warning",
+                  "none"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
           }
         },
         "additionalProperties": false,
@@ -5685,7 +5723,10 @@
           "lth",
           "sth",
           "no_block",
-          "gap"
+          "gap",
+          "p95",
+          "p75",
+          "level"
         ],
         "title": "PressureLossPoint"
       },
@@ -5716,6 +5757,44 @@
             "type": "boolean",
             "title": "Gap",
             "default": false
+          },
+          "p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95"
+          },
+          "p75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P75"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "extreme",
+                  "warning",
+                  "none"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
           }
         },
         "additionalProperties": false,
@@ -5724,7 +5803,10 @@
           "at",
           "value",
           "no_block",
-          "gap"
+          "gap",
+          "p95",
+          "p75",
+          "level"
         ],
         "title": "PressurePoint"
       },
@@ -6558,6 +6640,51 @@
           "rules_pending": {
             "type": "boolean",
             "title": "Rules Pending"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "loss_run": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loss Run"
+          },
+          "share_run": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Run"
+          },
+          "supply_run": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supply Run"
           }
         },
         "additionalProperties": false,
@@ -6579,7 +6706,11 @@
           "qc",
           "brk_version",
           "rules",
-          "rules_pending"
+          "rules_pending",
+          "closed_at",
+          "loss_run",
+          "share_run",
+          "supply_run"
         ],
         "title": "SellerPressureView"
       },

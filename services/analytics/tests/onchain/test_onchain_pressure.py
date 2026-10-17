@@ -5,12 +5,15 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from onchain_fixture import load_series
 
+from wheelhouse_service import stats
 from wheelhouse_service.onchain.brk import EPOCH, HOUR1_SERIES
 from wheelhouse_service.onchain.pressure import (
-    LOOKBACK,
     WINDOW,
     Pressure,
+    PressureLevels,
     PressureLossPoint,
+    PressurePoint,
+    lookback,
     quantile_r7,
     seller_pressure,
 )
@@ -18,7 +21,11 @@ from wheelhouse_service.rules import Rules
 
 HOUR = timedelta(hours=1)
 V1: Rules = frozenset()
+O1: Rules = frozenset({"O1"})
+O2: Rules = frozenset({"O2"})
 O3: Rules = frozenset({"O3"})
+# Long after every row of these tests has closed: under v1 the time of computation plays no part.
+LATER = datetime(2027, 1, 1, tzinfo=UTC)
 Rows = dict[str, list[tuple[datetime, float | None]]]
 Columns = dict[str, list[float | None]]
 
@@ -96,8 +103,8 @@ def at(hour: int) -> datetime:
     return BASE + HOUR * hour
 
 
-def computed(cols: Columns, rules: Rules = V1) -> Pressure:
-    result = seller_pressure(rows_of(cols), rules=rules)
+def computed(cols: Columns, rules: Rules = V1, computed_at: datetime = LATER) -> Pressure:
+    result = seller_pressure(rows_of(cols), rules=rules, computed_at=computed_at)
     assert result is not None
     return result
 
@@ -135,8 +142,12 @@ def fixture_rows(last: datetime) -> Rows:
     return rows
 
 
+# The original page's parity run read the rows up to 08:00.
+PARITY_LAST = datetime(2026, 10, 16, 8, tzinfo=UTC)
+
+
 def test_parity_with_original_page_at_0800():
-    result = seller_pressure(fixture_rows(datetime(2026, 10, 16, 8, tzinfo=UTC)), rules=V1)
+    result = seller_pressure(fixture_rows(PARITY_LAST), rules=V1, computed_at=LATER)
     assert result is not None
     assert result.last_at == datetime(2026, 10, 16, 8, tzinfo=UTC)
     assert result.kept == 2576
@@ -165,15 +176,15 @@ def test_parity_with_original_page_at_0800():
 
 
 def test_qc_passes_on_the_parity_input():
-    result = seller_pressure(fixture_rows(datetime(2026, 10, 16, 8, tzinfo=UTC)), rules=V1)
+    result = seller_pressure(fixture_rows(PARITY_LAST), rules=V1, computed_at=LATER)
     assert result is not None
     assert result.qc == []
 
 
 def test_lookback_ignores_rows_beyond_2600():
     full = fixture_rows(datetime(2026, 10, 16, 9, tzinfo=UTC))
-    assert all(len(points) == LOOKBACK for points in full.values())
-    baseline = seller_pressure(full, rules=V1)
+    assert all(len(points) == lookback(V1) for points in full.values())
+    baseline = seller_pressure(full, rules=V1, computed_at=LATER)
     assert baseline is not None
     first = full[PRICE][0][0]
     # 500 older hours whose cumulative values would turn the oldest kept row into a huge loss if the
@@ -183,7 +194,7 @@ def test_lookback_ignores_rows_beyond_2600():
         for name in HOUR1_SERIES
     }
     extended = {name: older[name] + full[name] for name in HOUR1_SERIES}
-    assert seller_pressure(extended, rules=V1) == baseline
+    assert seller_pressure(extended, rules=V1, computed_at=LATER) == baseline
 
 
 def test_no_block_hour_drops_itself_and_next():
@@ -354,7 +365,7 @@ def test_series_are_aligned_by_time_not_by_position():
     short[PRICE] = short[PRICE][3:]
     nulled = columns(10)
     nulled[PRICE][:3] = [None] * 3
-    assert seller_pressure(short, rules=V1) == computed(nulled)
+    assert seller_pressure(short, rules=V1, computed_at=LATER) == computed(nulled)
 
 
 def test_row_missing_from_one_series_counts_as_null():
@@ -363,17 +374,18 @@ def test_row_missing_from_one_series_counts_as_null():
     gapped[STH_LOSS] = [point for point in gapped[STH_LOSS] if point[0] != at(4)]
     nulled = columns(10)
     nulled[STH_LOSS][4] = None
-    assert seller_pressure(gapped, rules=V1) == computed(nulled)
+    assert seller_pressure(gapped, rules=V1, computed_at=LATER) == computed(nulled)
     assert computed(nulled).kept == 9 - 2
 
 
 def test_empty_when_nothing_can_be_kept():
-    assert seller_pressure({name: [] for name in HOUR1_SERIES}, rules=V1) is None
+    empty: Rows = {name: [] for name in HOUR1_SERIES}
+    assert seller_pressure(empty, rules=V1, computed_at=LATER) is None
     cols = columns(5)
     for hour in range(5):
         cols[PRICE][hour] = None
-    assert seller_pressure(rows_of(cols), rules=V1) is None
-    assert seller_pressure(rows_of(columns(1)), rules=V1) is None
+    assert seller_pressure(rows_of(cols), rules=V1, computed_at=LATER) is None
+    assert seller_pressure(rows_of(columns(1)), rules=V1, computed_at=LATER) is None
 
 
 def test_qc_hour_gap_fails_only_on_a_step_over_three_hours():
@@ -467,7 +479,7 @@ def test_plain_hour_values():
 
 
 def test_constants_match_the_original_page():
-    assert LOOKBACK == 2600
+    assert lookback(V1) == 2600
     assert WINDOW == timedelta(hours=720)
 
 
@@ -482,9 +494,9 @@ def test_payload_stored_before_o3_marks_still_loads():
 
 
 def test_o3_keeps_every_row_of_the_parity_input():
-    rows = fixture_rows(datetime(2026, 10, 16, 8, tzinfo=UTC))
-    v1 = seller_pressure(rows, rules=V1)
-    result = seller_pressure(rows, rules=O3)
+    rows = fixture_rows(PARITY_LAST)
+    v1 = seller_pressure(rows, rules=V1, computed_at=LATER)
+    result = seller_pressure(rows, rules=O3, computed_at=LATER)
     assert v1 is not None and result is not None
     # The 11 hours without a block and the 11 after them are kept: every hour but the first.
     assert result.kept == 2598
@@ -627,15 +639,15 @@ def test_o3_keeps_the_v1_handling_of_an_under_1h_null():
 
 @pytest.mark.parametrize("hours", [1, 2])
 def test_o3_drops_hours_without_a_block_that_open_the_window(hours: int):
-    # The window holds the last LOOKBACK hours, so with 5 more it opens at hour 5.
-    cols = columns(LOOKBACK + 5)
+    # The window holds the last lookback(O3) hours, so with 5 more it opens at hour 5.
+    cols = columns(lookback(O3) + 5)
     for hour in range(5, 5 + hours):
         no_block_hour(cols, hour)
     result = computed(cols, O3)
     # Nothing can be carried over into the window: the first hour with a block opens it and only
     # serves as the previous row.
     assert result.loss[0].at == at(5 + hours + 1)
-    assert result.kept == LOOKBACK - hours - 1
+    assert result.kept == lookback(O3) - hours - 1
     assert flagged(result) == []
     assert result.loss[0] == PressureLossPoint(at=at(5 + hours + 1), lth=1_000.0, sth=2_500.0)
 
@@ -676,8 +688,8 @@ def test_o3_qc_hour_gap_fails_on_any_missing_hour():
     # An hour BRK does not have at all leaves a two-hour step, which v1's three hours let pass.
     rows = rows_of(columns(12))
     rows = {name: [point for point in points if point[0] != at(5)] for name, points in rows.items()}
-    v1 = seller_pressure(rows, rules=V1)
-    result = seller_pressure(rows, rules=O3)
+    v1 = seller_pressure(rows, rules=V1, computed_at=LATER)
+    result = seller_pressure(rows, rules=O3, computed_at=LATER)
     assert v1 is not None and result is not None
     assert v1.qc == []
     # The hour after has nothing to difference against, so its flows are a gap; its under-1h legs
@@ -694,10 +706,287 @@ def test_o3_hour_without_a_block_after_a_missing_hour_carries_nothing():
     rows = {name: [point for point in points if point[0] != at(4)] for name, points in rows.items()}
     for name in HOUR1_SERIES:
         rows[name] = [(time, None if time == at(5) else value) for time, value in rows[name]]
-    result = seller_pressure(rows, rules=O3)
+    result = seller_pressure(rows, rules=O3, computed_at=LATER)
     assert result is not None
     loss = {p.at: p for p in result.loss}
     # Still no block, so no flows; but its levels and the next hour's flows are unknown.
     assert loss[at(5)] == PressureLossPoint(at=at(5), lth=0.0, sth=0.0, no_block=True)
     assert {p.at: (p.value, p.gap) for p in result.price}[at(5)] == (None, True)
     assert (loss[at(6)].lth, loss[at(6)].sth, loss[at(6)].gap) == (None, None, True)
+
+
+def test_quantile_r7_is_the_shared_one():
+    assert quantile_r7 is stats.quantile_r7
+
+
+# O1 and O2: rolling thresholds from closed hours.
+O1_O2: Rules = frozenset({"O1", "O2"})
+O2_O3: Rules = frozenset({"O2", "O3"})
+Point = PressureLossPoint | PressurePoint
+
+
+def charts_of(result: Pressure) -> dict[str, list[Point]]:
+    return {"loss": [*result.loss], "share": [*result.share], "supply": [*result.supply]}
+
+
+def value_of(point: Point) -> float | None:
+    if isinstance(point, PressureLossPoint):
+        return None if point.lth is None or point.sth is None else point.lth + point.sth
+    return point.value
+
+
+def varied(count: int, overrides: dict[int, float] | None = None) -> Columns:
+    """Chart 1 cycles through 100 values, so the thresholds are not flat; chart 2 follows it.
+
+    `overrides` sets the LTH loss added in given hours instead.
+    """
+    special = overrides or {}
+    return columns(count, {LTH_LOSS: lambda h: special.get(h, 100.0 * (h % 100))})
+
+
+# The last five hours: the lowest value, one between P75 and P95, then three far above P95.
+TAIL = {395: 0.0, 396: 8_000.0, 397: 1e6, 398: 1e6, 399: 1e6}
+
+
+def test_o2_looks_back_the_widest_span_and_one_window_before_it():
+    assert lookback(O2) == lookback(frozenset({"O1", "O2", "O3"})) == 2160 + 720
+    assert lookback(V1) == lookback(O1) == lookback(O3) == 2600
+
+
+@pytest.mark.parametrize("rules", [V1, O1, O3, frozenset({"O1", "O3"})])
+def test_without_o2_no_point_has_rolling_thresholds(rules: Rules):
+    result = seller_pressure(fixture_rows(PARITY_LAST), rules=rules, computed_at=LATER)
+    assert result is not None
+    for points in (result.loss, result.share, result.supply, result.price):
+        assert all(p.p95 is None and p.p75 is None and p.level is None for p in points)
+    assert (result.loss_run, result.share_run, result.supply_run) == (None, None, None)
+    # closed_at is O1's: under v1 there is no such reading.
+    assert result.closed_at == (result.last_at if "O1" in rules else None)
+
+
+def cut_before(rows: Rows, hour: datetime, rules: Rules) -> Pressure:
+    """The fixed-window computation on the rows before `hour` only."""
+    cut = {name: [(t, v) for t, v in points if t < hour] for name, points in rows.items()}
+    result = seller_pressure(cut, rules=rules, computed_at=LATER)
+    assert result is not None
+    return result
+
+
+@pytest.mark.parametrize(("rolling", "fixed"), [(O2, V1), (O2_O3, O3)])
+def test_o2_thresholds_are_v1_on_the_rows_before_each_hour(rolling: Rules, fixed: Rules):
+    rows = fixture_rows(PARITY_LAST)
+    result = seller_pressure(rows, rules=rolling, computed_at=LATER)
+    assert result is not None
+    charts = charts_of(result)
+    first = next(i for i, p in enumerate(result.loss) if p.p95 is not None)
+    picks = {*range(127, len(result.loss), 127), first - 1, first, len(result.loss) - 1}
+    checked = unset = 0
+    for hour in sorted(result.loss[i].at for i in picks):
+        fixed_result = cut_before(rows, hour, fixed)
+        for name, points in charts.items():
+            by_time = {p.at: p for p in points}
+            # v1's window ends at the chart's last point; it is O2's when that is the hour before.
+            if hour not in by_time or hour - HOUR not in by_time:
+                continue
+            levels: PressureLevels = getattr(fixed_result, f"{name}_levels")
+            point = by_time[hour]
+            if levels.n >= 168:
+                assert (point.p95, point.p75) == (levels.p95, levels.p75)
+                checked += 1
+            else:
+                assert (point.p95, point.p75, point.level) == (None, None, None)
+                unset += 1
+    assert checked > 40
+    assert unset > 0
+
+
+def test_o2_first_168_hours_have_no_thresholds():
+    result = computed(varied(400), O2)
+    for points in charts_of(result).values():
+        # Hour h has the h - 1 kept hours before it: hour 0 only serves as the previous row.
+        early = [p for p in points if p.at <= at(168)]
+        later = [p for p in points if p.at > at(168)]
+        assert len(early) == 168
+        assert all(p.p95 is None and p.p75 is None and p.level is None for p in early)
+        assert all(p.p95 is not None and p.p75 is not None and p.level for p in later)
+
+
+def test_o2_hours_after_an_outage_wait_for_168_values():
+    rows = {
+        name: [(t, v) for t, v in points if not at(400) <= t <= at(1000)]
+        for name, points in rows_of(varied(1400)).items()
+    }
+    result = seller_pressure(rows, rules=O2, computed_at=LATER)
+    assert result is not None
+    loss = {p.at: p for p in result.loss}
+    assert loss[at(399)].p95 is not None
+    # Hour 1001 has no previous row, so 1002 is the first after the outage. Its window still holds
+    # hours 282-399: 118 values, and each new one replaces one sliding out until 1120.
+    assert at(1001) not in loss
+    assert all(loss[at(h)].p95 is None and loss[at(h)].level is None for h in range(1002, 1170))
+    assert loss[at(1170)].p95 is not None
+    assert result.loss_levels.n == 1399 - 1002
+
+
+def test_o2_a_later_extreme_leaves_earlier_thresholds_alone():
+    before = computed(varied(500), O2)
+    after = computed(varied(500, {300: 1e9}), O2)
+    for name, points in charts_of(after).items():
+        for old, new in zip(charts_of(before)[name], points, strict=True):
+            if new.at <= at(300):
+                assert (new.p95, new.p75) == (old.p95, old.p75)
+    assert {p.at: p.level for p in after.loss}[at(300)] == "extreme"
+    # Only the hours after it see it.
+    assert [p.p95 for p in after.loss if p.at > at(300)] != [
+        p.p95 for p in before.loss if p.at > at(300)
+    ]
+
+
+def test_o2_level_compares_each_value_with_its_own_thresholds():
+    result = computed(varied(400, TAIL), O2)
+    loss = {p.at: p for p in result.loss}
+    assert [loss[at(h)].level for h in TAIL] == ["none", "warning", "extreme", "extreme", "extreme"]
+    warning = loss[at(396)]
+    assert warning.p95 is not None and warning.p75 is not None
+    assert warning.p75 <= (value_of(warning) or 0) < warning.p95
+    for points in charts_of(result).values():
+        for point in points:
+            value = value_of(point)
+            if point.p95 is None or point.p75 is None or value is None:
+                assert point.level is None
+            else:
+                expected = (
+                    "extreme" if value >= point.p95 else "warning" if value >= point.p75 else "none"
+                )
+                assert point.level == expected
+
+
+def test_o2_a_value_at_p95_is_extreme():
+    # Every hour is the same, so P95 = P75 = the value: each hour with thresholds is extreme, and
+    # the run reaches back to the first of them.
+    result = computed(columns(200), O2)
+    assert result.loss[-1].p95 == PLAIN_LOSS
+    assert {p.level for p in result.loss if p.at > at(168)} == {"extreme"}
+    assert result.loss_run == 199 - 168
+
+
+def test_o2_run_counts_back_from_the_last_row():
+    result = computed(varied(400, TAIL), O2)
+    # 399, 398 and 397 are extreme and 396 a warning; 395 is not.
+    assert result.loss_run == 4
+    calm = computed(varied(400, {399: 0.0}), O2)
+    assert {p.at: p.level for p in calm.loss}[at(399)] == "none"
+    assert calm.loss_run == 0
+
+
+def test_o2_run_stops_at_a_missing_row():
+    cols = varied(400, TAIL)
+    # v1 drops the hour without a block and the hour after it.
+    no_block(cols, 397)
+    result = computed(cols, O2)
+    assert {at(397), at(398)}.isdisjoint(p.at for p in result.loss)
+    assert result.loss_run == 1
+
+
+def test_o2_run_stops_at_a_null_point():
+    cols = varied(400, TAIL)
+    # Under O3 chart 1 is null in hours 397 and 398, which still have thresholds.
+    cols[STH_LOSS][397] = None
+    result = computed(cols, O2_O3)
+    loss = {p.at: p for p in result.loss}
+    assert (loss[at(398)].sth, loss[at(398)].level) == (None, None)
+    assert loss[at(398)].p95 is not None
+    assert result.loss_run == 1
+
+
+def test_o2_run_is_null_when_the_start_has_no_level():
+    cols = varied(400, TAIL)
+    cols[STH_LOSS][399] = None
+    result = computed(cols, O2_O3)
+    assert result.loss[-1].level is None
+    assert result.loss_run is None
+    # Too few values before the last row: no thresholds, no level and no run, never 0.
+    short = computed(columns(100), O2)
+    assert (short.loss_run, short.share_run, short.supply_run) == (None, None, None)
+    assert short.loss_levels == PressureLevels(p95=None, p75=None, n=98)
+
+
+def test_o2_levels_are_the_thresholds_of_the_start_hour():
+    result = computed(varied(400, TAIL), O2)
+    # The hours before 399 are 1-398.
+    for name, points in charts_of(result).items():
+        last = points[-1]
+        assert getattr(result, f"{name}_levels") == PressureLevels(
+            p95=last.p95, p75=last.p75, n=398
+        )
+    v1 = computed(varied(400, TAIL))
+    # v1's window holds the last row itself, and so its extreme value.
+    assert v1.loss_levels != result.loss_levels
+
+
+FORMING = at(399) + timedelta(minutes=30)
+
+
+def test_o1_a_forming_row_is_drawn_but_not_counted():
+    cols = varied(400, TAIL)
+    result = computed(cols, O1, FORMING)
+    assert result.closed_at == at(398)
+    assert result.last_at == result.loss[-1].at == result.price[-1].at == at(399)
+    # The window ends at closed_at: what v1 gives without the forming row.
+    closed = cut_before(rows_of(cols), at(399), V1)
+    assert (result.loss_levels, result.share_levels, result.supply_levels) == (
+        closed.loss_levels,
+        closed.share_levels,
+        closed.supply_levels,
+    )
+    # v1 counts the forming row's extreme value.
+    assert computed(cols, V1, FORMING).loss_levels != result.loss_levels
+
+
+def test_o1_o2_a_forming_row_has_no_level_and_does_not_start_the_run():
+    cols = varied(400, TAIL)
+    result = computed(cols, O1_O2, FORMING)
+    assert result.closed_at == at(398)
+    for name, points in charts_of(result).items():
+        forming, current = points[-1], points[-2]
+        assert forming.at == at(399)
+        # Its thresholds come from closed hours; only its level waits for the hour to close.
+        assert forming.p95 is not None and forming.level is None
+        assert current.at == at(398) and current.level is not None
+        # The current reading is closed_at's: its thresholds, over hours 1-397.
+        assert getattr(result, f"{name}_levels") == PressureLevels(
+            p95=current.p95, p75=current.p75, n=397
+        )
+    # 398, 397 and 396; 399 is not counted.
+    assert result.loss_run == 3
+    closed = computed(cols, O1_O2, at(399) + HOUR)
+    assert (closed.closed_at, closed.loss[-1].level, closed.loss_run) == (at(399), "extreme", 4)
+
+
+def test_o1_closed_at_needs_the_whole_hour():
+    cols = columns(10)
+    assert computed(cols, O1, at(9) + HOUR).closed_at == at(9)
+    assert computed(cols, O1, at(9) + HOUR - timedelta(seconds=1)).closed_at == at(8)
+
+
+def test_o1_one_forming_row_has_no_closed_at():
+    cols = columns(2)
+    computed_at = at(1) + timedelta(minutes=12)
+    empty = PressureLevels(p95=None, p75=None, n=0)
+    for rules in (O1, O1_O2):
+        result = computed(cols, rules, computed_at)
+        assert result.closed_at is None
+        assert [p.at for p in result.loss] == [at(1)]
+        assert result.loss[0].level is None
+        assert (result.loss_levels, result.share_levels, result.supply_levels) == (empty,) * 3
+        assert (result.loss_run, result.share_run, result.supply_run) == (None, None, None)
+
+
+def test_payload_stored_before_o1_o2_still_loads():
+    stored = computed(columns(5)).model_dump(mode="json")
+    for name in ("loss", "share", "supply", "price"):
+        for point in stored[name]:
+            del point["p95"], point["p75"], point["level"]
+    for name in ("closed_at", "loss_run", "share_run", "supply_run"):
+        del stored[name]
+    assert Pressure.model_validate(stored) == computed(columns(5))

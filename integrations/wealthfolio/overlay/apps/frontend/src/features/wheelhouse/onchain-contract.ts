@@ -69,10 +69,18 @@ const pressureLevels = z.object({
 // O3 marks an hour without a block (flows 0, levels carried over) and a value a series gap left
 // unknown, which is null and never 0. Under v1 no value is null and both marks are false.
 const pressureMarks = { no_block: z.boolean(), gap: z.boolean() };
+// O2 gives each point its hour's own thresholds and a level against them. Null under v1 and on
+// the price; a level is also null while its thresholds or value are, or its hour is forming (O1).
+const pressureRolling = {
+  p95: z.number().nullable(),
+  p75: z.number().nullable(),
+  level: z.enum(["extreme", "warning", "none"]).nullable(),
+};
 const pressurePoint = z.object({
   at: time,
   value: z.number().nullable(),
   ...pressureMarks,
+  ...pressureRolling,
 });
 
 export const levelsViewSchema: z.ZodType<LevelsView, z.ZodTypeDef, unknown> =
@@ -180,6 +188,7 @@ export const sellerPressureSchema: z.ZodType<
       lth: z.number().nullable(),
       sth: z.number().nullable(),
       ...pressureMarks,
+      ...pressureRolling,
     }),
   ),
   share: z.array(pressurePoint),
@@ -193,6 +202,12 @@ export const sellerPressureSchema: z.ZodType<
   brk_version: z.string().nullable(),
   rules,
   rules_pending: z.boolean(),
+  // O1's current reading, the newest closed row; null under v1 and when none has closed.
+  closed_at: time.nullable(),
+  // O2's hours in a row at warning or above, back from the current reading; never a stand-in 0.
+  loss_run: z.number().int().nullable(),
+  share_run: z.number().int().nullable(),
+  supply_run: z.number().int().nullable(),
 });
 
 // Hand-written payloads shared by contract and view tests. The cycle components and the
@@ -1017,6 +1032,14 @@ export const costBasisSample: CostBasisView = {
 const PRESSURE_POINTS = 2200;
 const HOUR_MS = 3_600_000;
 const PRESSURE_LAST_AT = Date.parse("2026-10-16T08:00:00Z");
+// What every v1 point carries: no O3 marks and no O2 thresholds.
+const V1_POINT = {
+  no_block: false,
+  gap: false,
+  p95: null,
+  p75: null,
+  level: null,
+} as const;
 
 // Synthetic hourly series for tests and previews, not a service result. Every value is positive
 // and smooth; only the last point and the three level triples carry the 2026-10-16 fixture
@@ -1038,26 +1061,22 @@ export function pressureSample(): SellerPressureView {
       at,
       lth: last ? 1_983_300 : 2_500_000 + 1_200_000 * slow + 300_000 * fast,
       sth: last ? 8_540_500 : 12_000_000 + 6_000_000 * slow + 800_000 * fast,
-      no_block: false,
-      gap: false,
+      ...V1_POINT,
     });
     share.push({
       at,
       value: last ? 0.41893330324776934 : 0.3 + 0.12 * slow + 0.02 * fast,
-      no_block: false,
-      gap: false,
+      ...V1_POINT,
     });
     supply.push({
       at,
       value: last ? 0.2957342245796155 : 0.28 + 0.01 * slow + 0.002 * fast,
-      no_block: false,
-      gap: false,
+      ...V1_POINT,
     });
     price.push({
       at,
       value: 100_000 + 8_000 * slow + 600 * fast + i * 3,
-      no_block: false,
-      gap: false,
+      ...V1_POINT,
     });
   }
   const lastAt = loss[loss.length - 1].at;
@@ -1087,5 +1106,9 @@ export function pressureSample(): SellerPressureView {
     brk_version: "0.1.0",
     rules: [],
     rules_pending: false,
+    closed_at: null,
+    loss_run: null,
+    share_run: null,
+    supply_run: null,
   };
 }
