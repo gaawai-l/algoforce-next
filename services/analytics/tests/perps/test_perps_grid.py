@@ -2,6 +2,9 @@
 
 import csv
 import json
+import random
+from collections import Counter, defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -400,3 +403,99 @@ def test_all_view_none_if_any_venue_none(store: PerpsStore):
     assert grid.long_liq == [None, 3.0, 0.0, 0.0]
     assert grid.short_liq == [None, 0.0, 0.0, 0.0]
     assert list(grid.rest_series) == list(REQUIRED["all"])
+
+
+def reference_liquidations(
+    store: PerpsStore, venue: Venue, start: int, covered: Sequence[bool]
+) -> tuple[list[float | None], list[float | None]]:
+    """The derive as it was before the fields were stored: every raw event parsed and merged in
+    Python, a key counting as often as the connection that saw it most."""
+    counts: dict[str, Counter[int]] = defaultdict(Counter)
+    events: dict[str, tuple[float, bool, float]] = {}
+    for conn, ts, raw_json, key in store.liquidations(venue, start):
+        raw = json.loads(raw_json)
+        if venue == "binance" and raw["X"] != "FILLED":
+            continue
+        longs = raw["S"] == ("SELL" if venue == "binance" else "Buy")
+        counts[key][conn] += 1
+        events[key] = (ts, longs, float(raw["z" if venue == "binance" else "v"]))
+    sums: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])
+    for key, per_conn in counts.items():
+        ts, longs, qty = events[key]
+        i = int((ts - start) // STEP)
+        if 0 <= i < len(covered) and covered[i]:
+            sums[i][0 if longs else 1] += max(per_conn.values()) * qty
+    return (
+        [sums[i][0] if c else None for i, c in enumerate(covered)],
+        [sums[i][1] if c else None for i, c in enumerate(covered)],
+    )
+
+
+def assert_close(actual: list[float | None], expected: list[float | None]) -> None:
+    assert [x is None for x in actual] == [x is None for x in expected]
+    assert [x for x in actual if x is not None] == pytest.approx(
+        [x for x in expected if x is not None], rel=1e-12, abs=1e-12
+    )
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_liquidation_sums_match_the_python_merge(store: PerpsStore, seed: int):
+    """Random events: keys on both connections or one, a key repeated on a connection, events
+    before the start, past the grid and in uncovered buckets, and Binance events not FILLED."""
+    rng = random.Random(seed)
+    last = at("05:50")
+    rest(store, last)
+    batches: dict[tuple[Venue, int], list[RawLiquidation]] = defaultdict(list)
+    for venue in ("binance", "bybit"):
+        stream: Stream = "binance_liq" if venue == "binance" else "bybit_liq"
+        # Each connection drops now and then; both are down over one stretch of 25 minutes.
+        hole = T0 + rng.uniform(3600, 14400)
+        for conn in (0, 1):
+            t = T0 - 300.0
+            while t < last + 1800:
+                end = t + rng.uniform(600, 5400)
+                for lo, hi in ((t, min(end, hole)), (max(t, hole + 1500), end)):
+                    if lo < hi:
+                        cover(store, stream, lo, hi, conn)
+                t = end + rng.choice((0, 0, 30, 900))
+        for _ in range(300):
+            ts = rng.randrange((T0 - 1200) * 1000, (last + 1800) * 1000) / 1000
+            qty = f"{rng.choice((0.001, 0.004, 0.25, 1.5, 7.123)):.3f}"
+            if venue == "binance":
+                side = rng.choice(("SELL", "BUY"))
+                status = rng.choice(("FILLED", "FILLED", "FILLED", "PARTIALLY_FILLED", "NEW"))
+                event = binance_liq(
+                    ts, side, qty, status=status, ap=str(rng.randrange(70000, 90000))
+                )
+            else:
+                event = bybit_liq(
+                    ts, rng.choice(("Buy", "Sell")), qty, p=str(rng.randrange(70000, 90000))
+                )
+            seen = rng.choice(((1, 0), (0, 1), (1, 1), (2, 1), (1, 2), (2, 0)))
+            for conn, times in enumerate(seen):
+                batches[venue, conn] += [event] * times
+            if venue == "binance" and rng.random() < 0.1:
+                # The same key pushed again with a status that does not count.
+                raw = {**json.loads(event.raw), "X": "PARTIALLY_FILLED"}
+                twin = RawLiquidation(event_ts=ts, key=event.key, raw=json.dumps(raw))
+                batches[venue, rng.randrange(2)] += [twin] * rng.randrange(1, 4)
+    for (venue, conn), rows in batches.items():
+        rng.shuffle(rows)
+        for first in range(0, len(rows), 50):
+            store.insert_liquidations(venue, conn, rows[first : first + 50])
+
+    views = {exchange: grid_of(store, exchange) for exchange in ("binance", "bybit", "all")}
+    expected = {}
+    for venue in ("binance", "bybit"):
+        grid = views[venue]
+        expected[venue] = reference_liquidations(store, venue, T0, grid.liq_covered)
+        assert_close(grid.long_liq, expected[venue][0])
+        assert_close(grid.short_liq, expected[venue][1])
+        assert any(grid.liq_covered) and not all(grid.liq_covered)
+        assert any(value for value in grid.long_liq if value)
+    for side in (0, 1):
+        both = [
+            None if a is None or b is None else a + b
+            for a, b in zip(expected["binance"][side], expected["bybit"][side], strict=True)
+        ]
+        assert_close(views["all"].long_liq if side == 0 else views["all"].short_liq, both)

@@ -2,6 +2,8 @@
 backoff, the six derived payloads, the liquidation direction check and pruning."""
 
 import json
+import math
+import random
 import time
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
@@ -24,6 +26,7 @@ from wheelhouse_service.perps.sync import (
     Directions,
     HostState,
     PerpsSync,
+    QtyUnits,
     StoredStates,
     derived_key,
     next_slot,
@@ -554,14 +557,66 @@ def test_prune_keeps_120d_and_1h_trade_ids(store: PerpsStore, rest: FakeRest, cl
     assert len(store.trades("bybit", 0)) == 2
 
 
-def test_qty_units_unknown_without_events():
-    units = qty_units([])
+def test_qty_units_unknown_without_events(store: PerpsStore):
+    units = qty_units(store.liquidation_sizes(0))
 
     # Nothing to check yet: the checks are unknown, not failed.
     assert units.events == 0
     assert (units.min_qty, units.min_notional, units.max_notional) == (None, None, None)
     assert units.notional_in_range is None
     assert units.min_qty_matches is None
+
+
+def reference_qty_units(events: Sequence[tuple[int, float, str, str]]) -> QtyUnits:
+    """The check as it was before the fields were stored: every Bybit event parsed in Python."""
+    sizes: dict[str, tuple[float, float]] = {}
+    for _, _, raw_json, key in events:
+        raw = json.loads(raw_json)
+        try:
+            qty, price = float(raw["v"]), float(raw["p"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(qty) and math.isfinite(price):
+            sizes[key] = (qty, qty * price)
+    qtys = [qty for qty, _ in sizes.values()]
+    notionals = [notional for _, notional in sizes.values()]
+    return QtyUnits(
+        events=len(sizes),
+        min_qty=min(qtys, default=None),
+        min_notional=min(notionals, default=None),
+        max_notional=max(notionals, default=None),
+        notional_in_range=10 <= min(notionals) and max(notionals) <= 5e7 if sizes else None,
+        min_qty_matches=math.isclose(min(qtys), 0.001) if sizes else None,
+    )
+
+
+def test_qty_units_from_sql_equals_the_python_check(store: PerpsStore):
+    start = start_of(2)
+    rng = random.Random(7)
+
+    def event(ts: int, qty: str, price: str | None) -> RawLiquidation:
+        raw: dict[str, object] = {"T": ts * 1000, "s": "BTCUSDT", "S": "Buy", "v": qty}
+        if price is not None:
+            raw["p"] = price
+        return RawLiquidation(
+            event_ts=ts, key=f"{ts * 1000}|Buy|{qty}|{price}", raw=json.dumps(raw)
+        )
+
+    for n in range(200):
+        ts = start + rng.randrange(-DAY, 2 * DAY)
+        qty = rng.choice(("0.001", "0.002", "0.150", "3.000", "1000.000"))
+        price = rng.choice(("59700.0", "61234.5", "0.5", "n/a", None))
+        row = event(ts, qty, price)
+        for conn in rng.choice(((0,), (1,), (0, 1), (0, 0))):
+            store.insert_liquidations("bybit", conn, [row])
+        if n == 100:
+            # Every case so far, and again once more events have come in.
+            assert qty_units(store.liquidation_sizes(start)) == reference_qty_units(
+                store.liquidations("bybit", start)
+            )
+    units = qty_units(store.liquidation_sizes(start))
+    assert units == reference_qty_units(store.liquidations("bybit", start))
+    assert units.events > 50 and units.notional_in_range is False
 
 
 def test_prune_runs_after_a_failed_round(

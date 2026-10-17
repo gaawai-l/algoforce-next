@@ -15,11 +15,11 @@ from typing import Literal, NamedTuple
 from pydantic import AwareDatetime
 
 from ..market import Model, timestamp
-from .grid import BAR, build_grid
+from .grid import BAR, LiqSums, build_grid
 from .rows import Exchange, Kline, OiPoint
 from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, PerpsRest, RestError
 from .states import DAY, STEP, Grid, StatesResult, Window, compute_states
-from .store import PerpsStore, Venue
+from .store import LiquidationSizes, PerpsStore, Venue
 
 logger = logging.getLogger("wheelhouse.perps.sync")
 
@@ -171,27 +171,20 @@ def direction_check(grid: Grid) -> DirectionCheck:
     return DirectionCheck(verdict=verdict, samples=samples, down=down, long_share=share)
 
 
-def qty_units(events: Iterable[tuple[int, float, str, str]]) -> QtyUnits:
+def qty_units(sizes: LiquidationSizes) -> QtyUnits:
     """Sizes and notionals of the distinct Bybit liquidations whose `v` and `p` are numbers."""
-    sizes: dict[str, tuple[float, float]] = {}
-    for _, _, raw_json, key in events:
-        raw = json.loads(raw_json)
-        try:
-            qty, price = float(raw["v"]), float(raw["p"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if math.isfinite(qty) and math.isfinite(price):
-            sizes[key] = (qty, qty * price)
-    qtys = [qty for qty, _ in sizes.values()]
-    notionals = [notional for _, notional in sizes.values()]
     low, high = NOTIONAL_RANGE
+    qty, lowest, highest = sizes.min_qty, sizes.min_notional, sizes.max_notional
+    # All three are None exactly when there are no events.
     return QtyUnits(
-        events=len(sizes),
-        min_qty=min(qtys, default=None),
-        min_notional=min(notionals, default=None),
-        max_notional=max(notionals, default=None),
-        notional_in_range=low <= min(notionals) and max(notionals) <= high if sizes else None,
-        min_qty_matches=math.isclose(min(qtys), MIN_QTY) if sizes else None,
+        events=sizes.events,
+        min_qty=qty,
+        min_notional=lowest,
+        max_notional=highest,
+        notional_in_range=(
+            None if lowest is None or highest is None else low <= lowest and highest <= high
+        ),
+        min_qty_matches=None if qty is None else math.isclose(qty, MIN_QTY),
     )
 
 
@@ -458,8 +451,12 @@ class PerpsSync:
     def _derive(self, start: int, at: datetime) -> dict[Exchange, Grid | list[str]]:
         """Store the six payloads; return each view's grid, or the series it lacks."""
         grids: dict[Exchange, Grid | list[str]] = {}
+        # Each venue's liquidations are summed once: the All view reuses them.
+        liquidations: dict[Venue, LiqSums] = {}
+        for venue in ("binance", "bybit"):
+            liquidations[venue] = self.store.liquidation_sums(venue, start)
         for exchange in EXCHANGES:
-            grid = build_grid(self.store, exchange, start)
+            grid = build_grid(self.store, exchange, start, liquidations)
             grids[exchange] = grid
             for window in WINDOWS:
                 states: StatesResult | None = None
@@ -489,6 +486,6 @@ class PerpsSync:
         result = Directions(
             binance=checks["binance"],
             bybit=checks["bybit"],
-            bybit_qty=qty_units(self.store.liquidations("bybit", start)),
+            bybit_qty=qty_units(self.store.liquidation_sizes(start)),
         )
         self.store.set_state(direction_check=result.model_dump_json())

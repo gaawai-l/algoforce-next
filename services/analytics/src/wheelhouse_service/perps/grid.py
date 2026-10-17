@@ -1,11 +1,8 @@
 """Stored perp inputs folded into one exchange view's 10m grid (spec §3.1 and §3.2)."""
 
-import json
 import math
-from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 from .rows import Exchange, Stream
 from .states import DAY, REFERENCE_DAYS, STEP, Grid
@@ -22,14 +19,11 @@ REQUIRED: dict[Exchange, tuple[str, ...]] = {
 # How far past a bucket's start the last row it reads is stamped: price reads the bar opening at
 # t+5m, delta the bars opening at t and t+5m, OI the row at t+10m.
 LAG = {"bybit:price": BAR, "binance:kline": BAR, "binance:oi": STEP, "bybit:oi": STEP}
-# Whether the raw side field means longs were liquidated (spec §3.1).
-LONGS: dict[Venue, dict[str, bool]] = {
-    "binance": {"SELL": True, "BUY": False},
-    "bybit": {"Buy": True, "Sell": False},
-}
 LIQ_STREAM: dict[Venue, Stream] = {"binance": "binance_liq", "bybit": "bybit_liq"}
 
 Values = list[float | None]
+# A venue's (longs, shorts) by bucket number from the grid's start, as the store sums them.
+LiqSums = Mapping[int, tuple[float, float]]
 
 
 @dataclass(frozen=True)
@@ -44,12 +38,18 @@ class _Part:
     liq_covered: list[bool]
 
 
-def build_grid(store: PerpsStore, exchange: Exchange, start: int) -> Grid | list[str]:
+def build_grid(
+    store: PerpsStore,
+    exchange: Exchange,
+    start: int,
+    liquidations: Mapping[Venue, LiqSums] | None = None,
+) -> Grid | list[str]:
     """The view's grid from bucket `start` to its data edge, or the required series that reach no
     bucket from `start` on.
 
     The edge `last` is the earliest of the required series' last buckets: for each series, the
     last bucket its last stored row (NULL or not) can fill. Collected streams only set coverage.
+    `liquidations` holds each venue's sums from `start` when the caller has read them already.
     """
     venues: tuple[Venue, ...] = (exchange,) if exchange != "all" else ("binance", "bybit")
     spot = store.klines("bybit", start)
@@ -86,7 +86,12 @@ def build_grid(store: PerpsStore, exchange: Exchange, start: int) -> Grid | list
                 for t, covered in zip(buckets, vd_covered, strict=True)
             ]
         liq_covered = _covered(store, LIQ_STREAM[venue], start, len(buckets))
-        longs, shorts = _liquidations(store, venue, start, liq_covered)
+        sums = (
+            liquidations[venue]
+            if liquidations is not None
+            else store.liquidation_sums(venue, start)
+        )
+        longs, shorts = _liquidations(sums, liq_covered)
         parts[venue] = _Part(oi, vd, vd_covered, longs, shorts, liq_covered)
 
     view = parts[exchange] if exchange != "all" else _sum(parts["binance"], parts["bybit"])
@@ -137,36 +142,10 @@ def _covered(store: PerpsStore, stream: Stream, start: int, n: int) -> list[bool
     return covered
 
 
-def _event(venue: Venue, raw: Mapping[str, Any]) -> tuple[bool, float] | None:
-    """(longs liquidated, quantity in BTC); None for a Binance event that is not FILLED."""
-    if venue == "binance":
-        if raw["X"] != "FILLED":
-            return None
-        return LONGS[venue][raw["S"]], float(raw["z"])
-    return LONGS[venue][raw["S"]], float(raw["v"])
-
-
-def _liquidations(
-    store: PerpsStore, venue: Venue, start: int, covered: Sequence[bool]
-) -> tuple[Values, Values]:
-    """Long and short liquidations per bucket: 0.0 where covered without events, None where not.
-
-    An event key seen on both connections counts as often as the connection that saw it most.
-    """
-    counts: dict[str, Counter[int]] = defaultdict(Counter)
-    events: dict[str, tuple[float, bool, float]] = {}
-    for conn, ts, raw_json, key in store.liquidations(venue, start):
-        event = _event(venue, json.loads(raw_json))
-        if event is not None:
-            counts[key][conn] += 1
-            events[key] = (ts, *event)
-    sums: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])  # bucket: [longs, shorts]
-    for key, per_conn in counts.items():
-        ts, longs, qty = events[key]
-        i = int((ts - start) // STEP)
-        if 0 <= i < len(covered) and covered[i]:
-            sums[i][0 if longs else 1] += max(per_conn.values()) * qty
-    zero = [0.0, 0.0]
+def _liquidations(sums: LiqSums, covered: Sequence[bool]) -> tuple[Values, Values]:
+    """Long and short liquidations per bucket: 0.0 where covered without events, None where not;
+    events in uncovered buckets are left out."""
+    zero = (0.0, 0.0)
     long_liq: Values = [sums.get(i, zero)[0] if c else None for i, c in enumerate(covered)]
     short_liq: Values = [sums.get(i, zero)[1] if c else None for i, c in enumerate(covered)]
     return long_liq, short_liq

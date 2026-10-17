@@ -24,9 +24,8 @@ from typing import Any, Protocol
 from websockets.exceptions import WebSocketException
 from websockets.sync.client import connect as websocket_connect
 
-from .grid import LONGS
 from .rows import RawLiquidation, Stream, Trade
-from .store import PerpsStore, Venue
+from .store import LONGS, PerpsStore, Venue
 
 SYMBOL = "BTCUSDT"
 STREAMS: tuple[Stream, ...] = ("binance_liq", "bybit_liq", "bybit_trades")
@@ -123,7 +122,7 @@ def _liquidation(raw: Mapping[str, Any], key: tuple[str, ...]) -> RawLiquidation
 
 
 def _readable(venue: Venue, row: RawLiquidation) -> bool:
-    """Whether grid.py can read the event: a side it maps, Binance's status `X`, and a finite
+    """Whether the event can be counted: a side LONGS maps, Binance's status `X`, and a finite
     quantity."""
     raw = json.loads(row.raw)
     side = raw.get("S")

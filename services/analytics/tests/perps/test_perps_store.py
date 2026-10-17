@@ -1,14 +1,20 @@
 """The perps SQLite store: migration, OI precedence, trade dedupe, coverage and pruning."""
 
+import json
+import sqlite3
 import stat
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from wheelhouse_service.market import digest
+from wheelhouse_service.perps import store as store_module
 from wheelhouse_service.perps.rows import Kline, OiPoint, RawLiquidation, Trade
-from wheelhouse_service.perps.store import PerpsStore
+from wheelhouse_service.perps.store import PerpsStore, liquidation_fields
 
 DAY = 86_400
 T0 = 1_792_022_400  # 2026-10-15 00:00 UTC
+MIGRATIONS = Path(store_module.__file__).with_name("migrations")
+WS = Path(__file__).parent / "fixtures" / "ws"
 
 
 def kline(t: int) -> Kline:
@@ -36,7 +42,10 @@ def test_store_wal_and_migration(tmp_path: Path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     with store.connection() as db:
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-        assert [tuple(row) for row in db.execute("SELECT version FROM perps_schema")] == [(1,)]
+        assert [tuple(row) for row in db.execute("SELECT version FROM perps_schema")] == [
+            (1,),
+            (2,),
+        ]
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {
         "kline",
@@ -49,6 +58,85 @@ def test_store_wal_and_migration(tmp_path: Path):
         "sync_state",
         "archive_absent",
     } <= tables
+
+
+def test_migration_002_maps_stored_liquidations_as_inserts_do(tmp_path: Path):
+    """A database the first release left (migration 001 only) gains each event's side, size and
+    price, mapped from its raw fields exactly as `insert_liquidations` maps a new event."""
+    path = tmp_path / "perps.sqlite3"
+    first = (MIGRATIONS / "001_perps.sql").read_text()
+    order = json.loads((WS / "binance_force_order_btc.json").read_text())["o"]
+    bybit = json.loads((WS / "bybit_all_liquidation.json").read_text())["data"]
+    raw: list[tuple[str, dict[str, object]]] = [
+        ("binance", order),  # FILLED SELL: longs, z counts
+        ("binance", {**order, "S": "BUY", "z": "0.004"}),  # shorts
+        ("binance", {**order, "X": "PARTIALLY_FILLED"}),  # not FILLED: no size
+        ("binance", {**order, "S": "BUY", "X": "NEW"}),
+        ("bybit", bybit[0]),  # Buy: longs
+        ("bybit", bybit[1]),  # Sell: shorts
+        ("bybit", {**bybit[0], "p": "n/a"}),  # a price that is no number
+        ("bybit", {key: value for key, value in bybit[1].items() if key != "p"}),
+    ]
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE perps_schema(version INTEGER PRIMARY KEY, checksum TEXT NOT NULL)")
+    for statement in first.split(";"):
+        if statement.strip():
+            db.execute(statement)
+    db.execute("INSERT INTO perps_schema VALUES(?,?)", (1, digest(first)))
+    db.executemany(
+        "INSERT INTO liquidations(venue, conn, event_ts, raw_json, key) VALUES(?,?,?,?,?)",
+        [(venue, 0, T0 + n, json.dumps(item), str(n)) for n, (venue, item) in enumerate(raw)],
+    )
+    db.commit()
+    db.close()
+
+    store = PerpsStore(path)
+    with store.connection() as db:
+        assert [row[0] for row in db.execute("SELECT version FROM perps_schema")] == [1, 2]
+        migrated = [
+            (row["venue"], row["raw_json"], (row["longs"], row["qty"], row["price"]))
+            for row in db.execute("SELECT * FROM liquidations ORDER BY id")
+        ]
+    assert [fields for _, _, fields in migrated] == [
+        (1, 0.25, None),
+        (0, 0.004, None),
+        (1, None, None),
+        (0, None, None),
+        (1, 0.513, 81602.3),
+        (0, 0.02, 81610.0),
+        (1, 0.513, None),
+        (0, 0.02, None),
+    ]
+    for venue, raw_json, fields in migrated:
+        assert fields == liquidation_fields(venue, json.loads(raw_json))
+
+    # The same events stored now are mapped the same way.
+    store.insert_liquidations(
+        "binance",
+        1,
+        [
+            RawLiquidation(event_ts=T0, key=str(n), raw=json.dumps(item))
+            for n, (venue, item) in enumerate(raw)
+            if venue == "binance"
+        ],
+    )
+    store.insert_liquidations(
+        "bybit",
+        1,
+        [
+            RawLiquidation(event_ts=T0, key=str(n), raw=json.dumps(item))
+            for n, (venue, item) in enumerate(raw)
+            if venue == "bybit"
+        ],
+    )
+    with store.connection() as db:
+        inserted = [
+            (row[0], row[1], row[2])
+            for row in db.execute(
+                "SELECT longs, qty, price FROM liquidations WHERE conn=1 ORDER BY id"
+            )
+        ]
+    assert inserted == [fields for _, _, fields in migrated]
 
 
 def test_hist_overrides_archive_not_reverse(tmp_path: Path):
