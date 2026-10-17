@@ -165,6 +165,24 @@ def test_hist_overrides_archive_not_reverse(tmp_path: Path):
     assert store.oi("bybit", T0) == {T0: (7.0, "bybit")}
 
 
+def test_stamps_reach_back_to_the_last_row_at_or_before_since(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    store.upsert_klines("bybit", [kline(t) for t in (T0 - 900, T0 - 600, T0 + 300, T0 + 600)])
+    store.upsert_oi(
+        "binance",
+        [OiPoint(t=T0, oi=None, source="archive"), OiPoint(t=T0 + 300, oi=1.0, source="hist")],
+    )
+
+    assert store.stamps("kline", "bybit", T0) == [T0 - 600, T0 + 300, T0 + 600]
+    assert store.stamps("kline", "bybit", T0 + 300) == [T0 + 300, T0 + 600]
+    assert store.stamps("kline", "bybit", T0 - 3600) == [T0 - 900, T0 - 600, T0 + 300, T0 + 600]
+    assert store.stamps("kline", "binance", T0) == []
+    # A NULL row is a stamp too.
+    assert store.stamps("oi", "binance", T0) == [T0, T0 + 300]
+    assert store.oi_source("binance", T0) == "archive"
+    assert store.oi_source("binance", T0 + 600) is None
+
+
 def test_record_trades_dedupes_in_one_batch_and_across_batches(tmp_path: Path):
     store = PerpsStore(tmp_path / "perps.sqlite3")
     store.record_trades(

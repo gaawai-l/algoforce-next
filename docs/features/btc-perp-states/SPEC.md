@@ -275,11 +275,12 @@
   - 内容包括：
     - 阈值 `T_*` 及各自的样本数；
     - 块列表：**只含与最近 30 天视图重叠的块**（4h 约 181 块），每块有 t0、t1、forming、已覆盖与否、state、各项特征、imputed 标记、价格和 OI 的块收盘值、delta 和清算的块合计；
+      - delta 未覆盖的块的 `delta`、清算未覆盖的块的 `lliq` 和 `sliq` 是补出来的值（null 桶按 0 计，结果为 0 或部分和，由 `imputed.sums` 标出），不参与判定和阈值；画图等使用方一律取块合计 `delta_sum`、`lliq_sum`、`sliq_sum`；
     - 两种 Show 的表 1；
     - 不足半块的尾块：只含绘图字段；
     - QC 失败项、覆盖天数、`last`、`computed_at`、原因码。
   - 新鲜度在请求时计算（§3.7）。
-  - 第一次派生之前，返回 `data_state = "unavailable"`，并附原因码。
+  - 第一次派生之前，返回 `data_state = "unavailable"`，并附原因码 `not_derived`；本进程不运行 worker 和采集器时（`WHEELHOUSE_PERPS=0` 或 `start_worker=False`），这个原因码改为 `perps_disabled`，因为不会有派生。
   - 读接口不访问交易所。
 - **`GET /perps/status`**：
   - 各来源的最近成功时间、错误码、退避截止时间；
@@ -300,7 +301,7 @@
   - Show：7d / 30d；
   - 三者写入 URL 参数 `px`、`pw`、`ps`。
 - **悬停**：块的悬停信息中显示 imputed 标记、"uncovered"，以及清算阈值为 0 的提示。
-- **方向未核对**：`direction` 不是 `ok` 时，squeeze 状态的标签后加 `(direction unverified)`。
+- **方向未核对**：所选视图自己的核对不是 `ok` 时（Binance、Bybit 视图看各自交易所的结果，All venues 看合并的 `direction`），squeeze 状态的标签后加 `(direction unverified)`；视图所含交易所的结果为 `inverted` 时，另显示提示 `Liquidation sides look inverted on <venue>: squeeze labels may be swapped`。
 - **前端轮询**：每 5 分钟一次。
 - **三栏说明**：表 1 和图 1–4 都带。窄屏下三栏说明全部展开；表 1 只留 State、Prob.、Max move 三列，What it is 可以展开。
 - **状态**：unavailable、stale、delayed、collecting、QC 警告、forming 块、未覆盖块、采集器 down。

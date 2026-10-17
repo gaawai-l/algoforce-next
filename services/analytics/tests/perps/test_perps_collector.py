@@ -879,6 +879,42 @@ def test_dropped_event_splits_coverage_around_it(tmp_path: Path):
     assert len(store.liquidations("binance", 0)) == 2
 
 
+def test_unexpected_frames_split_coverage_like_dropped_events(tmp_path: Path):
+    """A frame the stream should not carry may stand for events missed: it is counted, and the
+    coverage ends before it, as for a dropped event."""
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    base = 1792186090.0
+    ws = FakeWs()
+    binance = Rig(store, "binance_liq", ws)
+    binance.at(base)
+    binance.quiet(base + 21)  # the pong to the ping at base + 20 is the last proof
+    ws.frames.append(json.dumps({"e": "markPriceUpdate", "E": 1792186111000, "s": "BTCUSDT"}))
+    binance.at(base + 22)
+    assert coverage_rows(store) == [
+        ("binance_liq", 0, base, base + 18, 0),
+        ("binance_liq", 0, base + 22, base + 22, 1),
+    ]
+    assert binance.collector.counts == Counter({"unexpected_frame": 1, "coverage_split": 1})
+
+    ws = FakeWs(ACK)
+    bybit = Rig(store, "bybit_liq", ws, conn=1)
+    bybit.at(0, 0.5, 1)
+    bybit.quiet(21)
+    ws.frames.append(TRADES[0])  # another topic's data
+    bybit.at(22)
+    bybit.quiet(29)
+    # Bybit's own reply is expected and proves life; then a frame with no topic.
+    ws.frames.extend([PONG, json.dumps({"type": "snapshot", "data": []})])
+    bybit.at(30)
+    assert coverage_rows(store)[2:] == [
+        ("bybit_liq", 1, 0.5, 18, 0),
+        ("bybit_liq", 1, 22, 28, 0),
+        ("bybit_liq", 1, 30, 30, 1),
+    ]
+    assert bybit.collector.counts == Counter({"unexpected_frame": 2, "coverage_split": 2})
+    assert store.liquidations("bybit", 0) == []
+
+
 def test_coverage_splits_logged_when_their_count_doubles(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ):

@@ -109,6 +109,15 @@ class Directions(Model):
     bybit_qty: QtyUnits
 
 
+def stored_hosts(state: Mapping[str, str | None]) -> dict[str, HostState]:
+    """Each host's state as the worker stored it; empty for a host it has not recorded."""
+    stored = json.loads(state.get("hosts") or "{}")
+    empty = HostState(last_success=None, error=None, until=None)
+    return {
+        host: HostState.model_validate(stored[host]) if host in stored else empty for host in HOSTS
+    }
+
+
 class Gap(NamedTuple):
     """Stamps [a, b) of one series to fetch. A backward gap ends where the stored rows begin and
     is filled newest first, so that whatever a failure leaves stays joined to them."""
@@ -188,6 +197,10 @@ def qty_units(sizes: LiquidationSizes) -> QtyUnits:
     )
 
 
+class _Stopped(Exception):
+    """The worker is stopping: its round is abandoned before the next request."""
+
+
 class _Round:
     """One round's hosts: one that fails or is backed off is not asked again in the round."""
 
@@ -230,6 +243,10 @@ class PerpsSync:
         error: str | None = None
         try:
             self._round(at, clock)
+        except _Stopped:
+            # Neither a failure nor a finished round: the stored state stays as it was.
+            logger.info("perps_sync_stopped")
+            return True
         except Exception:
             # Never log the exception: it may carry values. A fixed code is enough here.
             error = "sync_failed"
@@ -274,7 +291,7 @@ class PerpsSync:
     def _round(self, at: datetime, clock: Callable[[], datetime]) -> None:
         now = int(at.timestamp())
         start = (now // DAY - (self.horizon_days + 1)) * DAY
-        hosts = self._hosts()
+        hosts = stored_hosts(self.store.state())
         # The stored deadline outlives a restart, which the client's own one does not.
         run = _Round(
             {
@@ -285,8 +302,15 @@ class PerpsSync:
             }
         )
         try:
-            self._fetch(run, start, now)
+            try:
+                self._fetch(run, start, now)
+            except _Stopped:
+                # What the requests so far found is kept, a backoff above all.
+                self._record_hosts(run, hosts, clock(), finished=False)
+                raise
             self._record_hosts(run, hosts, clock())
+            if self.stopping.is_set():
+                raise _Stopped  # nothing is derived once a stop is asked for
             grids = self._derive(start, clock())
             self._check_directions(grids, start)
         finally:
@@ -298,7 +322,7 @@ class PerpsSync:
         self._fill_series(
             run,
             BYBIT_HOST,
-            self.store.klines("bybit", 0),
+            self.store.stamps("kline", "bybit", start),
             self.rest.bybit_spot_klines,
             partial(self.store.upsert_klines, "bybit"),
             start,
@@ -307,7 +331,7 @@ class PerpsSync:
         self._fill_series(
             run,
             BYBIT_HOST,
-            self.store.oi("bybit", 0),
+            self.store.stamps("oi", "bybit", start),
             self.rest.bybit_oi,
             partial(self.store.upsert_oi, "bybit"),
             start,
@@ -316,7 +340,7 @@ class PerpsSync:
         self._fill_series(
             run,
             BINANCE_HOST,
-            self.store.klines("binance", 0),
+            self.store.stamps("kline", "binance", start),
             self.rest.binance_klines,
             partial(self.store.upsert_klines, "binance"),
             start,
@@ -326,7 +350,9 @@ class PerpsSync:
 
     def _ask[T](self, run: _Round, host: str, call: Callable[[], T]) -> T | None:
         """The call's result; None without asking when the host is closed for the round, or when
-        it fails, which closes it."""
+        it fails, which closes it. Raises _Stopped instead of asking once the worker is stopping."""
+        if self.stopping.is_set():
+            raise _Stopped
         if not run.open(host):
             return None
         run.asked.add(host)
@@ -357,7 +383,7 @@ class PerpsSync:
         self,
         run: _Round,
         host: str,
-        stored: Mapping[int, object],
+        stored: Iterable[int],
         fetch: Callable[[int, int], Sequence[R]],
         write: Callable[[list[R]], None],
         start: int,
@@ -370,7 +396,7 @@ class PerpsSync:
     def _binance_oi(self, run: _Round, start: int, end: int) -> None:
         """Binance OI: the history for the last HIST_DAYS days, archive files before that up to
         the boundary's day. At one stamp the history wins (the store sees to it)."""
-        stored = self.store.oi("binance", 0)
+        stored = self.store.stamps("oi", "binance", start)
         # Rounded up to a 5m stamp: a margin inside the history Binance keeps.
         boundary = -(-(end - 1 - HIST_DAYS * DAY) // BAR) * BAR
         write = partial(self.store.upsert_oi, "binance")
@@ -382,7 +408,9 @@ class PerpsSync:
                 else:
                     # A head gap ends at the first stored row: its file was fetched already if
                     # the row came from it; a history row does not cover the day before it.
-                    last_day = (gap.b - BAR) // DAY - (stored[gap.b][1] == "archive")
+                    last_day = (gap.b - BAR) // DAY - (
+                        self.store.oi_source("binance", gap.b) == "archive"
+                    )
                 # The file of day D holds the stamps (D 00:05, D+1 00:00].
                 first_day = max(start, gap.a - BAR) // DAY
                 steps += [
@@ -413,17 +441,17 @@ class PerpsSync:
         self.store.upsert_oi("binance", [point for point in points if gap.a <= point.t < gap.b])
         return True
 
-    def _hosts(self) -> dict[str, HostState]:
-        stored = json.loads(self.store.state().get("hosts") or "{}")
-        empty = HostState(last_success=None, error=None, until=None)
-        return {
-            host: HostState.model_validate(stored[host]) if host in stored else empty
-            for host in HOSTS
-        }
-
-    def _record_hosts(self, run: _Round, before: Mapping[str, HostState], at: datetime) -> None:
+    def _record_hosts(
+        self,
+        run: _Round,
+        before: Mapping[str, HostState],
+        at: datetime,
+        *,
+        finished: bool = True,
+    ) -> None:
         """A failure keeps its code and deadline until the host succeeds; a host that was backed
-        off keeps its state; one with nothing to fetch has no error left."""
+        off keeps its state; one with nothing to fetch has no error left, unless the round was
+        stopped before it got there."""
         hosts: dict[str, HostState] = {}
         for host in HOSTS:
             old = before[host]
@@ -436,16 +464,12 @@ class PerpsSync:
                 hosts[host] = old
             elif host in run.asked:
                 hosts[host] = HostState(last_success=at, error=None, until=None)
+            elif not finished:
+                hosts[host] = old
             else:
                 hosts[host] = HostState(last_success=old.last_success, error=None, until=None)
-        reasons = [
-            f"rest_error:{host}:{state.error}" for host, state in hosts.items() if state.error
-        ]
         self.store.set_state(
-            hosts=json.dumps(
-                {host: state.model_dump(mode="json") for host, state in hosts.items()}
-            ),
-            reasons=json.dumps(reasons),
+            hosts=json.dumps({host: state.model_dump(mode="json") for host, state in hosts.items()})
         )
 
     def _derive(self, start: int, at: datetime) -> dict[Exchange, Grid | list[str]]:

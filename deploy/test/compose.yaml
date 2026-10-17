@@ -50,6 +50,9 @@ services:
     expose:
       - "8787"
     restart: unless-stopped
+    # On SIGTERM the perps worker ends its request in flight (20 s at most) while the
+    # collectors close (8 s at most).
+    stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/wheelhouse/v1/status', timeout=5)"]
       interval: 30s

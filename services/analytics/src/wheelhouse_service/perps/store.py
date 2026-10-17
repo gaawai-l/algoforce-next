@@ -179,6 +179,23 @@ class PerpsStore:
             ).fetchall()
         return {row["t"]: (row["oi"], row["source"]) for row in rows}
 
+    def stamps(self, table: Literal["kline", "oi"], venue: Venue, since: int) -> list[int]:
+        """The stamps of a REST series from the last one at or before `since` on: whether the
+        rows reach back to `since`, and where they start and end, without reading them."""
+        with self.connection() as db:
+            rows = db.execute(
+                f"SELECT t FROM {table} WHERE venue=:venue AND t>=COALESCE("
+                f"(SELECT MAX(t) FROM {table} WHERE venue=:venue AND t<=:since), :since)",
+                {"venue": venue, "since": since},
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    def oi_source(self, venue: Venue, t: int) -> str | None:
+        """The source of the OI row at `t`; None without one."""
+        with self.connection() as db:
+            row = db.execute("SELECT source FROM oi WHERE venue=? AND t=?", (venue, t)).fetchone()
+        return None if row is None else str(row[0])
+
     def trades(self, venue: Venue, since: int) -> dict[int, tuple[float, float]]:
         """(buy, sell) by 10m bucket, from `since` on."""
         with self.connection() as db:

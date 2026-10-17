@@ -1,14 +1,19 @@
 """The perps REST worker: schedule, head and tail gaps, the OI hist/archive split, per-host
 backoff, the six derived payloads, the liquidation direction check and pruning."""
 
+import io
 import json
+import logging
 import math
 import random
+import threading
 import time
+import zipfile
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 
 from wheelhouse_service.market import timestamp
@@ -29,6 +34,7 @@ from wheelhouse_service.perps.sync import (
     QtyUnits,
     StoredStates,
     derived_key,
+    gaps,
     next_slot,
     qty_units,
 )
@@ -400,7 +406,6 @@ def test_binance_backoff_does_not_stop_bybit(store: PerpsStore, rest: FakeRest, 
     )
     assert hosts[BYBIT_HOST] == HostState(last_success=NOW, error=None, until=None)
     assert hosts[ARCHIVE_HOST] == HostState(last_success=None, error=None, until=None)
-    assert json.loads(store.state()["reasons"] or "") == ["rest_error:fapi.binance.com:418"]
 
     # Inside the backoff Binance is not asked, even though it would answer again.
     rest.fail.clear()
@@ -425,7 +430,150 @@ def test_binance_backoff_does_not_stop_bybit(store: PerpsStore, rest: FakeRest, 
     assert hosts_of(store)[BINANCE_HOST] == HostState(
         last_success=clock.now, error=None, until=None
     )
-    assert json.loads(store.state()["reasons"] or "") == []
+
+
+def test_bybit_failure_does_not_stop_binance(store: PerpsStore, rest: FakeRest, clock: Clock):
+    rest.fail[BYBIT_HOST] = ("403", 600)
+    worker(store, rest, clock).run_once()
+
+    # The first Bybit request fails and ends that host's round; Binance carries on in it.
+    assert rest.named("bybit_spot_klines") == [(start_of(2), END)]
+    assert rest.named("bybit_oi") == []
+    assert rest.named("binance_klines") == [(start_of(2), END)]
+    assert rest.named("binance_oi_hist") == [(start_of(2),)]
+    assert max(store.klines("binance", 0)) == LAST_BAR
+    assert max(store.oi("binance", 0)) == NOW_TS // BAR * BAR
+    assert store.klines("bybit", 0) == {} and store.oi("bybit", 0) == {}
+    hosts = hosts_of(store)
+    assert hosts[BYBIT_HOST] == HostState(
+        last_success=None, error="403", until=NOW + timedelta(minutes=10)
+    )
+    assert hosts[BINANCE_HOST] == HostState(last_success=NOW, error=None, until=None)
+    assert store.state()["last_error"] is None
+    # Every view prices with Bybit spot, so each is stored without it.
+    for exchange in EXCHANGES:
+        stored = payload(store, exchange, "4h")
+        assert stored.states is None
+        assert stored.reasons[0] == "series_missing:bybit:price"
+
+
+def test_unexpected_failure_while_fetching_is_sync_failed(
+    store: PerpsStore,
+    rest: FakeRest,
+    clock: Clock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    old = (NOW_TS - 121 * DAY) // BAR * BAR
+    store.upsert_klines(
+        "binance", [Kline(t=old, close=1.0, volume=1.0, taker_buy=0.5, source="binance_perp")]
+    )
+
+    def broken(start: int, end: int) -> list[Kline]:
+        raise ValueError("unexpected reply 12345")
+
+    monkeypatch.setattr(rest, "binance_klines", broken)
+    sync = worker(store, rest, clock)
+    with caplog.at_level(logging.INFO, logger="wheelhouse.perps.sync"):
+        assert sync.run_once()
+
+    state = store.state()
+    assert state["last_error"] == "sync_failed"
+    assert (state["last_run_at"], state["next_run_at"]) == (
+        timestamp(NOW),
+        timestamp(clock_time(12, 5)),
+    )
+    assert old not in store.klines("binance", 0)  # the prune still ran
+    assert store.derived(derived_key("all", "4h")) is None
+    messages = [record.getMessage() for record in caplog.records]
+    assert "perps_sync_failed code=sync_failed" in messages
+    assert not any("12345" in message for message in messages)  # a fixed code, never values
+
+    # The next round runs as usual and clears the error.
+    monkeypatch.delattr(rest, "binance_klines")
+    clock.now = clock_time(12, 5)
+    assert sync.run_once()
+    assert store.state()["last_error"] is None
+    assert store.derived(derived_key("all", "4h")) is not None
+
+
+def archive_file(day: date, stale: date) -> bytes:
+    """The day's metrics file, as data.binance.vision zips it. On `stale` the 10:55 value
+    repeats 10:50's, the pattern the archive quarantine catches."""
+    first = int(datetime(day.year, day.month, day.day, tzinfo=UTC).timestamp())
+    lines = [
+        "create_time,symbol,sum_open_interest,sum_open_interest_value,"
+        "count_toptrader_long_short_ratio,sum_toptrader_long_short_ratio,"
+        "count_long_short_ratio,sum_taker_long_short_vol_ratio"
+    ]
+    for t in range(first, first + DAY, BAR):
+        repeat = day == stale and t == first + 10 * 3600 + 55 * 60
+        value = hist_oi((t - BAR if repeat else t) + BAR) + ARCHIVE_SHIFT
+        created = datetime.fromtimestamp(t, UTC).strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"{created},BTCUSDT,{value},1.0,1.0,1.0,1.0,1.0")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(f"BTCUSDT-metrics-{day.isoformat()}.csv", "\n".join(lines) + "\n")
+    return buffer.getvalue()
+
+
+def test_archive_quarantine_reaches_the_payload_through_the_worker(
+    store: PerpsStore, rest: FakeRest, clock: Clock, monkeypatch: pytest.MonkeyPatch
+):
+    start = start_of(31)
+    days = [moment(start).date() + timedelta(days=n) for n in range(4)]
+    stale = days[1]
+
+    def files(request: httpx.Request) -> httpx.Response:
+        day = date.fromisoformat(request.url.path.removesuffix(".zip")[-10:])
+        return httpx.Response(200, content=archive_file(day, stale))
+
+    # The worker reaches the real archive parser; only the files are made up.
+    parser = PerpsRest(httpx.Client(transport=httpx.MockTransport(files)), clock=clock)
+
+    def archive(day: date) -> tuple[list[OiPoint], bool] | None:
+        rest.calls.append(("binance_oi_archive", day))
+        return parser.binance_oi_archive(day)
+
+    monkeypatch.setattr(rest, "binance_oi_archive", archive)
+    worker(store, rest, clock, horizon_days=31).run_once()
+
+    assert rest.named("binance_oi_archive") == [(day,) for day in reversed(days)]
+    oi = store.oi("binance", 0)
+    first = int(datetime(stale.year, stale.month, stale.day, tzinfo=UTC).timestamp())
+    # Quarantined from the stale pair's first row (created 10:50, stamped 10:55) to the end.
+    quarantined = range(first + 10 * 3600 + 55 * 60, first + DAY + BAR, BAR)
+    assert all(oi[t] == (None, "archive") for t in quarantined)
+    assert oi[first + 10 * 3600 + 50 * 60] == (
+        hist_oi(first + 10 * 3600 + 50 * 60) + ARCHIVE_SHIFT,
+        "archive",
+    )
+    assert {t for t, (value, _) in oi.items() if value is None} == set(quarantined)
+    for exchange in ("all", "binance"):
+        states = payload(store, exchange, "4h").states
+        assert states is not None and "archive_quarantined:1" in states.qc
+    bybit = payload(store, "bybit", "4h").states
+    assert bybit is not None and not any(code.startswith("archive") for code in bybit.qc)
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        [],
+        [-3 * BAR, -2 * BAR],  # only before the start
+        [-2 * BAR, BAR, 2 * BAR],  # a hole at the start
+        [-BAR, 0, BAR, 5 * BAR],
+        [3 * BAR, 4 * BAR, 9 * BAR],  # a head gap
+    ],
+)
+def test_gaps_from_stamps_equal_gaps_from_all_rows(store: PerpsStore, stored: list[int]):
+    start = start_of(2)
+    rows = [start + t for t in stored]
+    store.upsert_klines(
+        "bybit",
+        [Kline(t=t, close=1.0, volume=None, taker_buy=None, source="bybit_spot") for t in rows],
+    )
+    assert gaps(store.stamps("kline", "bybit", start), start, END) == gaps(rows, start, END)
 
 
 def test_derives_six_payloads(store: PerpsStore, rest: FakeRest, clock: Clock):
@@ -635,3 +783,45 @@ def test_prune_runs_after_a_failed_round(
 
     assert store.state()["last_error"] == "sync_failed"
     assert old not in store.klines("binance", 0)
+
+
+def test_a_stop_abandons_a_round_stuck_in_a_request(
+    store: PerpsStore, rest: FakeRest, clock: Clock, monkeypatch: pytest.MonkeyPatch
+):
+    old = (NOW_TS - 121 * DAY) // BAR * BAR
+    store.upsert_klines(
+        "binance", [Kline(t=old, close=1.0, volume=1.0, taker_buy=0.5, source="binance_perp")]
+    )
+    # The archive host failed in an earlier round; this round stops before asking it.
+    archive = {"last_success": None, "error": "500", "until": None}
+    store.set_state(hosts=json.dumps({ARCHIVE_HOST: archive}))
+    sync = worker(store, rest, clock)
+    asked = threading.Event()
+
+    def stuck(start: int, end: int) -> list[Kline]:
+        rest.calls.append(("binance_klines", start, end))
+        asked.set()
+        sync.stopping.wait(5)  # a slow request, answered once the stop is asked for
+        return []
+
+    monkeypatch.setattr(rest, "binance_klines", stuck)
+    ran: list[bool] = []
+    thread = threading.Thread(target=lambda: ran.append(sync.run_once()))
+    thread.start()
+    assert asked.wait(5)
+    stopped = time.monotonic()
+    sync.stopping.set()
+    thread.join(5)
+
+    assert not thread.is_alive() and time.monotonic() - stopped < 1
+    assert ran == [True]
+    # Nothing is asked after the stuck request and nothing is derived; the prune still runs.
+    assert [call[0] for call in rest.calls] == ["bybit_spot_klines", "bybit_oi", "binance_klines"]
+    assert all(store.derived(derived_key(e, w)) is None for e in EXCHANGES for w in WINDOWS)
+    assert old not in store.klines("binance", 0)
+    state = store.state()
+    assert "last_run_at" not in state and "direction_check" not in state
+    # What the requests found is kept, and the host the round never reached keeps its error.
+    hosts = hosts_of(store)
+    assert hosts[BYBIT_HOST] == HostState(last_success=NOW, error=None, until=None)
+    assert hosts[ARCHIVE_HOST] == HostState.model_validate(archive)

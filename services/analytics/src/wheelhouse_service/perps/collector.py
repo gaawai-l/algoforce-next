@@ -352,8 +352,12 @@ class Collector:
             self._begin(self._clock(), split=True)
 
     def _handle(self, msg: dict[str, Any], now: float) -> bool:
-        """Buffer the frame's events; True when some were dropped."""
+        """Buffer the frame's events; True when some were dropped, or when the frame is not one
+        the stream carries: it may stand for events missed."""
         if self.stream == "binance_liq":
+            if msg.get("e") != "forceOrder":
+                self._warn("unexpected_frame")
+                return True
             row = parse_binance_force_order(msg)
             return self._keep([] if row is None else [row])
         if "op" in msg:
@@ -364,6 +368,9 @@ class Collector:
                 elif self._live is None:
                     self._begin(self._clock())  # covered from the ack
             return False
+        if msg.get("topic") != TOPICS[self.stream]:
+            self._warn("unexpected_frame")
+            return True
         if self.stream == "bybit_liq":
             return self._keep(parse_bybit_liquidation(msg))
         self._trades.extend(parse_bybit_trades(msg))

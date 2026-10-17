@@ -8,6 +8,7 @@ import type {
   PerpCollector,
   PerpState,
   PerpStatesView,
+  PerpsStatus,
   PerpTable,
 } from "./perps-contract";
 
@@ -63,6 +64,20 @@ const seriesKey: Record<string, MessageKey> = {
 };
 // Their side comes from the exchanges' liquidation fields, checked against price in /perps/status.
 const SQUEEZES: readonly PerpState[] = ["shortsq", "longsq"];
+// The venues whose liquidations a view reads, each checked on its own.
+const VENUES: Record<Exchange, readonly ("binance" | "bybit")[]> = {
+  all: ["binance", "bybit"],
+  binance: ["binance"],
+  bybit: ["bybit"],
+};
+
+// A view's squeezes are verified by its own venue's check; All venues needs the combined
+// verdict. No status or no check yet is not ok.
+function verdictOf(status: PerpsStatus | undefined, exchange: Exchange) {
+  if (!status) return "pending";
+  if (exchange === "all") return status.direction;
+  return status.direction_check?.[exchange].verdict ?? "pending";
+}
 
 const pick = <T extends string>(
   options: readonly T[],
@@ -86,6 +101,7 @@ function reasonText(
   kept: boolean,
 ) {
   if (reason === "not_derived") return text("perp.reason.notDerived");
+  if (reason === "perps_disabled") return text("perp.reason.disabled");
   const series = /^series_missing:(.+)$/.exec(reason);
   if (series)
     return text("perp.reason.seriesMissing", {
@@ -323,7 +339,11 @@ export function PerpStates() {
     retry: false,
   });
   // Unknown counts as unverified: a failed status request does not vouch for the direction.
-  const verified = !status.isError && status.data?.direction === "ok";
+  const checked = status.isError ? undefined : status.data;
+  const verified = verdictOf(checked, exchange) === "ok";
+  const inverted = VENUES[exchange].filter(
+    (venue) => checked?.direction_check?.[venue].verdict === "inverted",
+  );
   const set = (name: "px" | "pw" | "ps", value: string) =>
     setSearch(
       (current) => {
@@ -417,6 +437,11 @@ export function PerpStates() {
           </p>
         ) : null}
         {reasons(data, true)}
+        {inverted.map((venue) => (
+          <p key={venue} className="wh-onchain-warn">
+            {text("perp.inverted", { venue: text(exchangeKey[venue]) })}
+          </p>
+        ))}
         {data.collecting ? (
           <p className="wh-flows-note wh-flows-note--pending">
             {text(

@@ -98,6 +98,9 @@ class Block(Model):
     covered: bool
     dpx: float
     doi: float
+    # The judged sums, null buckets counted as 0 (imputed.sums). Where the block's delta or
+    # liquidations are not covered they are imputed, 0 or a partial sum, and decide nothing:
+    # draw from the *_sum fields.
     delta: float
     lliq: float
     sliq: float

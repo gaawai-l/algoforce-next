@@ -7,6 +7,7 @@ Write the sample again after a contract change with:
 
 import json
 import random
+import socket
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -28,9 +29,8 @@ from wheelhouse_service.perps.api import (
     create_router,
     direction,
     states_view,
-    stored_hosts,
 )
-from wheelhouse_service.perps.collector import STREAMS
+from wheelhouse_service.perps.collector import STREAMS, Collectors
 from wheelhouse_service.perps.models import PerpStatesView, freshness
 from wheelhouse_service.perps.rows import Exchange, Stream
 from wheelhouse_service.perps.sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST
@@ -46,10 +46,12 @@ from wheelhouse_service.perps.store import PerpsStore
 from wheelhouse_service.perps.sync import (
     DirectionCheck,
     Directions,
+    PerpsSync,
     QtyUnits,
     StoredStates,
     Verdict,
     derived_key,
+    stored_hosts,
 )
 from wheelhouse_service.settings import Settings
 
@@ -395,7 +397,7 @@ def test_reason_codes(tmp_path: Path):
     assert all(view["collecting"] is True for view in views.values())
 
 
-def test_unavailable_before_first_derive(tmp_path: Path):
+def test_unavailable_while_perps_are_off(tmp_path: Path):
     path = tmp_path / "perps.sqlite"
     store = PerpsStore(path)
     never = {
@@ -419,7 +421,8 @@ def test_unavailable_before_first_derive(tmp_path: Path):
             "exchange": exchange,
             "window": window,
             "data_state": "unavailable",
-            "reasons": ["not_derived", *(f"collector_down:{stream}" for stream in streams)],
+            # No worker runs in this process, so nothing will be derived: not "not_derived".
+            "reasons": ["perps_disabled", *(f"collector_down:{stream}" for stream in streams)],
             "computed_at": None,
             "last": None,
             "thresholds": None,
@@ -450,8 +453,29 @@ def test_unavailable_before_first_derive(tmp_path: Path):
     assert (marker["last"], marker["blocks"], marker["collecting"]) == (None, [], None)
 
 
-def test_read_does_not_touch_network(tmp_path: Path):
-    store = PerpsStore(tmp_path / "perps.sqlite")
+def test_not_derived_before_the_first_round_while_perps_run(tmp_path: Path):
+    path = tmp_path / "perps.sqlite"
+    client, connect, seen = blocked()
+    # The worker and the collectors are made but never run: no round has derived anything.
+    with perps_spied() as (worker, collectors):
+        app = router_app(path, Clock(SAMPLE_NOW), start_worker=True, http=client, connect=connect)
+        with TestClient(app) as http:
+            views = {exchange: get_states(http, exchange) for exchange in EXCHANGES}
+    worker.assert_called_once()
+    collectors.assert_called_once()
+
+    for exchange, view in views.items():
+        assert view["data_state"] == "unavailable"
+        assert view["reasons"] == [
+            "not_derived",
+            *(f"collector_down:{stream}" for stream in VIEW_STREAMS[exchange]),
+        ]
+    assert seen == []
+
+
+def test_reads_with_perps_off_open_no_connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "perps.sqlite"
+    store = PerpsStore(path)
     for exchange in EXCHANGES:
         for window in WINDOWS:
             save(
@@ -460,21 +484,31 @@ def test_read_does_not_touch_network(tmp_path: Path):
                 window,
                 compute_states(synthetic_grid(SHORT_START, SAMPLE_LAST), window),
             )
-    t = datetime.now(UTC).timestamp()
+    t = SAMPLE_NOW.timestamp()
     for stream in STREAMS:
         cover(store, stream, t - DAY, t)
-    client, connect, seen = blocked()
+    attempts: list[object] = []
 
-    app = create_app(
-        tmp_path / "m.sqlite", start_worker=False, perps_http=client, perps_connect=connect
-    )
-    with TestClient(app) as http:
+    def refuse(*args: object, **kwargs: object) -> Any:
+        attempts.append(args)
+        raise OSError("network is blocked in this test")
+
+    monkeypatch.setattr(socket, "getaddrinfo", refuse)
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(socket.socket, "connect_ex", refuse)
+    # The block holds: a connection out is refused and seen.
+    with pytest.raises(OSError):
+        socket.create_connection(("fapi.binance.com", 443))
+    assert len(attempts) == 1
+    attempts.clear()
+
+    with TestClient(router_app(path, Clock(SAMPLE_NOW), start_worker=False)) as http:
         views = [get_states(http, e, w) for e in EXCHANGES for w in WINDOWS]
         status = http.get(f"{PREFIX}/status")
 
     assert all(view["last"] == iso(SAMPLE_LAST) for view in views)
     assert status.status_code == 200
-    assert seen == []
+    assert attempts == []
 
 
 def test_start_perps_false_starts_nothing(tmp_path: Path):
@@ -555,6 +589,38 @@ def test_perps_run_only_while_the_app_runs(tmp_path: Path):
     assert not names & {thread.name for thread in threading.enumerate()}
 
 
+def test_shutdown_tells_the_worker_before_stopping_the_collectors(tmp_path: Path):
+    client, connect, seen = blocked()
+    workers: list[PerpsSync] = []
+    order: list[tuple[str, bool]] = []
+
+    def stop_collectors(_: Collectors, *args: object) -> None:
+        order.append(("collectors", workers[0].stopping.is_set()))
+
+    def stop_worker(worker: PerpsSync) -> None:
+        order.append(("worker", worker.stopping.is_set()))
+
+    with (
+        patch.object(PerpsSync, "start", autospec=True, side_effect=workers.append),
+        patch.object(PerpsSync, "stop", autospec=True, side_effect=stop_worker),
+        patch.object(Collectors, "start", autospec=True),
+        patch.object(Collectors, "stop", autospec=True, side_effect=stop_collectors),
+    ):
+        app = router_app(
+            tmp_path / "perps.sqlite",
+            Clock(SAMPLE_NOW),
+            start_worker=True,
+            http=client,
+            connect=connect,
+        )
+        with TestClient(app):
+            assert not workers[0].stopping.is_set()
+
+    # The worker winds its round down while the collectors close their coverage.
+    assert order == [("collectors", True), ("worker", True)]
+    assert seen == []
+
+
 def test_status_counts_the_running_collectors_problems(tmp_path: Path):
     client, connect, _ = blocked()
     app = router_app(
@@ -632,10 +698,10 @@ def test_collector_status_from_store(tmp_path: Path):
     ]
     # A view lists, and reports down, only the streams it reads.
     assert binance["collectors"] == status["collectors"][:1]
-    assert binance["reasons"] == ["not_derived"]
+    assert binance["reasons"] == ["perps_disabled"]
     assert bybit["collectors"] == status["collectors"][1:]
     assert bybit["reasons"] == [
-        "not_derived",
+        "perps_disabled",
         "collector_down:bybit_liq",
         "collector_down:bybit_trades",
     ]
@@ -706,7 +772,7 @@ def test_status_reports_hosts_and_direction(tmp_path: Path):
 
 
 def test_capability_and_get_only_routes(tmp_path: Path):
-    app = create_app(tmp_path / "m.sqlite", start_worker=False)
+    app = create_app(tmp_path / "m.sqlite", start_worker=False, start_perps=False)
     with TestClient(app) as http:
         capabilities = http.get("/api/wheelhouse/v1/status").json()["capabilities"]
         paths = http.get("/api/wheelhouse/v1/openapi.json").json()["paths"]

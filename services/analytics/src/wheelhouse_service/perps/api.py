@@ -1,7 +1,6 @@
 """Read-only perps endpoints. They only read the private store: freshness, collector status and
 reason codes are worked out per request (spec §3.7, §4; P4-R10)."""
 
-import json
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -18,7 +17,15 @@ from .rows import Exchange, Stream
 from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, PerpsRest
 from .states import DAY, REFERENCE_DAYS, Window
 from .store import PerpsStore
-from .sync import HOSTS, Directions, HostState, PerpsSync, StoredStates, Verdict, derived_key
+from .sync import (
+    Directions,
+    HostState,
+    PerpsSync,
+    StoredStates,
+    Verdict,
+    derived_key,
+    stored_hosts,
+)
 
 # What each view reads; only these give it a `collector_down` or `rest_error` reason. Every view
 # prices with Bybit spot; Binance's OI comes from its history and its archive files.
@@ -34,6 +41,8 @@ VIEW_HOSTS: dict[Exchange, tuple[str, ...]] = {
 }
 # Before the worker's first derive there is no payload, whatever else is wrong.
 NOT_DERIVED = "not_derived"
+# Nor will there be one while this process runs no worker and no collectors.
+PERPS_DISABLED = "perps_disabled"
 
 
 def utc_now() -> datetime:
@@ -78,15 +87,6 @@ def collector_status(
     )
 
 
-def stored_hosts(state: Mapping[str, str | None]) -> dict[str, HostState]:
-    """Each host's state as the worker stored it; empty for a host it has not recorded."""
-    stored = json.loads(state.get("hosts") or "{}")
-    empty = HostState(last_success=None, error=None, until=None)
-    return {
-        host: HostState.model_validate(stored[host]) if host in stored else empty for host in HOSTS
-    }
-
-
 def states_view(
     exchange: Exchange,
     window: Window,
@@ -94,14 +94,18 @@ def states_view(
     collectors: Sequence[CollectorStatus],
     hosts: Mapping[str, HostState],
     now: datetime,
+    *,
+    enabled: bool = True,
 ) -> PerpStatesView:
-    """The stored payload of one view, with its freshness and reason codes at `now`.
+    """The stored payload of one view, with its freshness and reason codes at `now`; `enabled`
+    says whether this process runs the worker and the collectors.
 
     Reasons in order: series_missing, rest_error, collector_down, collecting (spec §3.7).
     """
     stored, computed_at = derived if derived is not None else (None, None)
     states = stored.states if stored is not None else None
-    reasons = list(stored.reasons) if stored is not None else [NOT_DERIVED]
+    missing = NOT_DERIVED if enabled else PERPS_DISABLED
+    reasons = list(stored.reasons) if stored is not None else [missing]
     errors = [(host, hosts[host].error) for host in VIEW_HOSTS[exchange]]
     reasons += [f"rest_error:{host}:{error}" for host, error in errors if error]
     reasons += [f"collector_down:{status.stream}" for status in collectors if not status.live]
@@ -167,7 +171,10 @@ def create_router(
             collectors.start()
             worker.start()
         yield
-        # Collectors first: stopping closes their coverage at the last committed proof.
+        # The worker is told first, so that it abandons its round at its next request while the
+        # collectors stop and close their coverage at the last committed proof.
+        if worker:
+            worker.stopping.set()
         if collectors:
             collectors.stop()
         if worker:
@@ -201,6 +208,7 @@ def create_router(
             statuses(VIEW_STREAMS[exchange], now),
             stored_hosts(db().state()),
             now,
+            enabled=start_worker,
         )
 
     @router.get("/status", response_model=PerpsStatus)

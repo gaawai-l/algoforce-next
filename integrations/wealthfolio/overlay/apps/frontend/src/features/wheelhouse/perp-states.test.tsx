@@ -60,6 +60,41 @@ function status(direction: PerpsStatus["direction"]): PerpsStatus {
   };
 }
 
+// Each venue's own check, and the combined verdict the service derives from both.
+function checked(
+  binance: PerpsStatus["direction"],
+  bybit: PerpsStatus["direction"],
+): PerpsStatus {
+  const check = (verdict: PerpsStatus["direction"]) => ({
+    verdict,
+    samples: 40,
+    down: 25,
+    long_share: verdict === "inverted" ? 0.2 : 0.8,
+  });
+  const both = [binance, bybit];
+  return {
+    ...status(
+      both.includes("inverted")
+        ? "inverted"
+        : both.every((verdict) => verdict === "ok")
+          ? "ok"
+          : "pending",
+    ),
+    direction_check: {
+      binance: check(binance),
+      bybit: check(bybit),
+      bybit_qty: {
+        events: 40,
+        min_qty: 0.001,
+        min_notional: 60,
+        max_notional: 250_000,
+        notional_in_range: true,
+        min_qty_matches: true,
+      },
+    },
+  };
+}
+
 function Where() {
   return <output data-testid="where">{useLocation().search}</output>;
 }
@@ -67,12 +102,15 @@ function Where() {
 function show({
   view = perpStatesSample(),
   direction = "ok",
+  checks,
   search = "",
   cached,
   cachedDirection,
 }: {
   view?: PerpStatesView | Error | "pending";
   direction?: PerpsStatus["direction"] | Error;
+  // A status with each venue's check; it replaces `direction`.
+  checks?: PerpsStatus;
   search?: string;
   // An earlier successful reading of the default view, which a failed refetch leaves cached.
   cached?: PerpStatesView;
@@ -82,15 +120,16 @@ function show({
   if (view === "pending") mocks.states.mockReturnValue(new Promise(() => {}));
   else if (view instanceof Error) mocks.states.mockRejectedValue(view);
   else mocks.states.mockResolvedValue(view);
-  if (direction instanceof Error) mocks.status.mockRejectedValue(direction);
-  else mocks.status.mockResolvedValue(status(direction));
+  const reply =
+    checks ?? (direction instanceof Error ? undefined : status(direction));
+  if (reply) mocks.status.mockResolvedValue(reply);
+  else mocks.status.mockRejectedValue(direction);
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   // The status is known from the first frame, so labels never flicker in an assertion; the
   // component still refetches it on mount.
-  if (!(direction instanceof Error))
-    client.setQueryData(["wh", "perps", "status"], status(direction));
+  if (reply) client.setQueryData(["wh", "perps", "status"], reply);
   if (cached) client.setQueryData(["wh", "perps", "all", "4h"], cached);
   if (cachedDirection)
     client.setQueryData(["wh", "perps", "status"], status(cachedDirection));
@@ -374,6 +413,85 @@ it("does not trust an older ok once the status request fails", async () => {
   );
 });
 
+// The sample as the given venue's view.
+function viewOf(exchange: PerpStatesView["exchange"]): PerpStatesView {
+  return { ...perpStatesSample(), exchange };
+}
+
+const squeezeLabels = () =>
+  bodyRows()
+    .slice(0, 2)
+    .map((row) => cellsOf(row)[0]);
+
+it.each([
+  ["binance", ["Short squeeze", "Long squeeze"]],
+  [
+    "bybit",
+    [
+      "Short squeeze (direction unverified)",
+      "Long squeeze (direction unverified)",
+    ],
+  ],
+  [
+    "all",
+    [
+      "Short squeeze (direction unverified)",
+      "Long squeeze (direction unverified)",
+    ],
+  ],
+] as const)(
+  "verifies the %s view's squeezes by its own venue's check",
+  async (exchange, labels) => {
+    // Binance is ok, Bybit still pending, so both together are pending.
+    show({
+      view: viewOf(exchange),
+      checks: checked("ok", "pending"),
+      search: `?px=${exchange}`,
+    });
+    await screen.findByText(tableTitle);
+    await waitFor(() => expect(mocks.status).toHaveBeenCalledOnce());
+    expect(squeezeLabels()).toEqual(labels);
+    expect(screen.queryByText(/look inverted/)).toBeNull();
+  },
+);
+
+it.each([
+  ["bybit", true, true],
+  ["all", true, true],
+  ["binance", false, false],
+] as const)(
+  "on the %s view, warns of inverted Bybit sides: %s",
+  async (exchange, warned, unverified) => {
+    show({
+      view: viewOf(exchange),
+      checks: checked("ok", "inverted"),
+      search: `?px=${exchange}`,
+    });
+    await screen.findByText(tableTitle);
+    await waitFor(() => expect(mocks.status).toHaveBeenCalledOnce());
+    const notice = screen.queryByText(
+      "Liquidation sides look inverted on Bybit: squeeze labels may be swapped",
+    );
+    expect(notice !== null).toBe(warned);
+    expect(screen.queryByText(/inverted on Binance/)).toBeNull();
+    expect(squeezeLabels()[0].includes("unverified")).toBe(unverified);
+  },
+);
+
+it("names each venue whose sides look inverted on the all-venues view", async () => {
+  show({ checks: checked("inverted", "inverted") });
+  expect(
+    await screen.findByText(
+      "Liquidation sides look inverted on Binance: squeeze labels may be swapped",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Liquidation sides look inverted on Bybit: squeeze labels may be swapped",
+    ),
+  ).toBeTruthy();
+});
+
 it("defaults to all venues, 4h and 30d, and asks for that view", async () => {
   show();
   await screen.findByText(tableTitle);
@@ -512,6 +630,39 @@ it("shows an unavailable view with its reasons and no table", async () => {
   expect(screen.queryByText(/older data kept/)).toBeNull();
   expect(screen.queryByRole("table")).toBeNull();
   expect(screen.queryByText(/Resolution 10m/)).toBeNull();
+});
+
+it("says when this service runs no perps collection", async () => {
+  const view: PerpStatesView = {
+    ...perpStatesSample(),
+    data_state: "unavailable",
+    reasons: ["perps_disabled", "collector_down:bybit_liq"],
+    computed_at: null,
+    last: null,
+    thresholds: null,
+    blocks: [],
+    tail: null,
+    tables: [],
+    covered_days: null,
+    collecting: null,
+    qc: [],
+    series_missing: [],
+  };
+  view.collectors = view.collectors.map((collector) => ({
+    ...collector,
+    live: false,
+    last_proof: null,
+    down_since: null,
+    covered_days: 0,
+    since: null,
+  }));
+  show({ view });
+  expect(
+    await screen.findByText(
+      "Perp data collection is turned off in this service · Bybit liquidations collector has not connected yet",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("table")).toBeNull();
 });
 
 it.each([

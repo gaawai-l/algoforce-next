@@ -519,6 +519,7 @@ const en = {
   "perp.series.bybitOi": "Bybit OI",
   "perp.reason.notDerived":
     "Not derived yet: the worker has not finished its first round",
+  "perp.reason.disabled": "Perp data collection is turned off in this service",
   "perp.reason.seriesMissing": "No {{series}} in the last 90 days",
   "perp.reason.restError": "{{host}} failing ({{code}}); older data kept",
   "perp.reason.restFailing": "{{host}} failing ({{code}})",
@@ -552,6 +553,8 @@ const en = {
   "perp.forming":
     "The latest block was still forming when computed ({{buckets}} of {{total}} ten-minute buckets); its state can change.",
   "perp.unverified": "{{state}} (direction unverified)",
+  "perp.inverted":
+    "Liquidation sides look inverted on {{venue}}: squeeze labels may be swapped",
   "perp.state.shortsq": "Short squeeze",
   "perp.state.longsq": "Long squeeze",
   "perp.state.shortun": "Short unwind",
@@ -1123,6 +1126,7 @@ const zh: Record<MessageKey, string> = {
   "perp.series.binanceKline": "Binance 主动成交量",
   "perp.series.bybitOi": "Bybit OI",
   "perp.reason.notDerived": "尚未派生：worker 还没有完成第一轮",
+  "perp.reason.disabled": "本服务未开启永续数据采集",
   "perp.reason.seriesMissing": "近 90 天没有 {{series}}",
   "perp.reason.restError": "{{host}} 请求失败（{{code}}），保留旧数据",
   "perp.reason.restFailing": "{{host}} 请求失败（{{code}}）",
@@ -1156,6 +1160,7 @@ const zh: Record<MessageKey, string> = {
   "perp.forming":
     "计算时最新块仍在形成（{{buckets}} / {{total}} 个 10 分钟桶），其状态可能改变。",
   "perp.unverified": "{{state}}（方向未核对）",
+  "perp.inverted": "{{venue}} 的清算方向看起来是反的：挤压标签可能对调了",
   "perp.state.shortsq": "空头挤压",
   "perp.state.longsq": "多头挤压",
   "perp.state.shortun": "空头离场",
