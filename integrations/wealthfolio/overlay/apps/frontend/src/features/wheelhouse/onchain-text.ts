@@ -73,6 +73,31 @@ export function rulesNote(
   return lines;
 }
 
+// The rules lines of several views, each line naming its views: views whose lines read the same
+// share them, so one line names them all, and a view that differs, or is the only one, is named.
+export function rulesByView(
+  text: TextFn,
+  views: { title: string; view: Parameters<typeof rulesNote>[1] }[],
+) {
+  const groups: { titles: string[]; lines: string[] }[] = [];
+  for (const { title, view } of views) {
+    const lines = rulesNote(text, view);
+    const same = groups.find(
+      (group) => group.lines.join("\n") === lines.join("\n"),
+    );
+    if (same) same.titles.push(title);
+    else groups.push({ titles: [title], lines });
+  }
+  return groups.flatMap(({ titles, lines }) =>
+    lines.map((line) =>
+      text("rules.forView", {
+        view: titles.join(text("rules.viewSeparator")),
+        line,
+      }),
+    ),
+  );
+}
+
 // The cost-line timestamps are UTC instants; the day they name is the UTC day.
 export const utcDay = (instant: string) =>
   new Date(instant).toISOString().slice(0, 10);

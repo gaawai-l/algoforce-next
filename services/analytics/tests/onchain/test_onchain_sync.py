@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 import pytest
-from onchain_fixture import brk_transport, load_urpd
+from onchain_fixture import EPOCH, brk_transport, load_urpd
 
 from wheelhouse_service.onchain.brk import (
     DAY1_SERIES,
@@ -23,6 +23,7 @@ from wheelhouse_service.onchain.cycle import Cycle
 from wheelhouse_service.onchain.pressure import Pressure
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import URPD_SET, OnchainSync
+from wheelhouse_service.rules import Rules
 
 NOW = datetime(2026, 10, 16, 10, 40, tzinfo=UTC)
 LINES = {"true_mean", "short_term", "average", "long_term", "median"}
@@ -36,13 +37,23 @@ def instant(value: str | None) -> datetime:
     return datetime.fromisoformat(value)
 
 
-def sync_for(store: OnchainStore, transport: httpx.MockTransport, now: datetime) -> OnchainSync:
+def sync_for(
+    store: OnchainStore,
+    transport: httpx.MockTransport,
+    now: datetime,
+    rules: Rules = frozenset(),
+) -> OnchainSync:
     client = BrkClient(httpx.Client(transport=transport), clock=lambda: now)
-    return OnchainSync(store, client, rules=frozenset())
+    return OnchainSync(store, client, rules=rules)
 
 
-def run(store: OnchainStore, transport: httpx.MockTransport, now: datetime) -> bool:
-    return sync_for(store, transport, now).run_once(now=now)
+def run(
+    store: OnchainStore,
+    transport: httpx.MockTransport,
+    now: datetime,
+    rules: Rules = frozenset(),
+) -> bool:
+    return sync_for(store, transport, now, rules).run_once(now=now)
 
 
 def rewritten(
@@ -1169,3 +1180,68 @@ def test_worker_thread_runs_and_stops_promptly(tmp_path: Path, monkeypatch: pyte
 
     assert sync.thread is not None
     assert not sync.thread.is_alive()
+
+
+# 2026-10-01 is inside the fixture's last run, which started on 09-23.
+GAP = date(2026, 10, 1)
+
+
+def without_gap_day(transport: httpx.MockTransport) -> httpx.MockTransport:
+    """The fixture BRK, except that TMM has no value for GAP."""
+
+    def edit(name: str, item: dict[str, Any]) -> None:
+        offset = (GAP - EPOCH).days - item["start"]
+        if name == "true_market_mean" and 0 <= offset < len(item["data"]):
+            item["data"][offset] = None
+
+    return rewritten(transport, edit)
+
+
+def test_o4_reaches_the_derived_cycle(tmp_path: Path):
+    def derived(rules: Rules) -> Cycle:
+        store = OnchainStore(tmp_path / f"{'-'.join(sorted(rules)) or 'v1'}.sqlite")
+        transport, _ = brk_transport()
+        assert run(store, without_gap_day(transport), NOW, rules)
+        return cycle_of(store)
+
+    v1, o4 = derived(frozenset()), derived(frozenset({"O4"}))
+
+    # v1 skips the day with no TMM; O4 keeps the state over it and counts it.
+    assert (v1.rules, v1.since, v1.day, v1.episodes[-1].days) == ([], date(2026, 9, 23), 23, 23)
+    assert (o4.rules, o4.since, o4.day, o4.episodes[-1].days) == (
+        ["O4"],
+        date(2026, 9, 23),
+        24,
+        24,
+    )
+    assert (v1.as_of, v1.state, v1.changes) == (o4.as_of, o4.state, o4.changes)
+
+
+def test_o1_reaches_the_derived_cycle(tmp_path: Path):
+    def derived(rules: Rules) -> Cycle:
+        store = OnchainStore(tmp_path / f"{'-'.join(sorted(rules)) or 'v1'}.sqlite")
+        transport, _ = brk_transport()
+        assert run(store, transport, NOW, rules)
+        return cycle_of(store)
+
+    v1, o1 = derived(frozenset()), derived(frozenset({"O1"}))
+
+    assert (v1.rules, v1.as_of, v1.day, v1.latest_day) == ([], D, 24, D)
+    # At 10:40 the closed day is 10-15; 10-16 is still open but is the newest day there is.
+    assert (o1.rules, o1.as_of, o1.day, o1.latest_day) == (["O1"], date(2026, 10, 15), 23, D)
+    assert (o1.state, o1.since, o1.changes) == (v1.state, v1.since, v1.changes)
+
+
+def test_o1_closed_day_is_the_one_at_the_start_of_the_round(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    # The round starts before 02:00, while 10-16 may still be revised, and ends after it.
+    start = datetime(2026, 10, 17, 1, 59, tzinfo=UTC)
+    done = datetime(2026, 10, 17, 2, 1, tzinfo=UTC)
+    sync = sync_for(store, transport, start, frozenset({"O1"}))
+
+    assert sync._refresh(start, lambda: done) is None
+
+    derived = store.derived("cycle")
+    assert derived is not None and derived[1] == done
+    assert cycle_of(store).as_of == date(2026, 10, 15)

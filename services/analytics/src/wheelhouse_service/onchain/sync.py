@@ -21,7 +21,7 @@ from .costbasis import (
 )
 from .cycle import classify
 from .levels import ModelLine, last_complete, model_lines
-from .models import GRACE_END
+from .models import GRACE_END, closed_day
 from .pressure import LOOKBACK, seller_pressure
 from .store import OnchainStore
 
@@ -142,15 +142,17 @@ class OnchainSync:
         )
         if not changed:
             return False
-        self.derive_from_store()
+        # Due first: should deriving fail, the next refresh still runs at once and derives anyway.
         self.store.set_state(next_due=timestamp(now))
+        self.derive_from_store()
         return True
 
     def derive_from_store(self) -> None:
         """Derive every stored view again under `self.rules`, reading only the store.
 
-        Each view keeps the time it was computed: the day1 ones the latest of theirs, the seller
-        pressure its own. A view group with nothing stored is left alone.
+        Each view keeps the time it was computed: the day1 ones the latest of theirs, which also
+        gives their closed day, the seller pressure its own. A view group with nothing stored is
+        left alone.
         """
         stamps = [
             derived[1] for view in DAY1_VIEWS if (derived := self.store.derived(view)) is not None
@@ -160,12 +162,15 @@ class OnchainSync:
         hour1_missing = self._stored_hour1_missing()
         if stamps:
             at = max(stamps)
-            self._derive(self._recent_urpd(at), at, hour1_missing, hour1_at)
+            self._derive(self._recent_urpd(at), at, hour1_missing, hour1_at, closed=closed_day(at))
         else:
             self._derive_pressure(hour1_missing, hour1_at)
 
     def _refresh(self, at: datetime, clock: Callable[[], datetime]) -> BrkError | None:
         """Run one refresh; return the error of the hour1 or URPD stage when only those failed."""
+        # The closed day is that of the round's start, so a round that crosses GRACE_END does not
+        # take a day BRK could still revise for closed.
+        closed = closed_day(at)
         version = self.client.version()
         missing: set[str] = set()
         if version != self.store.state()["brk_version"]:
@@ -202,7 +207,7 @@ class OnchainSync:
             urpd = self._recent_urpd(at)
 
         done = clock()
-        self._derive(urpd, done, hour1_missing, hour1_done)
+        self._derive(urpd, done, hour1_missing, hour1_done, closed=closed)
         absent = [name for name in DAY1_SERIES if name in missing]
         absent_hour1 = [name for name in HOUR1_SERIES if name in hour1_missing]
         # `price_close` is in both indexes, so day1 reasons keep their form and hour1 ones add it.
@@ -323,21 +328,30 @@ class OnchainSync:
         at: datetime,
         hour1_missing: set[str],
         hour1_at: datetime | None,
+        *,
+        closed: date,
     ) -> None:
-        """Derive every view; stamp the pressure `hour1_at`, None when the hour1 stage failed."""
+        """Derive every view; stamp the pressure `hour1_at`, None when the hour1 stage failed.
+
+        `closed` is the latest closed day: under O1 nothing dated after it is read.
+        """
         rows = {name: self.store.read_series(name, "day1") for name in DAY1_SERIES}
 
         w, sth, tmm, close = (
             {moment.date(): value for moment, value in rows[name]} for name in CYCLE_SERIES
         )
         days = sorted(w.keys() | sth.keys() | tmm.keys() | close.keys())
+        # Only the rules the payload records are applied.
+        cycle_rules = rules_for_view("cycle", self.rules)
         cycle = classify(
-            [(day, w.get(day), sth.get(day), tmm.get(day), close.get(day)) for day in days]
+            [(day, w.get(day), sth.get(day), tmm.get(day), close.get(day)) for day in days],
+            rules=frozenset(cycle_rules),
+            closed_day=closed,
         )
         if cycle is None:
             self.store.clear_derived("cycle")
         else:
-            cycle = cycle.model_copy(update={"rules": rules_for_view("cycle", self.rules)})
+            cycle = cycle.model_copy(update={"rules": cycle_rules})
             self.store.save_derived("cycle", cycle.model_dump_json(), at)
 
         last = last_complete(rows)
@@ -371,6 +385,10 @@ class OnchainSync:
         self._derive_pressure(hour1_missing, hour1_at)
 
     def _derive_pressure(self, hour1_missing: set[str], hour1_at: datetime | None) -> None:
+        """Derive the seller pressure and stamp it `hour1_at`.
+
+        With `hour1_at` None the stored pressure is kept as it is, with the time it was computed.
+        """
         if hour1_at is None:
             # The stored pressure stays, with the time it was computed, until hour1 is fetched.
             return

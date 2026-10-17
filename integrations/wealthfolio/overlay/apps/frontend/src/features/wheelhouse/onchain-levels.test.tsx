@@ -4,7 +4,7 @@ import type { CycleView, LevelsView } from "./onchain-contract";
 import { costBasisSample, cycleSample, levelsSample } from "./onchain-contract";
 import { phrase } from "./i18n";
 import { OnchainLevels, olderUrpdDate, shortDay } from "./onchain-levels";
-import { reasonText, rulesNote } from "./onchain-text";
+import { reasonText, rulesByView, rulesNote } from "./onchain-text";
 
 // The shared test setup mocks matchMedia as a narrow screen; each test sets its own width.
 function viewport(wide: boolean) {
@@ -403,8 +403,10 @@ it("says the views are the original v1 when no rule applied", () => {
       costBasis={costBasisSample}
     />,
   );
-  // All three views agree, so one line stands for them.
-  const line = screen.getByText("Rules: original v1");
+  // All three views agree, so one line names them all.
+  const line = screen.getByText(
+    "Cost-basis levels, Cost model lines, Cycle · Rules: original v1",
+  );
   expect(line.closest("details")).toBe(sourceSection());
   expect(screen.getAllByText(/Rules:/)).toHaveLength(1);
   expect(
@@ -420,14 +422,15 @@ it("names the rules of each view in the Source section when they differ", () => 
       costBasis={{ ...costBasisSample, rules: ["O1", "O5"] }}
     />,
   );
+  // The two views with the same rules share a line; the cycle has its own.
   const lines = [
-    "Cost-basis levels · Rules: O1 closed data only · O5 stable levels",
-    "Cost model lines · Rules: O1 closed data only · O5 stable levels",
+    "Cost-basis levels, Cost model lines · Rules: O1 closed data only · O5 stable levels",
     "Cycle · Rules: O1 closed data only · O4 calendar days",
   ];
   for (const line of lines)
     expect(screen.getByText(line).closest("details")).toBe(sourceSection());
-  expect(screen.queryByText("Rules: original v1")).toBeNull();
+  expect(screen.getAllByText(/Rules:/)).toHaveLength(2);
+  expect(screen.queryByText(/original v1/)).toBeNull();
 });
 
 it("says the Source rules are being recomputed only for the views that are", () => {
@@ -443,11 +446,13 @@ it("says the Source rules are being recomputed only for the views that are", () 
   ).toBeTruthy();
   expect(screen.getByText("Cycle · Rules: original v1")).toBeTruthy();
   expect(
-    screen.getByText("Cost model lines · Rules: original v1"),
+    screen.getByText(
+      "Cost-basis levels, Cost model lines · Rules: original v1",
+    ),
   ).toBeTruthy();
 });
 
-it("leaves a failed view out of the Source rules", () => {
+it("leaves a failed view out of the Source rules and names the one left", () => {
   render(
     <OnchainLevels
       levels={levelsSample}
@@ -455,8 +460,43 @@ it("leaves a failed view out of the Source rules", () => {
       cycleError="service down"
     />,
   );
-  expect(screen.getByText("Rules: original v1")).toBeTruthy();
+  expect(
+    screen.getByText("Cost model lines · Rules: original v1"),
+  ).toBeTruthy();
+  expect(screen.getAllByText(/Rules:/)).toHaveLength(1);
   expect(screen.queryByText(/O1 closed data only/)).toBeNull();
+});
+
+it("leaves the cost lines out of the Source rules when their request failed", () => {
+  render(
+    <OnchainLevels
+      levels={{ ...levelsSample, rules: ["O5"] }}
+      levelsError="service down"
+      cycle={cycleSample}
+      costBasis={costBasisSample}
+    />,
+  );
+  expect(
+    screen.getByText("Cost-basis levels, Cycle · Rules: original v1"),
+  ).toBeTruthy();
+  expect(screen.getAllByText(/Rules:/)).toHaveLength(1);
+  expect(screen.queryByText(/O5 stable levels/)).toBeNull();
+});
+
+it("leaves the cost-basis levels out of the Source rules when their request failed", () => {
+  render(
+    <OnchainLevels
+      levels={levelsSample}
+      cycle={cycleSample}
+      costBasis={{ ...costBasisSample, rules: ["O5"] }}
+      costBasisError="service down"
+    />,
+  );
+  expect(
+    screen.getByText("Cost model lines, Cycle · Rules: original v1"),
+  ).toBeTruthy();
+  expect(screen.getAllByText(/Rules:/)).toHaveLength(1);
+  expect(screen.queryByText(/O5 stable levels/)).toBeNull();
 });
 
 it("says nothing about the rules of a view that has no data", () => {
@@ -471,8 +511,30 @@ it("says nothing about the rules of a view that has no data", () => {
       cycle={{ ...cycleSample, rules: ["O1"] }}
     />,
   );
-  expect(screen.getByText("Rules: O1 closed data only")).toBeTruthy();
+  expect(screen.getByText("Cycle · Rules: O1 closed data only")).toBeTruthy();
   expect(screen.queryByText(/original v1/)).toBeNull();
+});
+
+it("groups the views by their rules lines in both languages", () => {
+  const zh = (
+    key: Parameters<typeof phrase>[1],
+    vars?: Record<string, string | number>,
+  ) => phrase("zh", key, vars);
+  type Note = Parameters<typeof rulesNote>[1];
+  const none: Note = { rules: [], rules_pending: false };
+  const pending: Note = { rules: [], rules_pending: true };
+  expect(
+    rulesByView(zh, [
+      { title: "成本价位表", view: none },
+      { title: "成本模型线", view: pending },
+      { title: "周期", view: none },
+    ]),
+  ).toEqual([
+    "成本价位表、周期 · 口径：原始 v1",
+    "成本模型线 · 口径：原始 v1",
+    "成本模型线 · 正在按已配置的规则重新计算",
+  ]);
+  expect(rulesByView(zh, [])).toEqual([]);
 });
 
 it("writes the rules line in both languages: none, several, and recomputing", () => {

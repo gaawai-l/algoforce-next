@@ -4,6 +4,7 @@ Run as `python -m wheelhouse_service.derive --data-dir DIR [--rules SPEC]`. BRK 
 """
 
 import argparse
+import json
 import os
 from collections.abc import Sequence
 from pathlib import Path
@@ -48,8 +49,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     store = OnchainStore(path)
     # The worker needs a client, but deriving from the store never uses it.
     OnchainSync(store, BrkClient(), rules=rules).derive_from_store()
-    views = [view for view in VIEWS if store.derived(view) is not None]
-    print(f"derived views={','.join(views) or 'none'} rules={','.join(sorted(rules)) or 'v1'}")
+    # Each view with the rules its payload recorded: only those implemented for it apply.
+    recorded = [
+        f"{view}={','.join(json.loads(derived[0]).get('rules', [])) or 'v1'}"
+        for view in VIEWS
+        if (derived := store.derived(view)) is not None
+    ]
+    print(f"derived {' '.join(recorded) or 'none'}")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,10 @@
 """Rule switches: the rules stored with each on-chain payload, and re-deriving when they change."""
 
 import json
+import logging
 import shutil
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -120,13 +121,25 @@ def test_payloads_stored_before_rules_existed_read_as_no_rules(tmp_path: Path):
     store = OnchainStore(path)
     for name, (payload, computed_at) in stored(store).items():
         assert payload.pop("rules") == []
+        # Nor was the newest day stored then.
+        payload.pop("latest_day", None)
         old = json.dumps(payload)
         store.save_derived(name, old, computed_at)
         assert PAYLOADS[name].model_validate_json(old).rules == []
+    cycle = store.derived("cycle")
+    assert cycle is not None
+    assert Cycle.model_validate_json(cycle[0]).latest_day is None
 
-    # Nothing is implemented yet, so even every rule on leaves nothing pending.
+    # Only the cycle has rules implemented, so under every rule only it waits to be derived again.
     views = read_views(path, ALL_RULES)
-    assert labels(views) == {name: ([], False) for name in ROUTES}
+    assert labels(views) == {
+        "cycle": ([], True),
+        "levels": ([], False),
+        "costbasis": ([], False),
+        "pressure": ([], False),
+    }
+    # Without the newest day, freshness follows `as_of`, the fixture's last day.
+    assert (views["cycle"]["data_state"], views["cycle"]["as_of"]) == ("fresh", "2026-10-16")
     assert views["cycle"]["state"] == "breakout"
     assert views["levels"]["lines"]
     assert views["costbasis"]["buckets"]
@@ -145,17 +158,15 @@ def test_empty_store_has_no_rules_and_nothing_pending(
     assert labels(views) == {name: ([], False) for name in ROUTES}
 
 
-def test_restart_with_other_rules_rederives_from_the_store_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setitem(rules.IMPLEMENTED, "cycle", frozenset({"O1"}))
+def test_restart_with_other_rules_rederives_from_the_store_only(tmp_path: Path):
     path = synced(tmp_path, frozenset())
     store = OnchainStore(path)
     before = stored(store)
     due = store.state()["next_due"]
-    configured: Rules = frozenset({"O1"})
+    # O4 changes no number on this data (no day is missing), so only the label may change.
+    configured: Rules = frozenset({"O4"})
 
-    # Restarted under O1, before the worker re-derived: the label is still the payload's.
+    # Restarted under O4, before the worker re-derived: the label is still the payload's.
     assert labels(read_views(path, configured)) == {
         "cycle": ([], True),
         "levels": ([], False),
@@ -168,7 +179,7 @@ def test_restart_with_other_rules_rederives_from_the_store_only(
     assert OnchainSync(store, client, rules=configured).rederive_if_rules_changed(RESTART)
 
     assert labels(read_views(path, configured)) == {
-        "cycle": (["O1"], False),
+        "cycle": (["O4"], False),
         "levels": ([], False),
         "costbasis": ([], False),
         "pressure": ([], False),
@@ -176,7 +187,7 @@ def test_restart_with_other_rules_rederives_from_the_store_only(
     after = stored(store)
     # Each payload keeps the time it was computed; only the cycle's label changed.
     assert {name: at for name, (_, at) in after.items()} == {name: NOW for name in ROUTES}
-    assert after["cycle"][0] == {**before["cycle"][0], "rules": ["O1"]}
+    assert after["cycle"][0] == {**before["cycle"][0], "rules": ["O4"]}
     for name in ("levels", "costbasis", "pressure"):
         assert after[name][0] == before[name][0]
     # The fetches the new rules need happen at once.
@@ -252,6 +263,68 @@ def test_empty_store_is_not_rederived(tmp_path: Path, monkeypatch: pytest.Monkey
     assert seen == []
 
 
+def test_rederive_takes_the_closed_day_from_the_stored_time(tmp_path: Path):
+    path = synced(tmp_path, frozenset())
+    store = OnchainStore(path)
+    client, seen = blocked_client()
+    # Restarted the next day after 02:00, when 10-16 is closed; at NOW, when the payloads were
+    # derived, it was not.
+    restart = datetime(2026, 10, 17, 3, 0, tzinfo=UTC)
+
+    assert OnchainSync(store, client, rules=frozenset({"O1"})).rederive_if_rules_changed(restart)
+
+    derived = store.derived("cycle")
+    assert derived is not None and derived[1] == NOW
+    cycle = Cycle.model_validate_json(derived[0])
+    assert (cycle.rules, cycle.as_of, cycle.day, cycle.latest_day) == (
+        ["O1"],
+        date(2026, 10, 15),
+        23,
+        date(2026, 10, 16),
+    )
+    assert seen == []
+
+
+def test_failed_rederive_still_makes_the_next_refresh_due_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    path = synced(tmp_path, frozenset())
+    store = OnchainStore(path)
+    before = stored(store)
+    client, seen = blocked_client()
+    sync = OnchainSync(store, client, rules=frozenset({"O4"}))
+
+    def fail() -> None:
+        raise RuntimeError("secret value 123")
+
+    monkeypatch.setattr(sync, "derive_from_store", fail)
+
+    with pytest.raises(RuntimeError):
+        sync.rederive_if_rules_changed(RESTART)
+
+    # The payloads stay as they were, and the refresh that derives them anyway is due at once.
+    assert stored(store) == before
+    assert store.state()["next_due"] == timestamp(RESTART)
+
+    # The worker logs only a fixed code and goes on to that refresh.
+    ran = threading.Event()
+
+    def run_once(*, now: datetime | None = None) -> bool:
+        ran.set()
+        return False
+
+    monkeypatch.setattr(sync, "run_once", run_once)
+    with caplog.at_level(logging.ERROR, logger="wheelhouse.onchain"):
+        sync.start()
+        try:
+            assert ran.wait(5)
+        finally:
+            sync.stop()
+    assert [record.getMessage() for record in caplog.records] == ["onchain_rederive_failed"]
+    assert "secret" not in caplog.text
+    assert seen == []
+
+
 def test_worker_rederives_before_its_first_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     client, _ = blocked_client()
     sync = OnchainSync(OnchainStore(tmp_path / "onchain.sqlite"), client, rules=frozenset())
@@ -312,9 +385,8 @@ def test_derive_command_rederives_a_copy_without_brk(
     assert {name: payload["rules"] for name, (payload, _) in original.items()} == {
         name: [] for name in ROUTES
     }
-    out = capsys.readouterr().out
-    assert out.count("\n") == 1
-    assert "cycle" in out and "pressure" in out and "O1,O3" in out
+    # Each view with the rules its payload recorded, not the rules asked for.
+    assert capsys.readouterr().out == "derived cycle=O1 levels=v1 costbasis=v1 pressure=O1,O3\n"
 
     # Without --rules, WHEELHOUSE_RULES decides.
     monkeypatch.setenv("WHEELHOUSE_RULES", "v1")
@@ -323,6 +395,7 @@ def test_derive_command_rederives_a_copy_without_brk(
     assert {name: payload["rules"] for name, (payload, _) in copied.items()} == {
         name: [] for name in ROUTES
     }
+    assert capsys.readouterr().out == "derived cycle=v1 levels=v1 costbasis=v1 pressure=v1\n"
     assert requests == []
 
 

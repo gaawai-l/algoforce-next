@@ -84,6 +84,11 @@ export function CycleBadge({
       ) : null}
       {stale ? (
         <small>{text("cycle.stale", { date: shortDay(data.as_of) })}</small>
+      ) : data.rules.includes("O1") ? (
+        // Under O1 the reading is of the last closed day, never of the open one.
+        <small>
+          {text("cycle.closedAsOf", { date: shortDay(data.as_of) })}
+        </small>
       ) : data.forming_at ? (
         <small>{text("cycle.forming")}</small>
       ) : null}

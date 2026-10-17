@@ -1,6 +1,6 @@
 import json
 import threading
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,10 +14,11 @@ from wheelhouse_service.http import create_app
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
 from wheelhouse_service.onchain.costbasis import StoredCostBasis
-from wheelhouse_service.onchain.models import day1_state, hour1_state
+from wheelhouse_service.onchain.models import closed_day, day1_state, hour1_state
 from wheelhouse_service.onchain.pressure import Pressure, seller_pressure
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import OnchainSync
+from wheelhouse_service.rules import Rules
 
 PREFIX = "/api/wheelhouse/v1/onchain"
 NOW = datetime(2026, 10, 16, 10, 40, tzinfo=UTC)
@@ -37,21 +38,33 @@ def blocked_client() -> tuple[BrkClient, list[str]]:
     return BrkClient(httpx.Client(transport=httpx.MockTransport(handler))), seen
 
 
-def synced(tmp_path: Path, *, at: datetime = NOW, **transport_options: Any) -> Path:
+def synced(
+    tmp_path: Path,
+    *,
+    at: datetime = NOW,
+    rules: Rules = frozenset(),
+    **transport_options: Any,
+) -> Path:
     """Run one sync against the fixture BRK at `at` and return the store path."""
     path = tmp_path / "onchain.sqlite"
     transport, _ = brk_transport(**transport_options)
     client = BrkClient(httpx.Client(transport=transport), clock=lambda: at)
-    OnchainSync(OnchainStore(path), client, rules=frozenset()).run_once(now=at)
+    OnchainSync(OnchainStore(path), client, rules=rules).run_once(now=at)
     return path
 
 
-def router_app(path: Path, now: datetime = NOW, *, start_worker: bool = False) -> FastAPI:
+def router_app(
+    path: Path,
+    now: datetime = NOW,
+    *,
+    start_worker: bool = False,
+    rules: Rules = frozenset(),
+) -> FastAPI:
     """Only the on-chain router, with a fixed clock and a client that cannot reach the network."""
     client, _ = blocked_client()
     app = FastAPI()
     app.include_router(
-        create_router(path, client, rules=frozenset(), start_worker=start_worker, clock=lambda: now)
+        create_router(path, client, rules=rules, start_worker=start_worker, clock=lambda: now)
     )
     return app
 
@@ -298,6 +311,71 @@ def test_refreshing_flag_is_exposed(tmp_path: Path):
 )
 def test_day1_state_midnight_grace(now: datetime, last: date | None, expected: str):
     assert day1_state(last, now) == expected
+
+
+@pytest.mark.parametrize(
+    ("at", "expected"),
+    [
+        (datetime(2026, 10, 16, 10, 40, tzinfo=UTC), date(2026, 10, 15)),
+        (datetime(2026, 10, 17, 0, 12, tzinfo=UTC), date(2026, 10, 15)),
+        (datetime(2026, 10, 17, 1, 30, tzinfo=UTC), date(2026, 10, 15)),
+        (datetime(2026, 10, 17, 1, 59, 59, tzinfo=UTC), date(2026, 10, 15)),
+        # From GRACE_END on, BRK no longer revises yesterday: it is closed.
+        (datetime(2026, 10, 17, 2, 0, tzinfo=UTC), date(2026, 10, 16)),
+        (datetime(2026, 10, 17, 2, 12, tzinfo=UTC), date(2026, 10, 16)),
+        # The day is the UTC day, whatever the offset of `at`.
+        (datetime(2026, 10, 17, 9, 30, tzinfo=timezone(timedelta(hours=8))), date(2026, 10, 15)),
+    ],
+)
+def test_closed_day_is_yesterday_from_the_end_of_the_grace(at: datetime, expected: date):
+    assert closed_day(at) == expected
+
+
+O1: Rules = frozenset({"O1"})
+
+
+def test_o1_cycle_is_fresh_and_closed_at_10_40_and_01_30(tmp_path: Path):
+    def read(path: Path, now: datetime) -> tuple[dict[str, Any], dict[str, Any]]:
+        with TestClient(router_app(path, now, rules=O1)) as http:
+            return http.get(f"{PREFIX}/cycle").json(), http.get(f"{PREFIX}/status").json()
+
+    # The fixture's last row is 10-16, still open at 10:40 and still being revised at 01:30.
+    for at, now in (
+        (NOW, NOW),
+        (datetime(2026, 10, 17, 1, 12, tzinfo=UTC), datetime(2026, 10, 17, 1, 30, tzinfo=UTC)),
+    ):
+        directory = tmp_path / at.isoformat()
+        directory.mkdir()
+        cycle, status = read(synced(directory, at=at, rules=O1), now)
+
+        assert cycle["data_state"] == "fresh", now
+        assert cycle["as_of"] == "2026-10-15"
+        assert cycle["forming_at"] is None
+        assert (cycle["state"], cycle["since"], cycle["day"]) == ("breakout", "2026-09-23", 23)
+        assert (cycle["rules"], cycle["rules_pending"]) == (["O1"], False)
+        # How recent the data is stays inside the service.
+        assert "latest_day" not in cycle
+        day1 = status["datasets"][0]
+        assert (day1["name"], day1["data_state"]) == ("day1", "fresh")
+        assert datetime.fromisoformat(day1["last_at"]) == datetime(2026, 10, 16, tzinfo=UTC)
+
+
+def test_cycle_without_latest_day_is_judged_by_its_as_of(tmp_path: Path):
+    path = synced(tmp_path, rules=O1)
+    store = OnchainStore(path)
+    derived = store.derived("cycle")
+    assert derived is not None
+    payload = json.loads(derived[0])
+    assert payload["latest_day"] == "2026-10-16"
+    # A payload stored before the field existed.
+    del payload["latest_day"]
+    store.save_derived("cycle", json.dumps(payload), derived[1])
+
+    with TestClient(router_app(path, NOW, rules=O1)) as http:
+        cycle = http.get(f"{PREFIX}/cycle").json()
+
+    # Only the closed day is known, and by itself that is a day old at 10:40.
+    assert (cycle["data_state"], cycle["as_of"]) == ("stale", "2026-10-15")
 
 
 def test_worker_not_started_when_disabled(tmp_path: Path):

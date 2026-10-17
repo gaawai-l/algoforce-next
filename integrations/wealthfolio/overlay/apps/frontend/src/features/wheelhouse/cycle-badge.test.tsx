@@ -10,7 +10,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { CycleView } from "./onchain-contract";
 import { cycleSample } from "./onchain-contract";
 import { CycleBadge } from "./cycle-badge";
-import { messages } from "./i18n";
+import { messages, phrase } from "./i18n";
 
 const mocks = vi.hoisted(() => ({ cycle: vi.fn() }));
 vi.mock("./client", async (original) => ({
@@ -67,6 +67,45 @@ it("omits the forming marker once the latest row is closed", async () => {
   show({ ...cycleSample, forming_at: null });
   await screen.findByText("Cycle · Breakout · day 24");
   expect(screen.queryByText("includes today (forming)")).toBeNull();
+  // Without O1 the reading is not of a closed day by rule, so it says nothing about one.
+  expect(screen.queryByText(/ close$/)).toBeNull();
+});
+
+it("says which closed day the reading is of when it was derived under O1", async () => {
+  show({
+    ...cycleSample,
+    rules: ["O1"],
+    forming_at: null,
+    as_of: "2026-10-15",
+    day: 23,
+  });
+  const badge = (await screen.findByText("Cycle · Breakout · day 23")).closest(
+    "button",
+  );
+  expect(screen.getByText("as of 15 Oct close")).toBeTruthy();
+  expect(screen.queryByText("includes today (forming)")).toBeNull();
+  expect(badge?.classList.contains("wh-cycle--muted")).toBe(false);
+});
+
+it("keeps the stale note for a stale reading under O1", async () => {
+  show({
+    ...cycleSample,
+    rules: ["O1"],
+    data_state: "stale",
+    forming_at: null,
+    as_of: "2026-10-14",
+  });
+  expect(await screen.findByText("stale · as of 14 Oct")).toBeTruthy();
+  expect(screen.queryByText(/ close$/)).toBeNull();
+});
+
+it("writes the closed-day note in both languages", () => {
+  expect(phrase("en", "cycle.closedAsOf", { date: "15 Oct" })).toBe(
+    "as of 15 Oct close",
+  );
+  expect(phrase("zh", "cycle.closedAsOf", { date: "10月15日" })).toBe(
+    "截至 10月15日 收盘",
+  );
 });
 
 it("keeps a fresh badge normal when the service only reports a note", async () => {

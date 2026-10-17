@@ -8,7 +8,7 @@ import {
 } from "./i18n";
 import type { CostBasisView, CycleView, LevelsView } from "./onchain-contract";
 import { CostBasisPanel, type CostBucket } from "./cost-basis-panel";
-import { lineNameKey, reasonText, rulesNote, utcDay } from "./onchain-text";
+import { lineNameKey, reasonText, rulesByView, utcDay } from "./onchain-text";
 
 type LineName = LevelsView["lines"][number]["name"];
 type ComponentName = CycleView["components"][number]["name"];
@@ -207,15 +207,14 @@ export function OnchainLevels({
     (lv?.data_state === "fresh" && lv.forming_at) ||
     (cy?.data_state === "fresh" && cy.forming_at);
 
-  // The views share their rules unless some apply to one view only, and then each is named. A view
-  // with no data was derived under no rules, so it says nothing.
-  const rulesOf: { title: string; lines: string[] }[] = [];
+  // The rules of each view, named; views with the same rules share a line. A view with no data was
+  // derived under no rules, so it says nothing.
+  const ruled: Parameters<typeof rulesByView>[1] = [];
   const addRules = (
     title: string,
     view?: Pick<LevelsView, "data_state" | "rules" | "rules_pending">,
   ) => {
-    if (view && view.data_state !== "unavailable")
-      rulesOf.push({ title, lines: rulesNote(text, view) });
+    if (view && view.data_state !== "unavailable") ruled.push({ title, view });
   };
   addRules(
     text("costBasis.levelsTitle"),
@@ -223,14 +222,7 @@ export function OnchainLevels({
   );
   addRules(text("levels.linesTitle"), lv);
   addRules(text("cycle.title"), cy);
-  const sameRules = rulesOf.every(
-    ({ lines }) => lines.join("\n") === rulesOf[0].lines.join("\n"),
-  );
-  const rulesLines = sameRules
-    ? (rulesOf[0]?.lines ?? [])
-    : rulesOf.flatMap(({ title, lines }) =>
-        lines.map((line) => text("rules.forView", { view: title, line })),
-      );
+  const rulesLines = rulesByView(text, ruled);
 
   return (
     <div className="wh-onchain">

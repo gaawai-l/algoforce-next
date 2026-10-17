@@ -149,7 +149,8 @@ def create_router(
         current_cost_basis = stored_cost_basis()
         current_pressure = stored_pressure()
 
-        days = [current_cycle.as_of] if current_cycle else []
+        # The newest day the data has, rather than a closed day the reading may be of.
+        days = [current_cycle.latest_day or current_cycle.as_of] if current_cycle else []
         if current_levels:
             days.append(current_levels.as_of.astimezone(UTC).date())
         urpd_date = current_levels.urpd_date if current_levels else None
@@ -231,11 +232,13 @@ def create_router(
                 rules_pending=False,
             )
         return CycleView(
-            **result.model_dump(),
-            data_state=day1_state(result.as_of, now),
+            **result.model_dump(exclude={"latest_day"}),
+            # Fresh while the data is, also when the reading is of an earlier, closed day.
+            data_state=day1_state(result.latest_day or result.as_of, now),
             reasons=reasons,
             refreshing=refreshing,
-            forming_at=forming_at(day_start(result.as_of), now),
+            # Under O1 the reading is of a closed day, so nothing in it is forming.
+            forming_at=None if "O1" in result.rules else forming_at(day_start(result.as_of), now),
             brk_version=state["brk_version"],
             rules_pending=pending("cycle", result.rules),
         )

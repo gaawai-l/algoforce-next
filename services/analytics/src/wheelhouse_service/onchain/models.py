@@ -23,6 +23,16 @@ HOUR1_FRESH = timedelta(hours=2)
 HOUR1_DELAYED = timedelta(hours=6)
 
 
+def closed_day(at: datetime) -> date:
+    """The latest closed day at `at`, for day1 rows and URPD snapshots alike.
+
+    BRK may still revise a day's values until GRACE_END on the next day, so yesterday only counts
+    as closed from then on.
+    """
+    grace = timedelta(hours=GRACE_END.hour, minutes=GRACE_END.minute)
+    return (at.astimezone(UTC) - grace).date() - timedelta(days=1)
+
+
 def day1_state(last: date | None, now: datetime) -> DataState:
     """Freshness of daily data whose latest row is dated `last`, judged at `now`."""
     if last is None:

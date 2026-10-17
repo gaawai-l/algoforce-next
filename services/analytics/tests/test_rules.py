@@ -39,9 +39,16 @@ def test_parse_rules_rejects_v1_with_other_rules(text: str):
         parse_rules(text)
 
 
-@pytest.mark.parametrize("text", ["O7", "O0", "O1,X", "all", "none", "O1,,O2", "O1,", "1", "O 1"])
+@pytest.mark.parametrize("text", ["O7", "O0", "O1,X", "all", "none", "1", "O 1"])
 def test_parse_rules_rejects_unknown_values(text: str):
     with pytest.raises(ValueError, match="Unknown rule"):
+        parse_rules(text)
+
+
+# A stray comma is a mistake of its own, not an unknown rule, and `v1,` is not v1 with others.
+@pytest.mark.parametrize("text", ["O1,,O2", "O1,", ",O1", "O1, ,O2", "v1,", ","])
+def test_parse_rules_rejects_empty_items(text: str):
+    with pytest.raises(ValueError, match=r"^the list has an empty item; remove the extra comma$"):
         parse_rules(text)
 
 
@@ -75,7 +82,7 @@ def test_settings_rules_from_env(monkeypatch: pytest.MonkeyPatch):
     assert Settings.from_env().rules == frozenset()
 
 
-@pytest.mark.parametrize("text", ["v1,O1", "O9"])
+@pytest.mark.parametrize("text", ["v1,O1", "O9", "O1,"])
 def test_settings_rules_reject_bad_values(monkeypatch: pytest.MonkeyPatch, text: str):
     monkeypatch.setenv("WHEELHOUSE_RULES", text)
     with pytest.raises(ValueError, match="WHEELHOUSE_RULES"):

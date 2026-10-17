@@ -2,11 +2,11 @@
 
 import math
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 
 from ..market import Model
-from ..rules import Rule
+from ..rules import Rule, Rules
 
 CycleState = Literal["advance", "breakout", "pressure", "repair", "breakdown", "capitulation"]
 ComponentName = Literal["depth", "pvs", "spread"]
@@ -49,6 +49,9 @@ class Cycle(Model):
     changes: int
     # The rules it was derived under; payloads stored before rules existed read as none.
     rules: list[Rule] = []
+    # The newest day with all four values, whatever the rules: how fresh the data is follows it,
+    # while `as_of` is the day the reading is of. Payloads stored before it existed read as None.
+    latest_day: date | None = None
 
 
 def raw_state(depth: float, pvs: float, spread: float) -> CycleState:
@@ -82,22 +85,40 @@ def gate(current: CycleState, depth: float, pvs: float, spread: float) -> CycleS
 
 def classify(
     rows: Sequence[tuple[date, float | None, float | None, float | None, float | None]],
+    *,
+    rules: Rules,
+    closed_day: date | None,
 ) -> Cycle | None:
     """Classify the latest day. `rows` are `(date, W, STH, TMM, price_close)` in date order.
 
     A row is dropped unless all four values are present and positive. The last kept row may be
     today's, still forming; it counts towards `day`.
+
+    O1: rows dated after `closed_day` are dropped as well, so the reading is of a closed day.
+    O4: days are counted by calendar. A day missing between kept ones keeps the state before it,
+    takes no part in the gate and belongs to that episode, which ends the day before the next
+    starts. Missing days after the last kept row do not extend the run.
     """
+    calendar = "O4" in rules
+    through = closed_day if "O1" in rules else None
     state: CycleState | None = None
     depth = pvs = spread = 0.0
     run_start = run_end = date.min
     run_days = 0
+    latest: date | None = None
     episodes: list[Episode] = []
+
+    def episode(held: CycleState, start: date, end: date, count: int) -> Episode:
+        days = (end - start).days + 1 if calendar else count
+        return Episode(state=held, start=start, end=end, days=days)
 
     for day, w, sth, tmm, close in rows:
         if w is None or sth is None or tmm is None or close is None:
             continue
         if min(w, sth, tmm, close) <= 0:
+            continue
+        latest = day
+        if through is not None and day > through:
             continue
         depth = 100 * math.log(w / tmm)
         spread = 100 * math.log(sth / tmm)
@@ -108,7 +129,8 @@ def classify(
         else:
             new_state = gate(state, depth, pvs, spread)
             if new_state != state:
-                episodes.append(Episode(state=state, start=run_start, end=run_end, days=run_days))
+                end = day - timedelta(days=1) if calendar else run_end
+                episodes.append(episode(state, run_start, end, run_days))
                 run_start, run_days = day, 0
         state = new_state
         run_end = day
@@ -116,13 +138,13 @@ def classify(
 
     if state is None:
         return None
-    episodes.append(Episode(state=state, start=run_start, end=run_end, days=run_days))
+    episodes.append(episode(state, run_start, run_end, run_days))
     values = (depth, pvs, spread)
     return Cycle(
         as_of=run_end,
         state=state,
         since=run_start,
-        day=run_days,
+        day=episodes[-1].days,
         components=[
             Component(
                 name=name,
@@ -134,4 +156,5 @@ def classify(
         ],
         episodes=episodes,
         changes=len(episodes) - 1,
+        latest_day=latest,
     )
