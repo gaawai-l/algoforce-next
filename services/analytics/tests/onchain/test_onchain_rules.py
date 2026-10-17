@@ -12,7 +12,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from onchain_fixture import brk_transport
+from onchain_fixture import GOLDEN_DAYS, brk_transport
 
 from wheelhouse_service import derive, rules
 from wheelhouse_service.http import create_app
@@ -58,12 +58,20 @@ def blocked_client() -> tuple[BrkClient, list[str]]:
     return BrkClient(httpx.Client(transport=httpx.MockTransport(handler))), seen
 
 
-def synced(directory: Path, configured: Rules) -> Path:
-    """One sync of the golden fixtures at NOW under `configured`; returns the store path."""
+def golden_client(at: datetime) -> tuple[BrkClient, list[tuple[str, dict[str, str]]]]:
+    """A BRK client serving the golden fixtures, and the requests it was asked for.
+
+    Only the days the sample has are served: another day is a snapshot BRK does not have.
+    """
+    transport, calls = brk_transport(urpd_dir=GOLDEN, urpd_dates=set(GOLDEN_DAYS))
+    return BrkClient(httpx.Client(transport=transport), clock=lambda: at), calls
+
+
+def synced(directory: Path, configured: Rules, at: datetime = NOW) -> Path:
+    """One sync of the golden fixtures at `at` under `configured`; returns the store path."""
     path = directory / "onchain.sqlite"
-    transport, _ = brk_transport(urpd_dir=GOLDEN)
-    client = BrkClient(httpx.Client(transport=transport), clock=lambda: NOW)
-    assert OnchainSync(OnchainStore(path), client, rules=configured).run_once(now=NOW)
+    client, _ = golden_client(at)
+    assert OnchainSync(OnchainStore(path), client, rules=configured).run_once(now=at)
     return path
 
 
@@ -81,17 +89,24 @@ def labels(views: dict[str, dict[str, Any]]) -> dict[str, tuple[list[str], bool]
     return {name: (view["rules"], view["rules_pending"]) for name, view in views.items()}
 
 
-def read_views(path: Path, configured: Rules) -> dict[str, dict[str, Any]]:
-    """The four views of a router configured with `configured`; it cannot reach BRK."""
+def read_routes(
+    path: Path, configured: Rules, at: datetime, routes: dict[str, str]
+) -> dict[str, dict[str, Any]]:
+    """`routes` at `at` of a router configured with `configured`; it cannot reach BRK."""
     client, seen = blocked_client()
     app = FastAPI()
     app.include_router(
-        create_router(path, client, rules=configured, start_worker=False, clock=lambda: NOW)
+        create_router(path, client, rules=configured, start_worker=False, clock=lambda: at)
     )
     with TestClient(app) as http:
-        views = {name: http.get(f"{PREFIX}/{route}").json() for name, route in ROUTES.items()}
+        views = {name: http.get(f"{PREFIX}/{route}").json() for name, route in routes.items()}
     assert seen == []
     return views
+
+
+def read_views(path: Path, configured: Rules, at: datetime = NOW) -> dict[str, dict[str, Any]]:
+    """The four views at `at` of a router configured with `configured`; it cannot reach BRK."""
+    return read_routes(path, configured, at, ROUTES)
 
 
 def test_payloads_are_stored_with_the_rules_they_were_derived_under(
@@ -206,6 +221,107 @@ def test_restart_with_other_rules_rederives_from_the_store_only(tmp_path: Path):
     )
     assert store.state()["next_due"] == timestamp(RESTART)
     assert seen == []
+
+
+# The night after NOW, before GRACE_END: 10-15 is still the latest closed day.
+NIGHT = datetime(2026, 10, 17, 1, 30, tzinfo=UTC)
+# Each view under the default configuration, every rule: the rules implemented for it.
+DEFAULT_LABELS = {
+    "cycle": (["O1", "O4"], False),
+    "levels": (["O1", "O5"], False),
+    "costbasis": (["O1", "O5"], False),
+    "pressure": (["O1", "O2", "O3"], False),
+}
+
+
+@pytest.mark.parametrize("now", [NOW, NIGHT])
+def test_default_rules_end_to_end(tmp_path: Path, now: datetime):
+    # Synced and read at `now`.
+    path = synced(tmp_path, ALL_RULES, at=now)
+    views = read_views(path, ALL_RULES, at=now)
+
+    assert labels(views) == DEFAULT_LABELS
+    assert {name: view["reasons"] for name, view in views.items()} == {name: [] for name in ROUTES}
+    # The hour1 fixture ends with the 10-16 09:00 row, more than six hours before NIGHT, so the
+    # pressure is stale then. The day1 rows and URPD end on 10-16, which is yesterday before
+    # GRACE_END at NIGHT, so they are still fresh.
+    hour1 = "fresh" if now == NOW else "stale"
+    assert {name: view["data_state"] for name, view in views.items()} == {
+        "cycle": "fresh",
+        "levels": "fresh",
+        "costbasis": "fresh",
+        "pressure": hour1,
+    }
+    # Every reading is of a closed day or hour: C = F = 10-15 at both times.
+    cycle, levels, cost, pressure = (views[name] for name in ROUTES)
+    assert (cycle["as_of"], cycle["state"], cycle["forming_at"]) == ("2026-10-15", "breakout", None)
+    assert (levels["as_of"], levels["urpd_date"], levels["forming_at"]) == (
+        "2026-10-15T00:00:00Z",
+        "2026-10-15",
+        None,
+    )
+    assert [line["name"] for line in levels["lines"]] == [
+        "true_mean",
+        "short_term",
+        "average",
+        "long_term",
+        "median",
+        "one_day_to_week",
+    ]
+    assert (cost["urpd_date"], cost["lines_as_of"], cost["forming_at"]) == (
+        "2026-10-15",
+        "2026-10-15",
+        None,
+    )
+    assert [bucket["bucket"] for bucket in cost["buckets"]] == [200, 500, 1000]
+    assert (pressure["closed_at"], pressure["last_at"], pressure["forming_at"]) == (
+        "2026-10-16T09:00:00Z",
+        "2026-10-16T09:00:00Z",
+        None,
+    )
+
+    status = read_routes(path, ALL_RULES, now, {"status": "status"})["status"]
+    assert status["last_error"] is None
+    assert [
+        (dataset["name"], dataset["data_state"], dataset["last_at"], dataset["reasons"])
+        for dataset in status["datasets"]
+    ] == [
+        ("day1", "fresh", "2026-10-16T00:00:00Z", []),
+        # D, the newest snapshot: at NIGHT the sample has none of 10-17 yet.
+        ("urpd", "fresh", "2026-10-16T00:00:00Z", []),
+        ("hour1", hour1, "2026-10-16T09:00:00Z", []),
+    ]
+
+
+def test_switching_from_v1_to_the_default_rules(tmp_path: Path):
+    path = synced(tmp_path, frozenset())
+    store = OnchainStore(path)
+
+    # Restarted under the default rules, before the worker re-derived: every view still has its
+    # v1 payload and says so.
+    assert labels(read_views(path, ALL_RULES, at=RESTART)) == {name: ([], True) for name in ROUTES}
+
+    client, calls = golden_client(RESTART)
+    sync = OnchainSync(store, client, rules=ALL_RULES)
+    assert sync.rederive_if_rules_changed(RESTART)
+    # From the store alone; the round that fetches what the new rules need is due at once.
+    assert calls == []
+    assert store.state()["next_due"] == timestamp(RESTART)
+    views = read_views(path, ALL_RULES, at=RESTART)
+    assert labels(views) == DEFAULT_LABELS
+    # F is 10-15, whose own grid days (10-14, 10-08, 09-15, 07-17) the v1 round did not fetch.
+    assert views["costbasis"]["urpd_date"] == "2026-10-15"
+    assert views["costbasis"]["reasons"] == [
+        f"urpd_grid_partial:lin{bucket}" for bucket in (200, 500, 1000)
+    ]
+
+    # The next round, due at the restart, fetches them.
+    assert sync.run_once(now=RESTART)
+    assert calls
+    views = read_views(path, ALL_RULES, at=RESTART)
+    assert labels(views) == DEFAULT_LABELS
+    assert {name: view["reasons"] for name, view in views.items()} == {name: [] for name in ROUTES}
+    assert [bucket["bucket"] for bucket in views["costbasis"]["buckets"]] == [200, 500, 1000]
 
 
 def test_a_rule_unrelated_to_a_view_does_not_make_it_pending(

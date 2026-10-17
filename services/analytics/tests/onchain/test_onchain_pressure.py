@@ -1073,3 +1073,48 @@ def test_payload_stored_before_o1_o2_still_loads():
     for name in ("closed_at", "loss_run", "share_run", "supply_run"):
         del stored[name]
     assert Pressure.model_validate(stored) == computed(columns(5))
+
+
+def test_o1_o2_o3_a_closed_hour_without_a_block_is_the_current_reading():
+    every: Rules = frozenset({"O1", "O2", "O3"})
+    # Hours 310 and 398 have no block: both add 1000 of LTH loss, the step `no_block_hour` takes
+    # out, so they realize nothing. Hour 399 is still forming.
+    cols = varied(400, {**TAIL, 398: 1_000.0})
+    no_block_hour(cols, 310)
+    no_block_hour(cols, 398)
+    result = computed(cols, every, FORMING)
+
+    # O3 keeps both rows, so the closed hour without a block is the current reading; v1 drops each
+    # with the hour after it.
+    assert (result.closed_at, result.last_at, result.kept) == (at(398), at(399), 399)
+    v1 = computed(cols, V1, FORMING)
+    assert (v1.kept, v1.last_at) == (395, at(397))
+    loss, share, supply = ({p.at: p for p in points} for points in charts_of(result).values())
+    for hour in (310, 398):
+        # Chart 1 reads a real 0 against its thresholds; chart 2 has no denominator, so no level.
+        assert (loss[at(hour)].lth, loss[at(hour)].sth, loss[at(hour)].no_block) == (0.0, 0.0, True)
+        assert (loss[at(hour)].level, loss[at(hour)].p95 is not None) == ("none", True)
+        assert (share[at(hour)].value, share[at(hour)].no_block, share[at(hour)].level) == (
+            None,
+            True,
+            None,
+        )
+        # Chart 3 carries the hour before over.
+        assert (supply[at(hour)].value, supply[at(hour)].level) == (PLAIN_SUPPLY, "extreme")
+    # The forming hour has thresholds from the closed hours, but no level yet.
+    for points in (loss, share, supply):
+        assert points[at(399)].p95 is not None and points[at(399)].level is None
+
+    # The current reading's thresholds are the fixed-window O3 ones on the rows before it: hours
+    # 1-397, hour 310's 0 counted on chart 1 and left out of chart 2.
+    closed = cut_before(rows_of(cols), at(398), O3)
+    assert (result.loss_levels, result.share_levels, result.supply_levels) == (
+        closed.loss_levels,
+        closed.share_levels,
+        closed.supply_levels,
+    )
+    assert (result.loss_levels.n, result.share_levels.n, result.supply_levels.n) == (397, 396, 397)
+    assert result.loss_levels == PressureLevels(p95=loss[at(398)].p95, p75=loss[at(398)].p75, n=397)
+    # Runs back from 398: chart 1's 0 is below Warning, chart 2 has no level there (null, not 0)
+    # and chart 3 is extreme in every hour with thresholds, 169 to 398.
+    assert (result.loss_run, result.share_run, result.supply_run) == (0, None, 230)
