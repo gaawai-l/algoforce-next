@@ -8,6 +8,8 @@ from onchain_fixture import load_series
 from wheelhouse_service import stats
 from wheelhouse_service.onchain.brk import EPOCH, HOUR1_SERIES
 from wheelhouse_service.onchain.pressure import (
+    MIN_SAMPLES,
+    SHOWN_HOURS,
     WINDOW,
     Pressure,
     PressureLevels,
@@ -812,6 +814,73 @@ def test_o2_thresholds_are_v1_on_the_rows_before_each_hour(rolling: Rules, fixed
                 unset += 1
     assert checked > 40
     assert unset > 0
+
+
+def read_as_sync(rows: Rows, rules: Rules) -> Rows:
+    """What a sync reads: the last lookback(rules) + 1 rows of each series."""
+    return {name: points[-(lookback(rules) + 1) :] for name, points in rows.items()}
+
+
+def unrepeated(count: int) -> Columns:
+    """Chart 1 with values that do not repeat in a cycle."""
+    return columns(count, {LTH_LOSS: lambda h: 100.0 * ((h * 7919) % 1000)})
+
+
+def check_left_edge(rows: Rows, rolling: Rules, fixed: Rules, cut_short: int) -> None:
+    """The first `cut_short` points on show reach back past the rows read and have no thresholds;
+    the others are the fixed-window ones on the rows before them."""
+    result = seller_pressure(rows, rules=rolling, computed_at=LATER)
+    assert result is not None
+    first_kept = result.loss[0].at
+    charts = {name: points[-SHOWN_HOURS:] for name, points in charts_of(result).items()}
+    for points in charts.values():
+        assert len(points) == SHOWN_HOURS
+        short = [p for p in points if p.at - WINDOW < first_kept]
+        assert short == points[:cut_short]
+        assert all(p.p95 is None and p.p75 is None and p.level is None for p in short)
+        assert all(p.p95 is not None for p in points[cut_short:] if value_of(p) is not None)
+    loss = charts["loss"]
+    picks = [*range(cut_short, cut_short + 3), *range(cut_short + 3, SHOWN_HOURS, 151)]
+    checked = 0
+    for hour in [loss[i].at for i in [*picks, SHOWN_HOURS - 1]]:
+        fixed_result = cut_before(rows, hour, fixed)
+        for name, points in charts.items():
+            by_time = {p.at: p for p in points}
+            if hour not in by_time or hour - HOUR not in by_time:
+                continue
+            levels: PressureLevels = getattr(fixed_result, f"{name}_levels")
+            assert levels.n >= MIN_SAMPLES
+            assert (by_time[hour].p95, by_time[hour].p75) == (levels.p95, levels.p75)
+            checked += 1
+    assert checked > 30
+
+
+def test_o2_points_on_show_whose_window_was_read_short_have_no_thresholds():
+    cols = unrepeated(3000)
+    # Two hours without a block inside the span on show: v1 drops four rows there, so the oldest
+    # 2160 points reach four hours further back than the rows read can fill.
+    no_block(cols, 2000)
+    no_block(cols, 2500)
+    check_left_edge(read_as_sync(rows_of(cols), O2), O2, V1, cut_short=4)
+
+
+def test_o2_o3_points_on_show_after_an_outage_whose_window_was_read_short_have_none():
+    # Twelve hours BRK does not have at all, inside the span on show.
+    rows = {
+        name: [(t, v) for t, v in points if not at(2000) <= t < at(2012)]
+        for name, points in rows_of(unrepeated(3000)).items()
+    }
+    check_left_edge(read_as_sync(rows, O2_O3), O2_O3, O3, cut_short=12)
+
+
+def test_o2_rows_holding_all_the_history_keep_the_168_rule_at_their_start():
+    # Nothing older was left out, so the start of the rows is the start of the history.
+    rows = {name: points[-2000:] for name, points in rows_of(unrepeated(3000)).items()}
+    result = seller_pressure(rows, rules=O2, computed_at=LATER)
+    assert result is not None
+    first = result.loss[0].at
+    assert [p.p95 is None for p in result.loss[166:169]] == [True, True, False]
+    assert result.loss[168].at - WINDOW < first
 
 
 def test_o2_first_168_hours_have_no_thresholds():

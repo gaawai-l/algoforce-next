@@ -504,7 +504,10 @@ def test_pressure_view_after_sync(tmp_path: Path):
     # Under v1 no point is without a block or behind a gap, and none has thresholds of its own.
     for group in ("loss", "share", "supply", "price"):
         assert not any(point["no_block"] or point["gap"] for point in view[group])
-        assert not any(point["p95"] or point["p75"] or point["level"] for point in view[group])
+        assert all(
+            point["p95"] is None and point["p75"] is None and point["level"] is None
+            for point in view[group]
+        )
     assert view["closed_at"] is None
     assert (view["loss_run"], view["share_run"], view["supply_run"]) == (None, None, None)
 

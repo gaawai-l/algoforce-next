@@ -22,9 +22,11 @@ from .brk import HOUR1_SERIES
 
 # Only the most recent hours count, whatever else the store holds: see `lookback`.
 V1_LOOKBACK = 2600
-# The most hours the seller pressure view sends; under O2 each of them needs a window before it.
+# The most points of each series the seller pressure view sends: the widest span on offer, that
+# many hours when none is missing. Under O2 each of them needs a window before it.
 SHOWN_HOURS = 2160
-# Levels look at the clock hours up to and including the last row of each chart.
+# v1's levels look at the clock hours up to and including the last row of each chart; O1 ends that
+# window at closed_at, and O2 gives each hour h its own, [h - 720h, h).
 WINDOW = timedelta(hours=720)
 HOUR = timedelta(hours=1)
 # Under O2 an hour with fewer values than this in the window before it has no thresholds.
@@ -147,7 +149,9 @@ def lookback(rules: Rules) -> int:
     """How many of the most recent hours count, whatever else the store holds.
 
     Under O2 the oldest hour on show needs a full window of kept rows before it, and one hour more:
-    the oldest hour read only serves as the previous row.
+    the oldest hour read only serves as the previous row. That holds when no hour is missing; when
+    some are, the oldest points on show reach further back, and a window that would start before
+    the first kept row has no thresholds rather than fewer values.
     """
     return SHOWN_HOURS + WINDOW // HOUR + 1 if "O2" in rules else V1_LOOKBACK
 
@@ -194,12 +198,15 @@ def _levels(
 
 
 def _rolling(
-    samples: Sequence[tuple[datetime, float]], hours: Sequence[datetime]
+    samples: Sequence[tuple[datetime, float]],
+    hours: Sequence[datetime],
+    earliest: datetime | None,
 ) -> list[_Thresholds]:
     """O2: the thresholds of each of the ascending `hours`, from the samples in [h - 720h, h).
 
     The samples are in time order. A sorted window slides along them, so each hour only adds the
-    samples it gains and removes those it loses. With fewer than MIN_SAMPLES both are null.
+    samples it gains and removes those it loses. Both are null with fewer than MIN_SAMPLES, and
+    when the window starts before `earliest`: older rows were left out, so it would be cut short.
     """
     window: list[float] = []
     added = removed = 0
@@ -211,7 +218,7 @@ def _rolling(
         while removed < added and samples[removed][0] < hour - WINDOW:
             del window[bisect_left(window, samples[removed][1])]
             removed += 1
-        if len(window) < MIN_SAMPLES:
+        if len(window) < MIN_SAMPLES or (earliest is not None and hour - WINDOW < earliest):
             out.append(_Thresholds(None, None, len(window)))
         else:
             p95, p75 = quantile_r7(window, 0.95), quantile_r7(window, 0.75)
@@ -242,13 +249,16 @@ def _run(levels: dict[datetime, Level | None], start: datetime) -> int | None:
 
 
 def _roll[P: (PressureLossPoint, PressurePoint)](
-    points: list[P], values: Sequence[float | None], start: datetime | None
+    points: list[P],
+    values: Sequence[float | None],
+    start: datetime | None,
+    earliest: datetime | None,
 ) -> tuple[list[P], PressureLevels, int | None]:
     """O2: the points with their thresholds and levels, the start hour's thresholds and the run.
 
     `values` are those of `points`. Only the points up to `start`, the current reading, are
     samples and have a level: under O1 those after it are still forming, and with `start` None no
-    row has closed.
+    row has closed. A window starting before `earliest` has no thresholds: see `_rolling`.
     """
 
     def counted(at: datetime) -> bool:
@@ -260,7 +270,7 @@ def _roll[P: (PressureLossPoint, PressurePoint)](
         if value is not None and counted(point.at)
     ]
     hours = sorted({point.at for point in points} | ({start} if start is not None else set()))
-    thresholds = dict(zip(hours, _rolling(samples, hours), strict=True))
+    thresholds = dict(zip(hours, _rolling(samples, hours, earliest), strict=True))
     levels: dict[datetime, Level | None] = {}
     rolled: list[P] = []
     for point, value in zip(points, values, strict=True):
@@ -435,11 +445,18 @@ def seller_pressure(
         next((r.at for r in reversed(kept) if computed_at >= r.at + HOUR), None) if o1 else None
     )
     start = closed_at if o1 else kept[-1].at
+    # With rows older than the lookback left out, no sample can come from before the first kept
+    # row, so a window reaching back past it is cut short. Without them, the rows are all the
+    # history there is, and its start only has fewer values.
+    earliest = kept[0].at if min(stamps) < first else None
     loss_run = share_run = supply_run = None
     if o2:
-        loss, loss_levels, loss_run = _roll(loss, [value for _, value in loss_totals], start)
-        share, share_levels, share_run = _roll(share, [p.value for p in share], start)
-        supply, supply_levels, supply_run = _roll(supply, [p.value for p in supply], start)
+        loss_values = [value for _, value in loss_totals]
+        loss, loss_levels, loss_run = _roll(loss, loss_values, start, earliest)
+        share, share_levels, share_run = _roll(share, [p.value for p in share], start, earliest)
+        supply, supply_levels, supply_run = _roll(
+            supply, [p.value for p in supply], start, earliest
+        )
     else:
         share_values = [(p.at, p.value) for p in share]
         supply_values = [(p.at, p.value) for p in supply]

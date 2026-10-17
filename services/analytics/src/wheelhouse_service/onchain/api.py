@@ -27,7 +27,7 @@ from .models import (
     day1_state,
     hour1_state,
 )
-from .pressure import HOUR, Pressure
+from .pressure import HOUR, SHOWN_HOURS, Pressure
 from .store import OnchainStore
 from .sync import CYCLE_SERIES, OnchainSync
 
@@ -35,8 +35,6 @@ from .sync import CYCLE_SERIES, OnchainSync
 DAY1_REASONS = (*(f"series_missing:{name}" for name in DAY1_SERIES), "brk_unavailable")
 URPD_REASONS = ("urpd_missing", "urpd_not_final", "brk_unavailable")
 PRESSURE_REASONS = (*(f"series_missing:hour1:{name}" for name in HOUR1_SERIES), "brk_unavailable")
-# The most points of each series that the seller pressure view sends: the widest span on offer.
-PRESSURE_POINTS = 2160
 CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unavailable")
 LEVELS_REASONS = (
     *(f"series_missing:{name}" for name in LINE_SERIES.values()),
@@ -369,10 +367,10 @@ def create_router(
             # The last row was still open when this was computed, however long ago that was.
             forming_at=result.last_at if computed_at < result.last_at + HOUR else None,
             last_at=result.last_at,
-            loss=result.loss[-PRESSURE_POINTS:],
-            share=result.share[-PRESSURE_POINTS:],
-            supply=result.supply[-PRESSURE_POINTS:],
-            price=result.price[-PRESSURE_POINTS:],
+            loss=result.loss[-SHOWN_HOURS:],
+            share=result.share[-SHOWN_HOURS:],
+            supply=result.supply[-SHOWN_HOURS:],
+            price=result.price[-SHOWN_HOURS:],
             loss_levels=result.loss_levels,
             share_levels=result.share_levels,
             supply_levels=result.supply_levels,
