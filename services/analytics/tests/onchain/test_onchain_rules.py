@@ -286,6 +286,10 @@ def test_default_rules_end_to_end(tmp_path: Path, now: datetime):
         "2026-10-16T09:00:00Z",
         None,
     )
+    # O2 and O3 took effect: every shown hour has a rolling threshold and a run counts back.
+    assert len(pressure["loss"]) == 2160
+    assert pressure["loss"][-1]["p95"] is not None
+    assert (pressure["loss_run"], pressure["supply_run"]) == (0, 49)
 
     status = read_routes(path, ALL_RULES, now, {"status": "status"})["status"]
     assert status["last_error"] is None

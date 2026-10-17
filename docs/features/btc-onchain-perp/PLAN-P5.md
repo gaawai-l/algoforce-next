@@ -25,7 +25,7 @@
 | 编号 | 裁定 | 理由 |
 |---|---|---|
 | P5-R1 | 环境变量 `WHEELHOUSE_RULES` 的取值规则：<br>• 逗号分隔的代号 `O1`–`O6`，大小写不敏感，忽略空白和重复；<br>• 未设置或为空字符串时，取默认值，即全部开启；<br>• 单独写 `v1` 表示全部关闭；`v1` 与其他代号同时出现时，启动失败；<br>• 无法识别的值同样让服务启动失败 | 空字符串很容易由 compose 文件意外产生，不能把它解释为"全部关闭" |
-| P5-R2 | 每份派生载荷都写入生成时所用的 `rules`，即 `sorted(rules_for_view(view, 配置))`，视图原样返回。<br>• 比较时按集合比较。配置与载荷中的规则不一致时，onchain 的 worker 立刻只从库里重新派生（不访问 BRK）；永续不单独重派生，由首轮覆盖（见 Task 7a）。完成之前，视图带 `rules_pending: true`。<br>• 新增的载荷字段都有默认值，旧载荷可读：`rules=[]`，`latest_day=None`，`latest_urpd_day=None`；为 None 时新鲜度按 v1 公式计算 | 保证界面显示的口径就是生成这些数字的口径；只切换一个视图无关的规则时，不误报 pending |
+| P5-R2 | 每份派生载荷都写入生成时所用的 `rules`，即 `sorted(rules_for_view(view, 配置))`，视图原样返回。<br>• 比较时按集合比较。配置与载荷中的规则不一致时，onchain 的 worker 立刻只从库里重新派生（不访问 BRK）；永续不单独重派生，由首轮覆盖（见 Task 7a）。完成之前，视图带 `rules_pending: true`；本进程没有运行 worker 时不会重算，所以不标 pending（实施中补充，见 P5-VERIFICATION 第 9 节）。<br>• 新增的载荷字段都有默认值，旧载荷可读：`rules=[]`，`latest_day=None`，`latest_urpd_day=None`；为 None 时新鲜度按 v1 公式计算 | 保证界面显示的口径就是生成这些数字的口径；只切换一个视图无关的规则时，不误报 pending |
 | P5-R3 | 各视图涉及的规则：<br>• 周期：O1、O4<br>• levels：O1、O5<br>• cost-basis：O1、O5<br>• 卖压：O1、O2、O3<br>• 永续：O1、O6<br><br>`rules_for_view` 只返回"已对该视图实现"且"已开启"的规则，所以载荷和视图里也只有这些 | 写清楚哪些规则影响哪个视图 |
 | P5-R4 | 以下各处都改为必填的关键字参数 `rules`：纯函数、`OnchainSync`、onchain 的 `create_router`；永续侧的 `compute_states`、`PerpsSync`、perps 的 `create_router` 在 Task 7a 再加，之前 `http.py` 只把 `rules` 传给 onchain。现有测试传 `frozenset()`，数值不变。`create_app(rules=None)` 表示取 `Settings.from_env().rules`；凡是断言 v1 数值、经由 `create_app` 的测试都显式传 `rules=frozenset()` | 避免"默认关闭"与"默认开启"互相矛盾 |
 | P5-R5 | **已收盘日** `closed_day(at) = (at − 2h).date() − 1 天`，2h 即 `GRACE_END`。辅助函数放在 `onchain/models.py`，与 `GRACE_END` 同处。day1 行和 URPD 都按这个定义 | 两边口径一致；D−1 的值在 02:00 前可能还会被修订 |
