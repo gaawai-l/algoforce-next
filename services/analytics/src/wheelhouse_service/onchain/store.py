@@ -189,23 +189,22 @@ class OnchainStore:
             ).fetchone()
         return None if row is None else datetime.fromisoformat(row["fetched_at"]).astimezone(UTC)
 
+    def urpd_not_final(self, day: date) -> list[tuple[str, str]]:
+        """The URPD_SET snapshots of `day` that are missing or were fetched before it was final."""
+        with self.connection() as db:
+            rows = db.execute(
+                "SELECT cohort, agg, fetched_at FROM urpd WHERE day=?", (day.isoformat(),)
+            ).fetchall()
+        fetched = {
+            (row["cohort"], row["agg"]): datetime.fromisoformat(row["fetched_at"]).astimezone(UTC)
+            for row in rows
+        }
+        final = final_from(day)
+        return [kind for kind in URPD_SET if (stamp := fetched.get(kind)) is None or stamp < final]
+
     def final_urpd_day(self, candidates: Sequence[date]) -> date | None:
         """The first of `candidates` whose URPD_SET snapshots are all stored and final."""
-        for day in candidates:
-            with self.connection() as db:
-                rows = db.execute(
-                    "SELECT cohort, agg, fetched_at FROM urpd WHERE day=?", (day.isoformat(),)
-                ).fetchall()
-            fetched = {
-                (row["cohort"], row["agg"]): datetime.fromisoformat(row["fetched_at"])
-                for row in rows
-            }
-            final = final_from(day)
-            if all(
-                (stamp := fetched.get(kind)) is not None and stamp >= final for kind in URPD_SET
-            ):
-                return day
-        return None
+        return next((day for day in candidates if not self.urpd_not_final(day)), None)
 
     def prune_urpd(self, keep: Set[date]) -> None:
         """Delete the snapshots of every day not in `keep`."""

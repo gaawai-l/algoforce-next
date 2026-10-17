@@ -370,6 +370,8 @@ const en = {
     "No cost-basis rows above $1k for the {{bucket}} buckets",
   "cycle.reason.urpdMissingAll":
     "All-holder URPD snapshot missing for the {{bucket}} bucket",
+  "cycle.reason.urpd_not_final":
+    "The latest closed day's cost-basis snapshots are not final yet",
   "cycle.title": "Cycle",
   "cycle.loading": "Loading cycle…",
   "cycle.stateLabel": "State",
@@ -399,6 +401,7 @@ const en = {
   "levels.source": "Source",
   "levels.sourceLine":
     "Bitcoin Research Kit · bitview.space · BRK {{version}} · as of {{date}}",
+  "levels.closedDate": "{{date}} close (UTC)",
   "levels.urpdLine": "URPD {{date}}",
   "levels.sourceNote":
     "On-chain prices are oracle estimates, not Bybit quotes. STH (<150d) means short-term holders: coins last moved less than 150 days ago.",
@@ -428,6 +431,7 @@ const en = {
   "costBasis.below": "Below",
   "costBasis.spot": "Spot",
   "costBasis.spotNote": "on-chain price",
+  "costBasis.spotClose": "on-chain price · {{date}} close",
   "costBasis.mNote":
     "M is a Gaussian component of that cohort's cost distribution; ±σ is one standard deviation. The % is from the band's midpoint.",
   "costBasis.layers": "Key levels layers",
@@ -996,6 +1000,7 @@ const zh: Record<MessageKey, string> = {
     "{{bucket}} 桶宽缺少部分历史 URPD 快照，网格只用已有日期",
   "cycle.reason.urpdEmpty": "{{bucket}} 桶宽下没有高于 $1k 的成本数据",
   "cycle.reason.urpdMissingAll": "{{bucket}} 桶宽缺少全体持有者的 URPD 快照",
+  "cycle.reason.urpd_not_final": "最近一个已收盘日的成本分布快照尚未定稿",
   "cycle.title": "周期",
   "cycle.loading": "正在加载周期…",
   "cycle.stateLabel": "状态",
@@ -1024,6 +1029,7 @@ const zh: Record<MessageKey, string> = {
   "levels.source": "数据来源",
   "levels.sourceLine":
     "Bitcoin Research Kit · bitview.space · BRK {{version}} · 截至 {{date}}",
+  "levels.closedDate": "{{date}} 收盘（UTC）",
   "levels.urpdLine": "URPD 筹码分布 {{date}}",
   "levels.sourceNote":
     "链上价格为预言机估算值，不是 Bybit 报价。STH (<150d) 指短期持有者：币龄不足 150 天的筹码。",
@@ -1053,6 +1059,7 @@ const zh: Record<MessageKey, string> = {
   "costBasis.below": "下方",
   "costBasis.spot": "现价",
   "costBasis.spotNote": "链上价格",
+  "costBasis.spotClose": "链上价格 · {{date}} 收盘价",
   "costBasis.mNote":
     "M 是该 cohort 成本分布的高斯成分，±σ 是一个标准差。百分比按价带中点计算。",
   "costBasis.layers": "关键位图层",

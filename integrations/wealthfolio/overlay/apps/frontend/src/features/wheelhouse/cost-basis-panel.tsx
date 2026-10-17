@@ -215,7 +215,10 @@ export function CostBasisPanel({
                   <td>
                     <span className="wh-cb-range">{usd(selected.spot)}</span>
                     <span className="wh-cb-labels">
-                      {text("costBasis.spotNote")}
+                      {view.rules.includes("O1") && view.urpd_date
+                        ? // Under O1 spot is the close of the snapshot's day, not a current price.
+                          text("costBasis.spotClose", { date: view.urpd_date })
+                        : text("costBasis.spotNote")}
                     </span>
                   </td>
                   <td />

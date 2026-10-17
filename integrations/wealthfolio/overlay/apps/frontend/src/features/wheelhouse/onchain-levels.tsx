@@ -198,7 +198,10 @@ export function OnchainLevels({
 
   const version = lv?.brk_version ?? cy?.brk_version ?? missing;
   const asOf = lv?.as_of
-    ? `${utcDay(lv.as_of)} UTC`
+    ? lv.rules.includes("O1")
+      ? // Under O1 the lines are those of the last closed day, never of the open one.
+        text("levels.closedDate", { date: utcDay(lv.as_of) })
+      : `${utcDay(lv.as_of)} UTC`
     : cy?.as_of
       ? `${cy.as_of} UTC`
       : missing;

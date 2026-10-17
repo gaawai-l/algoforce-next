@@ -105,6 +105,41 @@ it("lists the nearest bands far to near above spot and near to far below it", ()
   ).toBeTruthy();
 });
 
+it("says under O1 that spot is the close of the snapshot's day", () => {
+  render(
+    <CostBasisPanel
+      view={{
+        ...costBasisSample,
+        rules: ["O1"],
+        forming_at: null,
+        urpd_date: "2026-10-15",
+        lines_as_of: "2026-10-15",
+      }}
+      bucket={500}
+    />,
+  );
+  const spot = bandRows().find((tr) => tr.classList.contains("is-spot"))!;
+  expect(row(spot)).toMatchObject({
+    side: "Spot",
+    range: "$81,218",
+    labels: "on-chain price · 2026-10-15 close",
+  });
+  expect(phrase("zh", "costBasis.spotClose", { date: "2026-10-15" })).toBe(
+    "链上价格 · 2026-10-15 收盘价",
+  );
+});
+
+it("keeps the spot note without O1", () => {
+  render(
+    <CostBasisPanel
+      view={{ ...costBasisSample, rules: ["O5"] }}
+      bucket={500}
+    />,
+  );
+  const spot = bandRows().find((tr) => tr.classList.contains("is-spot"))!;
+  expect(row(spot).labels).toBe("on-chain price");
+});
+
 it("reads the selected bucket", () => {
   render(<CostBasisPanel view={costBasisSample} bucket={1000} />);
   expect(levelCells("Resistance")[1]).toBe("$90.0k");

@@ -2,13 +2,14 @@
 
 import json
 from collections.abc import Iterable, Set
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from wheelhouse_service.onchain.brk import Index, SeriesData, Urpd
+from wheelhouse_service.onchain.costbasis import PAST_DAYS
 from wheelhouse_service.onchain.levels import LINE_SERIES
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import URPD_SET
@@ -17,6 +18,15 @@ FIXTURES = Path(__file__).parent / "fixtures" / "brk-2026-10-16"
 # The cost-basis golden sample: D = 10-16 has undated files, every other day dated ones.
 GOLDEN = Path(__file__).parent / "fixtures" / "brk-2026-10-16T1829Z"
 GOLDEN_D = date(2026, 10, 16)
+# D and the day before, the closed day at 10:40 on D, each with the past days of its grid: all nine
+# days the sample has.
+GOLDEN_DAYS = sorted(
+    {
+        day - timedelta(days=n)
+        for day in (GOLDEN_D, GOLDEN_D - timedelta(days=1))
+        for n in (0, *PAST_DAYS)
+    }
+)
 # BRK positions count from 2009-01-01T00:00Z for both day1 and hour1.
 EPOCH = date(2009, 1, 1)
 # Observed on the live API: a bulk request over 320,000 weight is rejected, ~16 weight per point.

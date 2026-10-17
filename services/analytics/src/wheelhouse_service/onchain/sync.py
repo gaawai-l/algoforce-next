@@ -67,6 +67,18 @@ def next_slot(at: datetime) -> datetime:
     return slot if slot > at else slot + timedelta(hours=1)
 
 
+def closed_days(at: datetime) -> list[date]:
+    """The days whose URPD snapshots O1 needs at `at`, in the order they are fetched.
+
+    First the closed day C and the day before, the two days F can be, then the past days of
+    either's grid, newest first.
+    """
+    closed = closed_day(at)
+    anchors = [closed, closed - timedelta(days=1)]
+    past = {day - timedelta(days=n) for day in anchors for n in PAST_DAYS} - set(anchors)
+    return [*anchors, *sorted(past, reverse=True)]
+
+
 class OnchainSync:
     def __init__(self, store: OnchainStore, client: BrkClient, *, rules: Rules) -> None:
         self.store = store
@@ -203,6 +215,8 @@ class OnchainSync:
             # recent stored snapshot if there is one. The run is then recorded as failed.
             urpd_error = exc
             urpd = self._recent_urpd(at)
+        # F does not depend on D, so its snapshots are fetched whatever happened above.
+        self._urpd_closed(at)
 
         done = clock()
         not_final = self._derive(urpd, done, hour1_missing, hour1_done, closed=closed)
@@ -287,7 +301,8 @@ class OnchainSync:
             return None
         self.store.save_urpd(urpd, at)
         past = [urpd.date - timedelta(days=n) for n in PAST_DAYS]
-        keep = {today, today - timedelta(days=1), urpd.date, *past}
+        # Under O1 the closed days are kept too: F and its grid are read from them.
+        keep = {today, today - timedelta(days=1), urpd.date, *past, *self._closed_days(at)}
         try:
             for cohort, agg in URPD_SET[1:]:
                 # A failure here fails the stage, like one of `all lin500`.
@@ -310,6 +325,23 @@ class OnchainSync:
                     logger.warning("onchain_urpd_past_failed code=%s", exc.code)
         self.store.prune_urpd(keep)
         return urpd
+
+    def _closed_days(self, at: datetime) -> list[date]:
+        """The closed days under O1, whose snapshots F and its grid are read from; else none."""
+        return closed_days(at) if "O1" in rules_for_view("levels", self.rules) else []
+
+    def _urpd_closed(self, at: datetime) -> None:
+        """Fetch the snapshots of the closed days that are missing or not final.
+
+        A failure ends this step without failing the stage: F stays with what is stored, and the
+        next refresh fetches the rest. A snapshot BRK does not have is skipped.
+        """
+        try:
+            for day in self._closed_days(at):
+                for cohort, agg in self.store.urpd_not_final(day):
+                    self._save_urpd(cohort, day, agg, at)
+        except BrkError as exc:
+            logger.warning("onchain_urpd_closed_failed code=%s", exc.code)
 
     def _save_urpd(self, cohort: str, day: date, agg: str, at: datetime) -> None:
         urpd = self.client.urpd(cohort, day, agg)
@@ -362,9 +394,15 @@ class OnchainSync:
         snapshot = urpd
         not_final = False
         if "O1" in levels_rules:
-            final = self.store.final_urpd_day((closed, closed - timedelta(days=1)))
+            candidates = (closed, closed - timedelta(days=1))
+            final = self.store.final_urpd_day(candidates)
             not_final = final is None
             snapshot = None if final is None else self.store.urpd(URPD_COHORT, final, URPD_AGG)
+            if final is None:
+                for day in candidates:
+                    # The snapshot kinds only, never a value.
+                    kinds = ",".join(f"{c}:{a}" for c, a in self.store.urpd_not_final(day))
+                    logger.warning("onchain_urpd_not_final day=%s kinds=%s", day, kinds)
         last = last_complete(rows, rules=frozenset(levels_rules), through=closed)
         # The newest complete point whatever the closed day: how fresh the levels are follows it.
         latest = last_complete(rows, rules=frozenset(levels_rules), through=None)

@@ -2,14 +2,21 @@ import json
 import logging
 import re
 import threading
-from collections.abc import Callable
-from datetime import UTC, date, datetime, timedelta
+from collections.abc import Callable, Set
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from onchain_fixture import EPOCH, brk_transport, golden_urpd, load_urpd, seed_golden
+from onchain_fixture import (
+    EPOCH,
+    GOLDEN_DAYS,
+    brk_transport,
+    golden_urpd,
+    load_urpd,
+    seed_golden,
+)
 
 from wheelhouse_service.onchain.brk import (
     DAY1_SERIES,
@@ -24,7 +31,7 @@ from wheelhouse_service.onchain.levels import median_cost
 from wheelhouse_service.onchain.models import closed_day
 from wheelhouse_service.onchain.pressure import Pressure
 from wheelhouse_service.onchain.store import OnchainStore
-from wheelhouse_service.onchain.sync import URPD_SET, OnchainSync
+from wheelhouse_service.onchain.sync import URPD_SET, OnchainSync, closed_days
 from wheelhouse_service.rules import Rules
 
 NOW = datetime(2026, 10, 16, 10, 40, tzinfo=UTC)
@@ -1261,8 +1268,6 @@ def test_o1_closed_day_is_the_one_at_the_start_of_the_round(tmp_path: Path):
 # O1 on the levels and the cost basis. In the golden sample C, the closed day at NOW, is D - 1.
 O1: Rules = frozenset({"O1"})
 C = D - timedelta(days=1)
-# D and C, each with the past days of its grid: all nine days the golden sample has.
-GOLDEN_DAYS = sorted({D, C, *(day - timedelta(days=n) for day in (D, C) for n in PAST_DAYS)})
 
 
 def derive(store: OnchainStore, rules: Rules, at: datetime = NOW) -> bool:
@@ -1372,10 +1377,13 @@ def test_o1_changes_table_2_of_the_golden_sample(tmp_path: Path):
     # F's clusters barely differ from D's. Its close, though, is in the band from 82000, so the
     # band below it is now the nearest support and 64000 is no longer among the four.
     assert (v1_spots, o1_spots) == ({81217.6}, {82203.57})
+    assert all(82000 <= spot < 84000 for spot in o1_spots)
     assert o1 == {bucket: (RESISTANCE[bucket], O1_SUPPORT) for bucket in BUCKETS}
 
 
-def test_o1_falls_back_to_the_day_before_and_then_to_no_snapshot(tmp_path: Path):
+def test_o1_falls_back_to_the_day_before_and_then_to_no_snapshot(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
     store = OnchainStore(tmp_path / "onchain.sqlite")
     seed_golden(store, GOLDEN_DAYS, NOW)
     before = C - timedelta(days=1)
@@ -1385,7 +1393,9 @@ def test_o1_falls_back_to_the_day_before_and_then_to_no_snapshot(tmp_path: Path)
         )
 
     # C lacks one of its nine snapshots, so F is the day before.
-    assert derive(store, O1) is False
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert derive(store, O1) is False
+    assert "onchain_urpd_not_final" not in caplog.text
 
     levels = levels_of(store)
     assert (levels["urpd_date"], levels["onchain_close"], levels["latest_urpd_day"]) == (
@@ -1401,7 +1411,16 @@ def test_o1_falls_back_to_the_day_before_and_then_to_no_snapshot(tmp_path: Path)
 
     # One snapshot of the day before was fetched before that day was final: neither day is.
     store.save_urpd(golden_urpd("all", "lin500", before), datetime(2026, 10, 15, 1, 59, tzinfo=UTC))
-    assert derive(store, O1) is True
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert derive(store, O1) is True
+
+    # Each candidate is logged once, with the snapshot kinds that keep it from being F: the kinds
+    # only, never a value.
+    lines = [line for line in caplog.messages if line.startswith("onchain_urpd_not_final")]
+    assert lines == [
+        "onchain_urpd_not_final day=2026-10-15 kinds=sth:lin200",
+        "onchain_urpd_not_final day=2026-10-14 kinds=all:lin500",
+    ]
 
     levels = levels_of(store)
     assert set(line_prices(levels)) == LINES - {"median"}
@@ -1452,8 +1471,8 @@ def test_o1_reaches_the_derived_levels_and_cost_basis(tmp_path: Path):
         D,
         ["O1"],
     )
-    # Fetching F's own past days is Task 3b's: until then its grid is partial.
-    assert o1_cost.reasons == [f"urpd_grid_partial:lin{bucket}" for bucket in BUCKETS]
+    # The closed days' snapshots were fetched too, so F's own grid is complete.
+    assert o1_cost.reasons == []
 
 
 def test_o1_without_a_final_day_reports_urpd_not_final(tmp_path: Path):
@@ -1482,3 +1501,236 @@ def test_o1_without_a_final_day_reports_urpd_not_final(tmp_path: Path):
     sync_for(v1, again, NOW, O1).derive_from_store()
     assert v1.derived("costbasis") is None
     assert strings(v1.state()["reasons"]) == []
+
+
+# O1's URPD fetch and prune over one night. T is the day the rounds run on: until 02:00 the closed
+# day C is T - 2, and from then on T - 1. BRK publishes T's snapshots at 01:00.
+T = date(2026, 10, 17)
+
+
+def at_t(hour: int) -> datetime:
+    """HH:12 on T, when a refresh is due."""
+    return datetime.combine(T, time(hour, 12), tzinfo=UTC)
+
+
+def night_brk(
+    *,
+    unpublished: Set[date] = frozenset(),
+    failing: Set[tuple[str, date, str]] = frozenset(),
+) -> tuple[httpx.MockTransport, list[tuple[str, dict[str, str]]]]:
+    """The golden sample's BRK, without the snapshots of the `unpublished` days and with a 500 for
+    each (cohort, day, agg) in `failing`. Every request is recorded, in order."""
+    inner, calls = brk_transport(urpd_dir=GOLDEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = inner.handler(request)
+        path = request.url.path
+        if path.startswith("/api/urpd/"):
+            _, _, _, cohort, day = path.split("/")
+            when = date.fromisoformat(day)
+            if (cohort, when, request.url.params["agg"]) in failing:
+                return httpx.Response(500)
+            if when in unpublished:
+                return httpx.Response(404, json={"error": {"type": "not_found", "code": "x"}})
+        return response
+
+    return httpx.MockTransport(handler), calls
+
+
+def night_round(
+    store: OnchainStore,
+    hour: int,
+    rules: Rules,
+    *,
+    unpublished: Set[date] | None = None,
+    failing: Set[tuple[str, date, str]] = frozenset(),
+) -> list[tuple[str, str, str]]:
+    """One refresh at HH:12 on T; the URPD requests it made."""
+    if unpublished is None:
+        unpublished = {T} if hour < 1 else set()
+    transport, calls = night_brk(unpublished=unpublished, failing=failing)
+    assert run(store, transport, at_t(hour), rules) is True
+    return urpd_calls(calls)
+
+
+def days_of(day: date, *more: date) -> list[tuple[str, str, str]]:
+    """The requests for the nine snapshots of each day, in the order they are made."""
+    return [request for each in (day, *more) for request in same_day(each)]
+
+
+def v1_keep(at: datetime, d: date) -> set[date]:
+    """What v1's prune keeps at `at` with D = `d`."""
+    today = at.date()
+    return {today, today - timedelta(days=1), d, *(d - timedelta(days=n) for n in PAST_DAYS)}
+
+
+def stored_days(store: OnchainStore) -> set[date]:
+    return {date.fromisoformat(day) for _, day, _ in urpd_rows(store)}
+
+
+def ago(n: int) -> date:
+    return T - timedelta(days=n)
+
+
+def test_closed_days_are_the_two_anchors_then_their_grid_days_newest_first():
+    at = datetime(2026, 10, 17, 10, 40, tzinfo=UTC)
+    c = date(2026, 10, 16)
+
+    assert closed_days(at) == [c - timedelta(days=n) for n in (0, 1, 2, 7, 8, 30, 31, 90, 91)]
+    # The closed day changes at 02:00, and so does the whole list.
+    assert closed_days(datetime(2026, 10, 17, 1, 59, tzinfo=UTC))[0] == date(2026, 10, 15)
+    assert closed_days(datetime(2026, 10, 17, 2, tzinfo=UTC))[0] == c
+
+
+def test_o1_keeps_f_on_a_closed_day_through_the_night(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+
+    # 00:12: T is not published yet, so D is T - 1, and C is T - 2.
+    requests = night_round(store, 0, O1)
+
+    at = at_t(0)
+    assert closed_days(at)[:2] == [ago(2), ago(3)]
+    # v1's requests, then the closed days except C: one of D's past days, fetched final just now.
+    assert requests == [
+        ("all", T.isoformat(), "lin500"),
+        *same_day(ago(1)),
+        *past_of(ago(1)),
+        *days_of(*closed_days(at)[1:]),
+    ]
+    levels = levels_of(store)
+    assert (levels["urpd_date"], levels["onchain_close"]) == ("2026-10-15", 82203.57)
+    cost = costbasis_of(store)
+    assert (cost.urpd_date, cost.lines_as_of, cost.reasons) == (ago(2), ago(2), [])
+    assert [bucket.bucket for bucket in cost.buckets] == list(BUCKETS)
+    assert strings(store.state()["reasons"]) == []
+    # T is kept but has nothing to keep yet.
+    assert stored_days(store) == (v1_keep(at, ago(1)) | set(closed_days(at))) - {T}
+
+    # 01:12: D is T now. v1 would keep T, T - 1, T - 7, T - 30 and T - 90 only, which drops C.
+    at = at_t(1)
+    assert ago(2) not in v1_keep(at, T)
+    assert ago(2) in stored_days(store)
+    requests = night_round(store, 1, O1)
+
+    # Every closed day's snapshots are final already, so none is fetched again.
+    assert requests == same_day(T) + past_of(T)
+    assert stored_days(store) == v1_keep(at, T) | set(closed_days(at))
+    assert levels_of(store)["urpd_date"] == "2026-10-15"
+    cost = costbasis_of(store)
+    assert (cost.urpd_date, cost.reasons) == (ago(2), [])
+    assert strings(store.state()["reasons"]) == []
+
+    # 02:12: C is T - 1, whose nine snapshots this round fetched final as one of D's past days.
+    at = at_t(2)
+    requests = night_round(store, 2, O1)
+
+    assert closed_days(at)[0] == ago(1)
+    # Only the grid days new to the closed days are fetched: C - 7, C - 30 and C - 90.
+    assert requests == same_day(T) + same_day(ago(1)) + days_of(ago(8), ago(31), ago(91))
+    levels = levels_of(store)
+    assert (levels["urpd_date"], levels["onchain_close"]) == ("2026-10-16", 81217.6)
+    cost = costbasis_of(store)
+    assert (cost.urpd_date, cost.lines_as_of, cost.reasons) == (ago(1), ago(1), [])
+    assert [bucket.bucket for bucket in cost.buckets] == list(BUCKETS)
+    assert strings(store.state()["reasons"]) == []
+    assert stored_days(store) == v1_keep(at, T) | set(closed_days(at))
+
+
+def test_o1_failed_closed_snapshot_keeps_f_on_the_day_before(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    night_round(store, 0, O1)
+    night_round(store, 1, O1)
+
+    # 02:12: one of C = T - 1's snapshots fails, both as D's past day and as C.
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        requests = night_round(store, 2, O1, failing={("lth", ago(1), "lin1000")})
+
+    at = at_t(2)
+    # The closed step stops at the error: C - 7, C - 30 and C - 90 are not asked for this round.
+    assert requests == same_day(T) + same_day(ago(1)) + [("lth", ago(1).isoformat(), "lin1000")]
+    assert caplog.text.count("onchain_urpd_past_failed code=brk_unavailable") == 1
+    assert caplog.text.count("onchain_urpd_closed_failed code=brk_unavailable") == 1
+    # The stage did not fail, and F is the day before C, still kept with its grid days.
+    state = store.state()
+    assert (state["last_error"], strings(state["reasons"])) == (None, [])
+    levels = levels_of(store)
+    assert (levels["urpd_date"], levels["onchain_close"]) == ("2026-10-15", 82203.57)
+    cost = costbasis_of(store)
+    assert (cost.urpd_date, cost.lines_as_of, cost.reasons) == (ago(2), ago(1), [])
+    assert [bucket.bucket for bucket in cost.buckets] == list(BUCKETS)
+    assert {ago(2), ago(3), ago(9), ago(32), ago(92)} <= stored_days(store)
+    unfetched = {ago(8), ago(31), ago(91)}
+    assert stored_days(store) == (v1_keep(at, T) | set(closed_days(at))) - unfetched
+
+
+def test_o1_fetches_the_closed_days_when_d_fails(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    night_round(store, 0, O1)
+    night_round(store, 1, O1)
+
+    # 02:12: D's second snapshot fails the URPD stage, which prunes before it raises.
+    requests = night_round(store, 2, O1, failing={("sth", T, "lin500")})
+
+    at = at_t(2)
+    # The closed step still runs. That prune kept the closed days stored at 01:12, so only C, not
+    # final yet, and the grid days new to the closed days are fetched.
+    assert requests == same_day(T)[:2] + days_of(ago(1), ago(8), ago(31), ago(91))
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert strings(state["reasons"]) == []
+    levels = levels_of(store)
+    assert (levels["urpd_date"], levels["onchain_close"]) == ("2026-10-16", 81217.6)
+    cost = costbasis_of(store)
+    assert (cost.urpd_date, cost.reasons) == (ago(1), [])
+    assert stored_days(store) == v1_keep(at, T) | set(closed_days(at))
+
+
+def test_o1_fetches_the_closed_days_without_d_and_skips_what_does_not_exist(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+
+    # Neither T nor T - 1 is published, so there is no D; C = T - 1 has no snapshots either.
+    requests = night_round(store, 2, O1, unpublished={T, ago(1)})
+
+    at = at_t(2)
+    # Each missing snapshot of C is skipped, and the days after it are still fetched.
+    assert requests == [
+        ("all", T.isoformat(), "lin500"),
+        ("all", ago(1).isoformat(), "lin500"),
+        *days_of(*closed_days(at)),
+    ]
+    state = store.state()
+    assert (state["last_error"], strings(state["reasons"])) == (None, ["urpd_missing"])
+    levels = levels_of(store)
+    assert (levels["urpd_date"], levels["latest_urpd_day"]) == ("2026-10-15", None)
+    cost = costbasis_of(store)
+    assert (cost.urpd_date, cost.reasons) == (ago(2), [])
+    # Without D nothing is pruned.
+    assert stored_days(store) == set(closed_days(at)) - {ago(1)}
+
+
+def test_v1_night_makes_no_closed_day_requests(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    v1: Rules = frozenset()
+
+    requests = night_round(store, 0, v1)
+    assert requests == [
+        ("all", T.isoformat(), "lin500"),
+        *same_day(ago(1)),
+        *past_of(ago(1)),
+    ]
+    assert len(requests) == 46
+    assert stored_days(store) == v1_keep(at_t(0), ago(1)) - {T}
+
+    requests = night_round(store, 1, v1)
+    assert requests == same_day(T) + past_of(T)
+    assert len(requests) == 45
+    # v1 drops T - 2, which it no longer needs.
+    assert stored_days(store) == v1_keep(at_t(1), T)
+
+    requests = night_round(store, 2, v1)
+    assert requests == same_day(T) + same_day(ago(1))
+    assert len(requests) == 18
+    assert stored_days(store) == v1_keep(at_t(2), T)
+    assert levels_of(store)["urpd_date"] == T.isoformat()

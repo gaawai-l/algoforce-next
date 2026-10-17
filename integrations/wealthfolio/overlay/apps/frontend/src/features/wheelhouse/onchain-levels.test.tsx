@@ -395,6 +395,74 @@ it("reads the per-snapshot URPD reason codes in both languages", () => {
   expect(reasonText(en, "urpd_unknown:lin500")).toBe("urpd_unknown:lin500");
 });
 
+it("reads the reason that the closed day's snapshots are not final in both languages", () => {
+  const en = (
+    key: Parameters<typeof phrase>[1],
+    vars?: Record<string, string | number>,
+  ) => phrase("en", key, vars);
+  const zh = (
+    key: Parameters<typeof phrase>[1],
+    vars?: Record<string, string | number>,
+  ) => phrase("zh", key, vars);
+  expect(reasonText(en, "urpd_not_final")).toBe(
+    "The latest closed day's cost-basis snapshots are not final yet",
+  );
+  expect(reasonText(zh, "urpd_not_final")).toBe(
+    "最近一个已收盘日的成本分布快照尚未定稿",
+  );
+});
+
+it("says under O1 that the lines are as of the closed day's close", () => {
+  render(
+    <OnchainLevels
+      levels={{
+        ...levelsSample,
+        rules: ["O1"],
+        forming_at: null,
+        as_of: "2026-10-15T00:00:00+00:00",
+        urpd_date: "2026-10-15",
+        reasons: ["urpd_not_final"],
+      }}
+      cycle={cycleSample}
+    />,
+  );
+  expect(
+    screen
+      .getByText(
+        "Bitcoin Research Kit · bitview.space · BRK 0.1.0 · as of 2026-10-15 close (UTC)",
+      )
+      .closest("details"),
+  ).toBe(sourceSection());
+  expect(
+    screen.getByText(
+      "The latest closed day's cost-basis snapshots are not final yet",
+    ),
+  ).toBeTruthy();
+  expect(
+    phrase("zh", "levels.sourceLine", {
+      version: "0.1.0",
+      date: phrase("zh", "levels.closedDate", { date: "2026-10-15" }),
+    }),
+  ).toBe(
+    "Bitcoin Research Kit · bitview.space · BRK 0.1.0 · 截至 2026-10-15 收盘（UTC）",
+  );
+});
+
+it("keeps the v1 as-of wording without O1", () => {
+  render(
+    <OnchainLevels
+      levels={{ ...levelsSample, rules: ["O5"] }}
+      cycle={{ ...cycleSample, rules: ["O1"] }}
+    />,
+  );
+  expect(
+    screen.getByText(
+      "Bitcoin Research Kit · bitview.space · BRK 0.1.0 · as of 2026-10-16 UTC",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/close \(UTC\)/)).toBeNull();
+});
+
 it("says the views are the original v1 when no rule applied", () => {
   render(
     <OnchainLevels

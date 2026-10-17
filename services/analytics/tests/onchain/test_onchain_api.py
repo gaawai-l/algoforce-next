@@ -8,12 +8,12 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from onchain_fixture import brk_transport, seed_golden
+from onchain_fixture import GOLDEN_DAYS, brk_transport, seed_golden
 
 from wheelhouse_service.http import create_app
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
-from wheelhouse_service.onchain.costbasis import PAST_DAYS, StoredCostBasis
+from wheelhouse_service.onchain.costbasis import StoredCostBasis
 from wheelhouse_service.onchain.models import closed_day, day1_state, hour1_state
 from wheelhouse_service.onchain.pressure import Pressure, seller_pressure
 from wheelhouse_service.onchain.store import OnchainStore
@@ -358,6 +358,31 @@ def test_o1_cycle_is_fresh_and_closed_at_10_40_and_01_30(tmp_path: Path):
         day1 = status["datasets"][0]
         assert (day1["name"], day1["data_state"]) == ("day1", "fresh")
         assert datetime.fromisoformat(day1["last_at"]) == datetime(2026, 10, 16, tzinfo=UTC)
+
+
+def test_status_day1_is_the_newer_latest_day_of_the_cycle_and_the_levels(tmp_path: Path):
+    path = synced(tmp_path, rules=O1)
+    store = OnchainStore(path)
+
+    def status_with(cycle_day: str, levels_day: str) -> dict[str, Any]:
+        for kind, day in (("cycle", cycle_day), ("levels", levels_day)):
+            derived = store.derived(kind)
+            assert derived is not None
+            payload = json.loads(derived[0])
+            payload["latest_day"] = day
+            store.save_derived(kind, json.dumps(payload), derived[1])
+        with TestClient(router_app(path, NOW, rules=O1)) as http:
+            day1: dict[str, Any] = http.get(f"{PREFIX}/status").json()["datasets"][0]
+        return day1
+
+    # Whichever of the two is newer, and not merely the first or the last read.
+    for cycle_day, levels_day in (("2026-10-16", "2026-10-14"), ("2026-10-14", "2026-10-16")):
+        day1 = status_with(cycle_day, levels_day)
+        assert (day1["name"], day1["data_state"]) == ("day1", "fresh")
+        assert datetime.fromisoformat(day1["last_at"]) == datetime(2026, 10, 16, tzinfo=UTC)
+    # Both older than the closed day each view reads: neither as_of stands in for them.
+    day1 = status_with("2026-10-13", "2026-10-12")
+    assert (day1["data_state"], day1["last_at"]) == ("stale", "2026-10-13T00:00:00Z")
 
 
 def test_cycle_without_latest_day_is_judged_by_its_as_of(tmp_path: Path):
@@ -932,12 +957,6 @@ def test_cost_basis_read_does_not_touch_network(tmp_path: Path):
     assert view["urpd_date"] == "2026-10-16"
     assert len(view["buckets"]) == 3
     assert seen == []
-
-
-# O1 on the levels and the cost basis. The golden sample's D and C = D - 1, each with its grid days.
-GOLDEN_DAYS = sorted(
-    {day - timedelta(days=n) for day in (D, D - timedelta(days=1)) for n in (0, *PAST_DAYS)}
-)
 
 
 def golden_o1(path: Path, at: datetime) -> None:

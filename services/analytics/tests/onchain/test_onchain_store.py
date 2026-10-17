@@ -279,6 +279,23 @@ def test_final_urpd_day_needs_every_snapshot_stored_and_final(tmp_path: Path):
     assert store.final_urpd_day(candidates) is None
 
 
+def test_urpd_not_final_lists_the_missing_and_early_snapshots_in_urpd_set_order(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    day = date(2026, 10, 15)
+    final = datetime(2026, 10, 16, 2, tzinfo=UTC)
+    assert store.urpd_not_final(day) == list(URPD_SET)
+
+    # One a second before its day is final, the rest at that moment or later; the first is missing.
+    stamps = [final - timedelta(seconds=1), final] + [final + timedelta(hours=1)] * 6
+    for (cohort, agg), fetched_at in zip(URPD_SET[1:], stamps, strict=True):
+        snapshot = load_urpd(cohort).model_copy(update={"date": day, "aggregation": agg})
+        store.save_urpd(snapshot, fetched_at)
+
+    assert store.urpd_not_final(day) == [URPD_SET[0], URPD_SET[1]]
+    # Another day's snapshots do not count.
+    assert store.urpd_not_final(day + timedelta(days=1)) == list(URPD_SET)
+
+
 def test_derived_roundtrip_and_clear(tmp_path: Path):
     store = OnchainStore(tmp_path / "onchain.sqlite3")
     assert store.derived("regime") is None
