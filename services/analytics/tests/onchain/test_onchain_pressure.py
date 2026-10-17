@@ -1,3 +1,4 @@
+import math
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -9,11 +10,15 @@ from wheelhouse_service.onchain.pressure import (
     LOOKBACK,
     WINDOW,
     Pressure,
+    PressureLossPoint,
     quantile_r7,
     seller_pressure,
 )
+from wheelhouse_service.rules import Rules
 
 HOUR = timedelta(hours=1)
+V1: Rules = frozenset()
+O3: Rules = frozenset({"O3"})
 Rows = dict[str, list[tuple[datetime, float | None]]]
 Columns = dict[str, list[float | None]]
 
@@ -91,10 +96,33 @@ def at(hour: int) -> datetime:
     return BASE + HOUR * hour
 
 
-def computed(cols: Columns) -> Pressure:
-    result = seller_pressure(rows_of(cols))
+def computed(cols: Columns, rules: Rules = V1) -> Pressure:
+    result = seller_pressure(rows_of(cols), rules=rules)
     assert result is not None
     return result
+
+
+def no_block_hour(cols: Columns, hour: int) -> None:
+    """An hour without a block as BRK has it: nothing realized, then every value null."""
+    for name in STEPS:
+        hold(cols, name, hour)
+    no_block(cols, hour)
+
+
+def flagged(result: Pressure) -> list[tuple[str, datetime]]:
+    """The points marked as without a block or behind a gap, as (chart, time)."""
+    charts = {
+        "loss": result.loss,
+        "share": result.share,
+        "supply": result.supply,
+        "price": result.price,
+    }
+    return [
+        (name, point.at)
+        for name, points in charts.items()
+        for point in points
+        if point.no_block or point.gap
+    ]
 
 
 def fixture_rows(last: datetime) -> Rows:
@@ -108,7 +136,7 @@ def fixture_rows(last: datetime) -> Rows:
 
 
 def test_parity_with_original_page_at_0800():
-    result = seller_pressure(fixture_rows(datetime(2026, 10, 16, 8, tzinfo=UTC)))
+    result = seller_pressure(fixture_rows(datetime(2026, 10, 16, 8, tzinfo=UTC)), rules=V1)
     assert result is not None
     assert result.last_at == datetime(2026, 10, 16, 8, tzinfo=UTC)
     assert result.kept == 2576
@@ -132,10 +160,12 @@ def test_parity_with_original_page_at_0800():
     # under-1h series have nulls at the same hours).
     assert len(result.price) == result.kept
     assert result.xgap == 0
+    # v1 marks no point: those marks are O3's.
+    assert not any(flagged(result))
 
 
 def test_qc_passes_on_the_parity_input():
-    result = seller_pressure(fixture_rows(datetime(2026, 10, 16, 8, tzinfo=UTC)))
+    result = seller_pressure(fixture_rows(datetime(2026, 10, 16, 8, tzinfo=UTC)), rules=V1)
     assert result is not None
     assert result.qc == []
 
@@ -143,7 +173,7 @@ def test_qc_passes_on_the_parity_input():
 def test_lookback_ignores_rows_beyond_2600():
     full = fixture_rows(datetime(2026, 10, 16, 9, tzinfo=UTC))
     assert all(len(points) == LOOKBACK for points in full.values())
-    baseline = seller_pressure(full)
+    baseline = seller_pressure(full, rules=V1)
     assert baseline is not None
     first = full[PRICE][0][0]
     # 500 older hours whose cumulative values would turn the oldest kept row into a huge loss if the
@@ -153,7 +183,7 @@ def test_lookback_ignores_rows_beyond_2600():
         for name in HOUR1_SERIES
     }
     extended = {name: older[name] + full[name] for name in HOUR1_SERIES}
-    assert seller_pressure(extended) == baseline
+    assert seller_pressure(extended, rules=V1) == baseline
 
 
 def test_no_block_hour_drops_itself_and_next():
@@ -324,7 +354,7 @@ def test_series_are_aligned_by_time_not_by_position():
     short[PRICE] = short[PRICE][3:]
     nulled = columns(10)
     nulled[PRICE][:3] = [None] * 3
-    assert seller_pressure(short) == computed(nulled)
+    assert seller_pressure(short, rules=V1) == computed(nulled)
 
 
 def test_row_missing_from_one_series_counts_as_null():
@@ -333,17 +363,17 @@ def test_row_missing_from_one_series_counts_as_null():
     gapped[STH_LOSS] = [point for point in gapped[STH_LOSS] if point[0] != at(4)]
     nulled = columns(10)
     nulled[STH_LOSS][4] = None
-    assert seller_pressure(gapped) == computed(nulled)
+    assert seller_pressure(gapped, rules=V1) == computed(nulled)
     assert computed(nulled).kept == 9 - 2
 
 
 def test_empty_when_nothing_can_be_kept():
-    assert seller_pressure({name: [] for name in HOUR1_SERIES}) is None
+    assert seller_pressure({name: [] for name in HOUR1_SERIES}, rules=V1) is None
     cols = columns(5)
     for hour in range(5):
         cols[PRICE][hour] = None
-    assert seller_pressure(rows_of(cols)) is None
-    assert seller_pressure(rows_of(columns(1))) is None
+    assert seller_pressure(rows_of(cols), rules=V1) is None
+    assert seller_pressure(rows_of(columns(1)), rules=V1) is None
 
 
 def test_qc_hour_gap_fails_only_on_a_step_over_three_hours():
@@ -439,3 +469,235 @@ def test_plain_hour_values():
 def test_constants_match_the_original_page():
     assert LOOKBACK == 2600
     assert WINDOW == timedelta(hours=720)
+
+
+def test_payload_stored_before_o3_marks_still_loads():
+    stored = computed(columns(5)).model_dump(mode="json")
+    for name in ("loss", "share", "supply", "price"):
+        for point in stored[name]:
+            del point["no_block"], point["gap"]
+    old = Pressure.model_validate(stored)
+    assert old == computed(columns(5))
+    assert not any(flagged(old))
+
+
+def test_o3_keeps_every_row_of_the_parity_input():
+    rows = fixture_rows(datetime(2026, 10, 16, 8, tzinfo=UTC))
+    v1 = seller_pressure(rows, rules=V1)
+    result = seller_pressure(rows, rules=O3)
+    assert v1 is not None and result is not None
+    # The 11 hours without a block and the 11 after them are kept: every hour but the first.
+    assert result.kept == 2598
+    assert (result.loss_levels.n, result.share_levels.n, result.supply_levels.n) == (720, 718, 720)
+    assert (result.last_at, result.latest_at, result.xgap, result.qc) == (
+        v1.last_at,
+        v1.latest_at,
+        0,
+        [],
+    )
+    no_block = [p.at for p in result.loss if p.no_block]
+    assert len(no_block) == 11
+    # None of them opens the window, and two fall in the 720 hours of the levels.
+    assert result.loss[0].at < no_block[0]
+    window = [at for at in no_block if at > result.last_at - WINDOW]
+    assert window == [
+        datetime(2026, 10, 3, 14, tzinfo=UTC),
+        datetime(2026, 10, 3, 18, tzinfo=UTC),
+    ]
+
+    raw = {name: dict(points) for name, points in rows.items()}
+    loss = {p.at: p for p in result.loss}
+    share = {p.at: p for p in result.share}
+    supply = {p.at: p for p in result.supply}
+    price = {p.at: p for p in result.price}
+    supply_of = {p.at: p.value for p in v1.supply}
+    for at_ in no_block:
+        before = at_ - HOUR
+        assert all(raw[name][at_] is None for name in HOUR1_SERIES)
+        # Flows are 0; the share has no denominator; supply and price carry the hour before over.
+        assert (loss[at_].lth, loss[at_].sth, loss[at_].gap) == (0.0, 0.0, False)
+        assert (share[at_].value, share[at_].no_block) == (None, True)
+        assert (supply[at_].value, supply[at_].no_block) == (supply_of[before], True)
+        assert (price[at_].value, price[at_].no_block) == (raw[PRICE][before], True)
+        # The next hour differs from the carried values, so it holds only its own flows.
+        after = loss[at_ + HOUR]
+        lth_loss = raw[LTH_LOSS][at_ + HOUR] - raw[LTH_LOSS][before]  # type: ignore[operator]
+        assert after.lth == math.floor(max(0.0, lth_loss) / 100 + 0.5) * 100
+        assert not after.no_block and not after.gap
+    # What v1 kept reads the same, and the only marks are the hours without a block.
+    for name in ("loss", "share", "supply", "price"):
+        by_time = {p.at: p for p in getattr(result, name)}
+        assert all(by_time[p.at] == p for p in getattr(v1, name))
+    assert {at_ for _, at_ in flagged(result)} == set(no_block)
+
+
+def test_o3_hour_without_a_block_keeps_its_row_and_the_next():
+    cols = columns(12)
+    # Hour 4 has its own supply and price, which hour 5 carries over.
+    cols[STH_IN_LOSS][4] = 90.0
+    no_block_hour(cols, 5)
+    v1, result = computed(cols), computed(cols, O3)
+    assert (v1.kept, result.kept) == (11 - 2, 11)
+    loss = {p.at: p for p in result.loss}
+    assert loss[at(5)] == PressureLossPoint(at=at(5), lth=0.0, sth=0.0, no_block=True)
+    # The next hour reads its differences as usual: a plain hour.
+    assert (loss[at(6)].lth, loss[at(6)].sth, loss[at(6)].no_block) == (1_000.0, 2_500.0, False)
+    assert {p.at: p.value for p in result.supply}[at(5)] == pytest.approx(80 / 110, rel=1e-12)
+    assert {p.at: p.value for p in result.price}[at(5)] == 100_004.0
+    assert [p.value for p in result.share if p.at == at(5)] == [None]
+    assert flagged(result) == [(name, at(5)) for name in ("loss", "share", "supply", "price")]
+    # Chart 1 counts the 0; chart 2 has no denominator there.
+    assert (result.loss_levels.n, result.share_levels.n, result.supply_levels.n) == (11, 10, 11)
+    assert result.xgap == 0
+    assert result.qc == []
+
+
+def test_o3_carries_over_hours_without_a_block_in_a_row():
+    cols = columns(12)
+    no_block_hour(cols, 5)
+    no_block_hour(cols, 6)
+    result = computed(cols, O3)
+    assert result.kept == 11
+    assert [p.at for p in result.loss if p.no_block] == [at(5), at(6)]
+    assert {p.at: (p.lth, p.sth) for p in result.loss}[at(7)] == (1_000.0, 2_500.0)
+    assert {p.at: p.value for p in result.price}[at(6)] == 100_004.0
+    # v1 drops three rows here, which leaves a step of four hours.
+    assert computed(cols).qc == ["hour_gap"]
+    assert result.qc == []
+
+
+def test_o3_partial_gap_nulls_the_legs_that_need_the_series():
+    cols = columns(12)
+    # STH loss is null in hour 5, so hours 5 and 6 cannot have an STH loss leg.
+    cols[STH_LOSS][5] = None
+    # LTH profit is null in hour 8: chart 1 does not need it, chart 2 does.
+    cols[LTH_PROFIT][8] = None
+    v1, result = computed(cols), computed(cols, O3)
+    assert (v1.kept, result.kept) == (11 - 4, 11)
+    loss = {p.at: p for p in result.loss}
+    share = {p.at: p for p in result.share}
+    for hour in (5, 6):
+        assert (loss[at(hour)].lth, loss[at(hour)].sth, loss[at(hour)].gap) == (1_000.0, None, True)
+        assert (share[at(hour)].value, share[at(hour)].gap) == (None, True)
+    for hour in (8, 9):
+        point = loss[at(hour)]
+        assert (point.lth, point.sth, point.gap) == (1_000.0, 2_500.0, False)
+        assert (share[at(hour)].value, share[at(hour)].gap) == (None, True)
+    assert sorted(flagged(result)) == sorted(
+        [("loss", at(5)), ("loss", at(6))] + [("share", at(h)) for h in (5, 6, 8, 9)]
+    )
+    # Chart 1's total is null where one leg is, and null values stay out of the levels.
+    assert result.loss_levels.n == 11 - 2
+    assert result.share_levels.n == 11 - 4
+    assert result.supply_levels.n == 11
+    assert result.loss_levels.p95 == PLAIN_LOSS
+    assert result.xgap == 0
+    assert result.qc == []
+
+
+def test_o3_supply_gap_nulls_only_that_supply_point():
+    cols = columns(12)
+    cols[STH_IN_LOSS][5] = None
+    cols[YOUNG_IN_PROFIT][8] = None
+    result = computed(cols, O3)
+    supply = {p.at: p for p in result.supply}
+    assert (supply[at(5)].value, supply[at(5)].gap) == (None, True)
+    assert (supply[at(8)].value, supply[at(8)].gap) == (None, True)
+    # Supply is read at its own row, so the next hour is whole.
+    assert supply[at(6)].value == pytest.approx(PLAIN_SUPPLY, rel=1e-12)
+    assert sorted(flagged(result)) == [("supply", at(5)), ("supply", at(8))]
+    assert result.supply_levels.n == 11 - 2
+    assert result.qc == ["sth_supply"]
+
+
+def test_o3_keeps_the_v1_handling_of_an_under_1h_null():
+    cols = columns(10)
+    cols[YOUNG_LOSS][5] = None
+    v1, result = computed(cols), computed(cols, O3)
+    # The row is kept, xgap counts it and the hour after, and nothing is taken out: as in v1.
+    assert (result.kept, result.xgap, result.qc) == (9, 2, ["intraday_legs"])
+    assert {p.at: p.sth for p in result.loss}[at(5)] == 3_000.0
+    assert (result.loss, result.share, result.supply, result.price) == (
+        v1.loss,
+        v1.share,
+        v1.supply,
+        v1.price,
+    )
+
+
+@pytest.mark.parametrize("hours", [1, 2])
+def test_o3_drops_hours_without_a_block_that_open_the_window(hours: int):
+    # The window holds the last LOOKBACK hours, so with 5 more it opens at hour 5.
+    cols = columns(LOOKBACK + 5)
+    for hour in range(5, 5 + hours):
+        no_block_hour(cols, hour)
+    result = computed(cols, O3)
+    # Nothing can be carried over into the window: the first hour with a block opens it and only
+    # serves as the previous row.
+    assert result.loss[0].at == at(5 + hours + 1)
+    assert result.kept == LOOKBACK - hours - 1
+    assert flagged(result) == []
+    assert result.loss[0] == PressureLossPoint(at=at(5 + hours + 1), lth=1_000.0, sth=2_500.0)
+
+
+def test_o3_keeps_a_row_whose_only_gap_is_the_price():
+    cols = columns(8)
+    cols[PRICE][4] = None
+    v1, result = computed(cols), computed(cols, O3)
+    assert (v1.kept, result.kept) == (6, 7)
+    assert flagged(result) == [("price", at(4))]
+    price = {p.at: p for p in result.price}
+    assert (price[at(4)].value, price[at(4)].gap) == (None, True)
+    # The rest of the row reads as usual.
+    loss = {p.at: p for p in result.loss}
+    assert (loss[at(4)].lth, loss[at(4)].sth) == (1_000.0, 2_500.0)
+    assert {p.at: p.value for p in result.share}[at(4)] == pytest.approx(PLAIN_SHARE, rel=1e-12)
+    assert {p.at: p.value for p in result.supply}[at(4)] == pytest.approx(PLAIN_SUPPLY, rel=1e-12)
+
+
+def test_o3_keeps_the_newest_row_without_a_price_as_the_newest_hour():
+    cols = columns(10)
+    cols[PRICE][9] = None
+    result = computed(cols, O3)
+    assert result.last_at == result.latest_at == at(9)
+    # No price at all still keeps the rows.
+    unpriced = columns(10)
+    unpriced[PRICE] = [None] * 10
+    bare = computed(unpriced, O3)
+    assert (bare.kept, bare.latest_at) == (9, at(9))
+    assert all(p.value is None and p.gap for p in bare.price)
+
+
+def test_o3_qc_hour_gap_fails_on_any_missing_hour():
+    # With no row dropped, an hour without a block leaves every step at one hour.
+    blocks = columns(12)
+    no_block_hour(blocks, 5)
+    assert computed(blocks, O3).qc == []
+    # An hour BRK does not have at all leaves a two-hour step, which v1's three hours let pass.
+    rows = rows_of(columns(12))
+    rows = {name: [point for point in points if point[0] != at(5)] for name, points in rows.items()}
+    v1 = seller_pressure(rows, rules=V1)
+    result = seller_pressure(rows, rules=O3)
+    assert v1 is not None and result is not None
+    assert v1.qc == []
+    # The hour after has nothing to difference against, so its flows are a gap; its under-1h legs
+    # are unknown too, which xgap counts as on any kept row.
+    assert result.qc == ["hour_gap", "intraday_legs"]
+    assert result.xgap == 1
+    loss = {p.at: p for p in result.loss}
+    assert (loss[at(6)].lth, loss[at(6)].sth, loss[at(6)].gap) == (None, None, True)
+    assert {p.at: p.value for p in result.price}[at(6)] == 100_006.0
+
+
+def test_o3_hour_without_a_block_after_a_missing_hour_carries_nothing():
+    rows = rows_of(columns(12))
+    rows = {name: [point for point in points if point[0] != at(4)] for name, points in rows.items()}
+    for name in HOUR1_SERIES:
+        rows[name] = [(time, None if time == at(5) else value) for time, value in rows[name]]
+    result = seller_pressure(rows, rules=O3)
+    assert result is not None
+    loss = {p.at: p for p in result.loss}
+    # Still no block, so no flows; but its levels and the next hour's flows are unknown.
+    assert loss[at(5)] == PressureLossPoint(at=at(5), lth=0.0, sth=0.0, no_block=True)
+    assert {p.at: (p.value, p.gap) for p in result.price}[at(5)] == (None, True)
+    assert (loss[at(6)].lth, loss[at(6)].sth, loss[at(6)].gap) == (None, None, True)

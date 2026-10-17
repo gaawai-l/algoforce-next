@@ -5646,12 +5646,36 @@
             "title": "At"
           },
           "lth": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Lth"
           },
           "sth": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Sth"
+          },
+          "no_block": {
+            "type": "boolean",
+            "title": "No Block",
+            "default": false
+          },
+          "gap": {
+            "type": "boolean",
+            "title": "Gap",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -5659,7 +5683,9 @@
         "required": [
           "at",
           "lth",
-          "sth"
+          "sth",
+          "no_block",
+          "gap"
         ],
         "title": "PressureLossPoint"
       },
@@ -5671,15 +5697,34 @@
             "title": "At"
           },
           "value": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Value"
+          },
+          "no_block": {
+            "type": "boolean",
+            "title": "No Block",
+            "default": false
+          },
+          "gap": {
+            "type": "boolean",
+            "title": "Gap",
+            "default": false
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "at",
-          "value"
+          "value",
+          "no_block",
+          "gap"
         ],
         "title": "PressurePoint"
       },

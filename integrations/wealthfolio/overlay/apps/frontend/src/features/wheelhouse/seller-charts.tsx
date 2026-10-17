@@ -29,10 +29,14 @@ const SPANS = [
 const DEFAULT_SPAN = 720;
 
 // A row is one hour of one chart; `parts` is [LTH, STH] for the stacked chart and [value] otherwise.
+// A null part is unknown and is never drawn as 0. `noBlock` and `gap` are the O3 marks: an hour
+// without a block (its flows are a real 0) and a value a series gap left unknown.
 interface Row {
   at: string;
   t: number;
-  parts: number[];
+  parts: (number | null)[];
+  noBlock: boolean;
+  gap: boolean;
 }
 interface Pt {
   t: number;
@@ -79,6 +83,10 @@ const utcStamp = (t: number) =>
   new Date(t).toISOString().slice(0, 16).replace("T", " ");
 const utcDay = (t: number) => new Date(t).toISOString().slice(5, 10);
 const utcClock = (t: number) => new Date(t).toISOString().slice(11, 16);
+
+// The points whose value is known; a line drawn through them breaks where one is not.
+const known = (points: { t: number; v: number | null }[]): Pt[] =>
+  points.flatMap(({ t, v }) => (v == null ? [] : [{ t, v }]));
 
 // Consecutive points exactly one hour apart stay in one run; any other step breaks the line.
 function runs(points: Pt[]) {
@@ -134,6 +142,12 @@ function nearest(rows: Row[], t: number) {
 const round = (value: number) => Math.round(value * 100) / 100;
 const isNumber = (value: number | null | undefined): value is number =>
   value != null;
+// The height of a row's bar or point; one unknown part leaves the stacked total unknown.
+function total(kind: Kind, row: Row) {
+  const [first, second] = row.parts;
+  if (kind !== "stack") return first;
+  return first == null || second == null ? null : first + second;
+}
 
 function frame(width: number, height: number, rows: Row[]) {
   const compact = width < 500;
@@ -185,13 +199,16 @@ const Layer = memo(function Layer({
 }: LayerProps) {
   const f = frame(width, height, rows);
   const marks = [levels?.p95, levels?.p75].filter(isNumber);
-  const values = rows.map((row) =>
-    kind === "stack" ? row.parts[0] + row.parts[1] : row.parts[0],
-  );
+  const scale = [
+    ...rows.map((row) => total(kind, row)).filter(isNumber),
+    ...marks,
+  ];
+  // A span with no known value still needs an axis.
+  if (!scale.length) scale.push(0);
   let lo = 0;
-  let hi = Math.max(...values, ...marks);
+  let hi = Math.max(...scale);
   if (kind === "line") {
-    lo = Math.min(...values, ...marks);
+    lo = Math.min(...scale);
     const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.05 || 1;
     hi += pad;
     lo = lo >= 0 ? Math.max(0, lo - pad) : lo - pad;
@@ -227,22 +244,22 @@ const Layer = memo(function Layer({
   let outline = null;
   if (forming) {
     const cx = f.x(forming.t);
-    const total =
-      kind === "stack" ? forming.parts[0] + forming.parts[1] : forming.parts[0];
+    const value = total(kind, forming);
     if (kind === "line") {
-      outline = (
-        <circle
-          className="wh-seller-forming"
-          data-forming="true"
-          data-at={forming.at}
-          cx={round(cx)}
-          cy={round(y(total))}
-          r="4"
-        />
-      );
+      outline =
+        value == null ? null : (
+          <circle
+            className="wh-seller-forming"
+            data-forming="true"
+            data-at={forming.at}
+            cx={round(cx)}
+            cy={round(y(value))}
+            r="4"
+          />
+        );
     } else {
       const w = Math.max(barW + 2, 5);
-      const top = Math.min(y(total), lineY - 3);
+      const top = value == null ? lineY - 3 : Math.min(y(value), lineY - 3);
       outline = (
         <rect
           className="wh-seller-forming"
@@ -297,6 +314,8 @@ const Layer = memo(function Layer({
       {kind === "stack" &&
         rows.map((row) => {
           const [lth, sth] = row.parts;
+          // One unknown leg leaves the hour's total unknown: no bar, not a shorter one.
+          if (lth == null || sth == null) return null;
           const x = round(f.x(row.t) - barW / 2);
           const yLth = y(lth);
           const yTop = y(lth + sth);
@@ -324,25 +343,24 @@ const Layer = memo(function Layer({
           );
         })}
       {kind === "bars" &&
-        rows
-          .filter((row) => row.parts[0] > 0)
-          .map((row) => (
+        rows.map((row) => {
+          const value = row.parts[0];
+          return value != null && value > 0 ? (
             <rect
               key={row.at}
               className="wh-seller-bar wh-seller-bar--sth"
               x={round(f.x(row.t) - barW / 2)}
-              y={round(y(row.parts[0]))}
+              y={round(y(value))}
               width={round(barW)}
-              height={round(y(0) - y(row.parts[0]))}
+              height={round(y(0) - y(value))}
             />
-          ))}
+          ) : null;
+        })}
       {kind === "line" && (
         <path
           className="wh-seller-line"
-          d={path(
-            rows.map((row) => ({ t: row.t, v: row.parts[0] })),
-            y,
-          )}
+          // An unknown value is left out, so the line breaks there.
+          d={path(known(rows.map((row) => ({ t: row.t, v: row.parts[0] }))), y)}
         />
       )}
       {isNumber(levels?.p95) && (
@@ -550,12 +568,12 @@ function Panel({
           {
             tone: "sky",
             label: text("seller.loss.lth"),
-            value: amount(row.parts[0]),
+            value: level(row.parts[0]),
           },
           {
             tone: "rose",
             label: text("seller.loss.sth"),
-            value: amount(row.parts[1]),
+            value: level(row.parts[1]),
           },
         ]
       : [
@@ -564,10 +582,19 @@ function Panel({
             label: text(
               key === "share" ? "seller.share.label" : "seller.supply.label",
             ),
-            value: amount(row.parts[0]),
+            value: level(row.parts[0]),
           },
         ]
     : [];
+  // Why the hour reads as it does: no block (its flows are 0) or a series gap (unknown).
+  const note = row
+    ? [
+        row.noBlock ? text("seller.noBlock") : null,
+        row.gap ? text("seller.gap") : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
   const title = text(copy[key].title);
 
   return (
@@ -632,6 +659,7 @@ function Panel({
                 ? text("seller.latest", { time: utcStamp(row.t) })
                 : `${utcStamp(row.t)} UTC`}
             </span>
+            {note ? <span className="wh-seller-note">{note}</span> : null}
             {items.map((item) => (
               <span key={item.tone + item.label} className="wh-seller-key">
                 <i
@@ -674,14 +702,16 @@ function Panel({
   );
 }
 
-function toRows<T extends { at: string }>(
+function toRows<T extends { at: string; no_block: boolean; gap: boolean }>(
   source: T[],
-  parts: (item: T) => number[],
+  parts: (item: T) => (number | null)[],
 ): Row[] {
   return source.map((item) => ({
     at: item.at,
     t: Date.parse(item.at),
     parts: parts(item),
+    noBlock: item.no_block,
+    gap: item.gap,
   }));
 }
 
@@ -712,8 +742,9 @@ function Charts({ view }: { view: SellerPressureView }) {
     ],
     [view],
   );
+  // An hour without a price has no point, so the price line breaks there.
   const price = useMemo<Pt[]>(
-    () => view.price.map((p) => ({ t: Date.parse(p.at), v: p.value })),
+    () => known(view.price.map((p) => ({ t: Date.parse(p.at), v: p.value }))),
     [view],
   );
   const priceAt = useMemo(() => new Map(price.map((p) => [p.t, p.v])), [price]);
@@ -806,7 +837,16 @@ export function SellerCharts() {
         <p className="wh-onchain-warn">
           {text("seller.qc", {
             count: data.qc.length,
-            list: data.qc.map((code) => text(`seller.qc.${code}`)).join(", "),
+            list: data.qc
+              .map((code) =>
+                // O3 keeps every row, so its hour check fails on any missing hour.
+                text(
+                  code === "hour_gap" && data.rules.includes("O3")
+                    ? "seller.qc.hour_gap.o3"
+                    : `seller.qc.${code}`,
+                ),
+              )
+              .join(", "),
           })}
         </p>
       ) : null}

@@ -421,7 +421,6 @@ it("says under O1 that the lines are as of the closed day's close", () => {
         forming_at: null,
         as_of: "2026-10-15T00:00:00+00:00",
         urpd_date: "2026-10-15",
-        reasons: ["urpd_not_final"],
       }}
       cycle={cycleSample}
     />,
@@ -433,11 +432,8 @@ it("says under O1 that the lines are as of the closed day's close", () => {
       )
       .closest("details"),
   ).toBe(sourceSection());
-  expect(
-    screen.getByText(
-      "The latest closed day's cost-basis snapshots are not final yet",
-    ),
-  ).toBeTruthy();
+  expect(screen.getByText("URPD 2026-10-15 UTC")).toBeTruthy();
+  expect(screen.queryByText(/not final yet/)).toBeNull();
   expect(
     phrase("zh", "levels.sourceLine", {
       version: "0.1.0",
@@ -446,6 +442,35 @@ it("says under O1 that the lines are as of the closed day's close", () => {
   ).toBe(
     "Bitcoin Research Kit · bitview.space · BRK 0.1.0 · 截至 2026-10-15 收盘（UTC）",
   );
+});
+
+it("says under O1 when no closed day's snapshots are final", () => {
+  // As the service has it: no URPD day, so no median line, and the reason says why.
+  render(
+    <OnchainLevels
+      levels={{
+        ...levelsSample,
+        rules: ["O1"],
+        forming_at: null,
+        as_of: "2026-10-15T00:00:00+00:00",
+        urpd_date: null,
+        lines: levelsSample.lines.filter((line) => line.name !== "median"),
+        reasons: ["urpd_not_final"],
+      }}
+      cycle={cycleSample}
+    />,
+  );
+  expect(
+    screen.getByText(
+      "The latest closed day's cost-basis snapshots are not final yet",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText("URPD Unavailable")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Bitcoin Research Kit · bitview.space · BRK 0.1.0 · as of 2026-10-15 close (UTC)",
+    ),
+  ).toBeTruthy();
 });
 
 it("keeps the v1 as-of wording without O1", () => {

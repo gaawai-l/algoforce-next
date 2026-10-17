@@ -1970,9 +1970,19 @@ export interface components {
              */
             at: string;
             /** Lth */
-            lth: number;
+            lth: number | null;
             /** Sth */
-            sth: number;
+            sth: number | null;
+            /**
+             * No Block
+             * @default false
+             */
+            no_block: boolean;
+            /**
+             * Gap
+             * @default false
+             */
+            gap: boolean;
         };
         /** PressurePoint */
         PressurePoint: {
@@ -1982,7 +1992,17 @@ export interface components {
              */
             at: string;
             /** Value */
-            value: number;
+            value: number | null;
+            /**
+             * No Block
+             * @default false
+             */
+            no_block: boolean;
+            /**
+             * Gap
+             * @default false
+             */
+            gap: boolean;
         };
         /** PrevCountdown */
         PrevCountdown: {

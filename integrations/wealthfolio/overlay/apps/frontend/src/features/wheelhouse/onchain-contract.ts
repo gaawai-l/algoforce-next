@@ -66,7 +66,14 @@ const pressureLevels = z.object({
   p75: z.number().nullable(),
   n: z.number().int(),
 });
-const pressurePoint = z.object({ at: time, value: z.number() });
+// O3 marks an hour without a block (flows 0, levels carried over) and a value a series gap left
+// unknown, which is null and never 0. Under v1 no value is null and both marks are false.
+const pressureMarks = { no_block: z.boolean(), gap: z.boolean() };
+const pressurePoint = z.object({
+  at: time,
+  value: z.number().nullable(),
+  ...pressureMarks,
+});
 
 export const levelsViewSchema: z.ZodType<LevelsView, z.ZodTypeDef, unknown> =
   z.object({
@@ -167,7 +174,14 @@ export const sellerPressureSchema: z.ZodType<
   refreshing: z.boolean(),
   forming_at: time.nullable(),
   last_at: time.nullable(),
-  loss: z.array(z.object({ at: time, lth: z.number(), sth: z.number() })),
+  loss: z.array(
+    z.object({
+      at: time,
+      lth: z.number().nullable(),
+      sth: z.number().nullable(),
+      ...pressureMarks,
+    }),
+  ),
   share: z.array(pressurePoint),
   supply: z.array(pressurePoint),
   price: z.array(pressurePoint),
@@ -1024,18 +1038,26 @@ export function pressureSample(): SellerPressureView {
       at,
       lth: last ? 1_983_300 : 2_500_000 + 1_200_000 * slow + 300_000 * fast,
       sth: last ? 8_540_500 : 12_000_000 + 6_000_000 * slow + 800_000 * fast,
+      no_block: false,
+      gap: false,
     });
     share.push({
       at,
       value: last ? 0.41893330324776934 : 0.3 + 0.12 * slow + 0.02 * fast,
+      no_block: false,
+      gap: false,
     });
     supply.push({
       at,
       value: last ? 0.2957342245796155 : 0.28 + 0.01 * slow + 0.002 * fast,
+      no_block: false,
+      gap: false,
     });
     price.push({
       at,
       value: 100_000 + 8_000 * slow + 600 * fast + i * 3,
+      no_block: false,
+      gap: false,
     });
   }
   const lastAt = loss[loss.length - 1].at;

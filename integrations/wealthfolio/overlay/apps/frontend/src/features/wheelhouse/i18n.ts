@@ -465,6 +465,7 @@ const en = {
   "rules.O6": "past-only ranking",
   "seller.qc": "QC {{count}} failed: {{list}}",
   "seller.qc.hour_gap": "no hourly gap over 2 hours",
+  "seller.qc.hour_gap.o3": "no missing hour",
   "seller.qc.intraday_legs": "intraday legs on every hour",
   "seller.qc.sth_supply": "STH supply on every hour",
   "seller.noData": "No data for this chart",
@@ -476,6 +477,8 @@ const en = {
   "seller.warningHint":
     "75th percentile of the last 30 days · {{n}} hourly samples",
   "seller.latest": "Latest · {{time}} UTC",
+  "seller.noBlock": "No block this hour",
+  "seller.gap": "Series gap: value unavailable",
   "seller.price": "BTC/USD",
   "seller.aria":
     "{{title}}. Use the left and right arrow keys to read one hour; Escape returns to the latest.",
@@ -1092,6 +1095,7 @@ const zh: Record<MessageKey, string> = {
   "rules.O6": "只用过去排名",
   "seller.qc": "QC {{count}} 项未通过：{{list}}",
   "seller.qc.hour_gap": "小时数据无超过 2 小时的缺口",
+  "seller.qc.hour_gap.o3": "小时数据无缺失",
   "seller.qc.intraday_legs": "每小时都有 1 小时内分项",
   "seller.qc.sth_supply": "每小时都有 STH 持仓数据",
   "seller.noData": "此图暂无数据",
@@ -1101,6 +1105,8 @@ const zh: Record<MessageKey, string> = {
   "seller.extremeHint": "近 30 天第 95 百分位 · {{n}} 个小时样本",
   "seller.warningHint": "近 30 天第 75 百分位 · {{n}} 个小时样本",
   "seller.latest": "最新 · {{time}} UTC",
+  "seller.noBlock": "这一小时没有出块",
+  "seller.gap": "序列缺口：数值不可用",
   "seller.price": "BTC/USD",
   "seller.aria":
     "{{title}}。用左右方向键逐小时读取；按 Esc 回到最新。",

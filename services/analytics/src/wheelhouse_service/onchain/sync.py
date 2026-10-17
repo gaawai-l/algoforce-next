@@ -453,18 +453,21 @@ class OnchainSync:
             # The stored pressure stays, with the time it was computed, until hour1 is fetched.
             return
         pressure = None
+        # Only the rules the payload records are applied.
+        rules = rules_for_view("pressure", self.rules)
         if not hour1_missing:
             # An absent series is not a zero: with any of them gone there is no pressure at all.
             pressure = seller_pressure(
                 {
                     name: self.store.read_series(name, "hour1", tail=LOOKBACK + 1)
                     for name in HOUR1_SERIES
-                }
+                },
+                rules=frozenset(rules),
             )
         if pressure is None:
             self.store.clear_derived("pressure")
         else:
-            pressure = pressure.model_copy(update={"rules": rules_for_view("pressure", self.rules)})
+            pressure = pressure.model_copy(update={"rules": rules})
             self.store.save_derived("pressure", pressure.model_dump_json(), hour1_at)
 
     def _cost_basis(

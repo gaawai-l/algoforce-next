@@ -500,7 +500,10 @@ def test_pressure_view_after_sync(tmp_path: Path):
     assert view["xgap"] == stored.xgap
     assert view["qc"] == stored.qc == []
     assert datetime.fromisoformat(view["loss"][-1]["at"]) == LAST_ROW
-    assert set(view["loss"][0]) == {"at", "lth", "sth"}
+    assert set(view["loss"][0]) == {"at", "lth", "sth", "no_block", "gap"}
+    # Under v1 no point is without a block or behind a gap.
+    for group in ("loss", "share", "supply", "price"):
+        assert not any(point["no_block"] or point["gap"] for point in view[group])
 
 
 def test_pressure_view_freshness_follows_the_clock(tmp_path: Path):
@@ -593,7 +596,7 @@ def test_no_block_hour_does_not_delay_the_pressure_view(tmp_path: Path):
         name: [(at, None if at == gap else value) for at, value in store.read_series(name, "hour1")]
         for name in HOUR1_SERIES
     }
-    pressure = seller_pressure(rows)
+    pressure = seller_pressure(rows, rules=frozenset())
     assert pressure is not None
     assert pressure.latest_at == LAST_ROW
     assert pressure.last_at == LAST_ROW - timedelta(hours=2)

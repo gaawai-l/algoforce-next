@@ -526,6 +526,136 @@ it("has Chinese copy for every seller key and a different string from English", 
   );
 });
 
+// Reads one hour back from the latest on a chart's keyboard and returns its legend.
+const readBack = (
+  container: HTMLElement,
+  name: "loss" | "share" | "supply",
+) => {
+  fireEvent.keyDown(chart(container, name).querySelector("svg")!, {
+    key: "ArrowLeft",
+  });
+  return (
+    chart(container, name).querySelector(".wh-seller-legend")?.textContent ?? ""
+  );
+};
+
+it("draws an hour without a block as 0 and says so when it is read", async () => {
+  // O3 keeps the hour: no flows, no share (0 / 0), supply and price carried over.
+  const view = pressureSample();
+  const hour = view.loss.length - 2;
+  view.loss[hour] = { ...view.loss[hour], lth: 0, sth: 0, no_block: true };
+  view.share[hour] = { ...view.share[hour], value: null, no_block: true };
+  view.supply[hour] = {
+    ...view.supply[hour - 1],
+    at: view.supply[hour].at,
+    no_block: true,
+  };
+  view.price[hour] = {
+    ...view.price[hour - 1],
+    at: view.price[hour].at,
+    no_block: true,
+  };
+  const { container } = show({ ...view, rules: ["O3"] });
+  await screen.findByText(/Resolution 1h/);
+
+  // A 0 has no height, and an unknown share has no bar; the line and the price go on.
+  for (const part of ["lth", "sth"])
+    expect(
+      chart(container, "loss").querySelectorAll(`rect.wh-seller-bar--${part}`),
+    ).toHaveLength(719);
+  expect(
+    chart(container, "share").querySelectorAll("rect.wh-seller-bar"),
+  ).toHaveLength(719);
+  expect(moves(pathOf(chart(container, "supply"), "path.wh-seller-line"))).toBe(
+    1,
+  );
+  expect(moves(pathOf(chart(container, "loss"), "path.wh-seller-price"))).toBe(
+    1,
+  );
+
+  const loss = readBack(container, "loss");
+  expect(loss).toContain("No block this hour");
+  expect(loss).toContain("LTH loss $0.00");
+  expect(loss).not.toContain("Series gap");
+  const share = readBack(container, "share");
+  expect(share).toContain("No block this hour");
+  expect(share).toContain("STH loss share Unavailable");
+  expect(share).not.toMatch(/0\.0%/);
+  // The latest hour had a block: no note.
+  fireEvent.keyDown(chart(container, "loss").querySelector("svg")!, {
+    key: "Escape",
+  });
+  expect(chart(container, "loss").querySelector(".wh-seller-note")).toBeNull();
+});
+
+it("draws no bar or line for a gap and says so when it is read", async () => {
+  const view = pressureSample();
+  const hour = view.loss.length - 2;
+  view.loss[hour] = { ...view.loss[hour], lth: null, gap: true };
+  view.share[hour] = { ...view.share[hour], value: null, gap: true };
+  view.supply[hour] = { ...view.supply[hour], value: null, gap: true };
+  view.price[hour] = { ...view.price[hour], value: null, gap: true };
+  const { container } = show({ ...view, rules: ["O3"] });
+  await screen.findByText(/Resolution 1h/);
+
+  // One unknown leg leaves the stack unknown: neither part is drawn, never as 0.
+  for (const part of ["lth", "sth"])
+    expect(
+      chart(container, "loss").querySelectorAll(`rect.wh-seller-bar--${part}`),
+    ).toHaveLength(719);
+  expect(
+    chart(container, "share").querySelectorAll("rect.wh-seller-bar"),
+  ).toHaveLength(719);
+  expect(moves(pathOf(chart(container, "supply"), "path.wh-seller-line"))).toBe(
+    2,
+  );
+  expect(moves(pathOf(chart(container, "loss"), "path.wh-seller-price"))).toBe(
+    2,
+  );
+
+  const loss = readBack(container, "loss");
+  expect(loss).toContain("Series gap: value unavailable");
+  expect(loss).toContain("LTH loss Unavailable");
+  // The known leg still reads.
+  expect(loss).toMatch(/STH loss \$\d/);
+  expect(loss).toContain("BTC/USD Unavailable");
+  expect(loss).not.toContain("No block");
+  for (const name of ["share", "supply"] as const)
+    expect(readBack(container, name)).toContain(
+      "Series gap: value unavailable",
+    );
+});
+
+it("keeps the axes when a span has no known value", async () => {
+  const view = pressureSample();
+  view.share = view.share.map((point) => ({
+    ...point,
+    value: null,
+    gap: true,
+  }));
+  view.share_levels = { p95: null, p75: null, n: 0 };
+  view.supply = view.supply.map((point) => ({
+    ...point,
+    value: null,
+    gap: true,
+  }));
+  view.supply_levels = { p95: null, p75: null, n: 0 };
+  const { container } = show({ ...view, rules: ["O3"] });
+  await screen.findByText(/Resolution 1h/);
+  for (const name of ["share", "supply"] as const) {
+    const svg = chart(container, name).querySelector("svg")!;
+    expect(svg.innerHTML).not.toMatch(/NaN|Infinity/);
+    expect(svg.querySelector("rect.wh-seller-bar")).toBeNull();
+    // The latest point is unknown, so it has no forming marker either.
+    expect(svg.querySelector('circle[data-forming="true"]')).toBeNull();
+  }
+});
+
+it("names the O3 hour check by the gap it fails on", async () => {
+  show({ ...pressureSample(), rules: ["O3"], qc: ["hour_gap"] });
+  expect(await screen.findByText("QC 1 failed: no missing hour")).toBeTruthy();
+});
+
 it("says in the header that the original v1 rules produced the charts", async () => {
   show(pressureSample());
   expect(await screen.findByText("Rules: original v1")).toBeTruthy();

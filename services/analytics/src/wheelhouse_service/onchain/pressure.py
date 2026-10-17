@@ -1,4 +1,8 @@
-"""Seller pressure from the hourly BRK series, following the rules of the original page (v1)."""
+"""Seller pressure from the hourly BRK series, following the rules of the original page (v1).
+
+O3 keeps the rows that v1 drops: an hour without a block carries the hour before over, and a value a
+series gap leaves unknown is null instead of costing its row.
+"""
 
 import math
 from collections.abc import Sequence
@@ -9,7 +13,7 @@ from typing import Literal, NamedTuple
 from pydantic import AwareDatetime, Field
 
 from ..market import Model
-from ..rules import Rule
+from ..rules import Rule, Rules
 from .brk import HOUR1_SERIES
 
 # Only the most recent hours count, whatever else the store holds.
@@ -21,6 +25,8 @@ HOUR = timedelta(hours=1)
 QUANTUM = 100
 # The widest step between kept rows that passes QC: an hour without a block drops two rows.
 MAX_STEP = timedelta(hours=3)
+# Under O3 no row is dropped, so any step over an hour is a missing hour.
+O3_MAX_STEP = HOUR
 
 PRICE = "price_close"
 STH_PROFIT = "sth_realized_profit_cumulative"
@@ -49,13 +55,22 @@ class PressureLevels(Model):
 
 class PressureLossPoint(Model):
     at: AwareDatetime
-    lth: float
-    sth: float
+    # Null only under O3, where a series gap leaves the leg unknown.
+    lth: float | None
+    sth: float | None
+    # O3 only. `no_block`: the hour had no block, so its flows are 0 and its levels carried over.
+    # `gap`: a series the value needs is null. Both default to False, so stored payloads still load.
+    no_block: bool = False
+    gap: bool = False
 
 
 class PressurePoint(Model):
     at: AwareDatetime
-    value: float
+    # Null only under O3: a series gap, a share or supply whose denominator is not positive, or an
+    # hour without a block on chart 2.
+    value: float | None
+    no_block: bool = False
+    gap: bool = False
 
 
 class Pressure(Model):
@@ -73,20 +88,22 @@ class Pressure(Model):
     # the next derivation. `qc` lists the checks that failed; empty when all pass.
     qc: list[QcCode] = Field(default_factory=list)
     # The newest hour with a price, kept or not: BRK is current even when that hour was dropped.
+    # Never older than `last_at`, whose price O3 can leave null.
     latest_at: AwareDatetime | None = None
     # The rules it was derived under; payloads stored before rules existed read as none.
     rules: list[Rule] = []
 
 
 class _Row(NamedTuple):
-    """One kept hour. The flows are whole units of QUANTUM dollars."""
+    """One kept hour. The flows are whole units of QUANTUM dollars; None only under O3."""
 
     at: datetime
-    price: float
-    lth_profit: int
-    lth_loss: int
-    sth_profit: int  # without the coins held under 1h
-    sth_loss: int  # without the coins held under 1h
+    price: float | None
+    lth_profit: int | None
+    lth_loss: int | None
+    sth_profit: int | None  # without the coins held under 1h
+    sth_loss: int | None  # without the coins held under 1h
+    no_block: bool = False
 
 
 def quantile_r7(sorted_values: Sequence[float], q: float) -> float | None:
@@ -110,6 +127,14 @@ def _units(dollars: float) -> int:
     return math.floor(dollars / QUANTUM + 0.5)
 
 
+def _units_of(dollars: float | None) -> int | None:
+    return None if dollars is None else _units(dollars)
+
+
+def _dollars(units: int | None) -> float | None:
+    return None if units is None else float(units * QUANTUM)
+
+
 def _leg(cumulative: Series, at: datetime) -> float | None:
     """What a cumulative series added in the hour ending at `at`, never below 0."""
     now, before = cumulative.get(at), cumulative.get(at - HOUR)
@@ -118,23 +143,59 @@ def _leg(cumulative: Series, at: datetime) -> float | None:
     return max(0.0, now - before)
 
 
-def _levels(points: Sequence[tuple[datetime, float]]) -> PressureLevels:
+def _levels(points: Sequence[tuple[datetime, float | None]]) -> PressureLevels:
+    """The window ends at the chart's last point; a null value is not in the sample."""
     if not points:
         return PressureLevels(p95=None, p75=None, n=0)
     oldest = points[-1][0] - WINDOW
-    values = sorted(value for at, value in points if at > oldest)
+    values = sorted(value for at, value in points if at > oldest and value is not None)
     return PressureLevels(
         p95=quantile_r7(values, 0.95), p75=quantile_r7(values, 0.75), n=len(values)
     )
 
 
-def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pressure | None:
+def _carry_over_no_block(
+    series: dict[str, Series], hours: list[datetime]
+) -> tuple[list[datetime], set[datetime]]:
+    """O3: an hour without a block, every series null there, takes every value of the hour before.
+
+    `series` is filled in place, so the flows of such an hour are 0 and the next hour's differences
+    read as usual. Hours without a block at the start of the window have nothing to carry over and
+    are dropped: the window starts at the first hour with a block, which only serves as the previous
+    row. Returns the hours left and those without a block.
+    """
+
+    def empty(at: datetime) -> bool:
+        return all(series[name].get(at) is None for name in HOUR1_SERIES)
+
+    start = next((i for i, at in enumerate(hours) if not empty(at)), len(hours))
+    hours = hours[start:]
+    no_block: set[datetime] = set()
+    for at in hours[1:]:
+        if empty(at):
+            no_block.add(at)
+            for name in HOUR1_SERIES:
+                series[name][at] = series[name].get(at - HOUR)
+    return hours, no_block
+
+
+def _less(leg: float | None, young: float) -> float | None:
+    """A short-term holders' leg without the coins held under 1h, never below 0."""
+    return None if leg is None else max(0.0, leg - young)
+
+
+def seller_pressure(
+    rows: dict[str, list[tuple[datetime, float | None]]], *, rules: Rules
+) -> Pressure | None:
     """The three seller pressure charts, or None when no row can be kept.
 
     `rows` holds every HOUR1_SERIES series in time order. Series are lined up by timestamp, and an
-    hour a series does not have counts as a null there. Nothing is filled in: a row is kept only
-    when the price and the four realized cumulatives are known for it and for the hour before.
+    hour a series does not have counts as a null there. Under v1 nothing is filled in: a row is
+    kept only when the price and the four realized cumulatives are known for it and for the hour
+    before. Under O3 every hour after the first is kept: an hour without a block carries the hour
+    before over, and what a null leaves unknown is null and marked as a gap.
     """
+    o3 = "O3" in rules
     stamps = [at for name in HOUR1_SERIES for at, _ in rows[name]]
     if not stamps:
         return None
@@ -142,17 +203,25 @@ def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pre
     series: dict[str, Series] = {
         name: {at: value for at, value in rows[name] if at >= first} for name in HOUR1_SERIES
     }
+    hours = sorted({at for values in series.values() for at in values})
+    no_block: set[datetime] = set()
+    if o3:
+        hours, no_block = _carry_over_no_block(series, hours)
 
     kept: list[_Row] = []
     xgap = 0
     # The oldest hour has no previous row, so it only serves as one.
-    for at in sorted({at for values in series.values() for at in values}):
+    for at in hours[1:]:
         price = series[PRICE].get(at)
+        if at in no_block:
+            # Nothing happened on chain that hour: its flows are 0, not unknown.
+            kept.append(_Row(at, price, 0, 0, 0, 0, no_block=True))
+            continue
         sth_profit = _leg(series[STH_PROFIT], at)
         sth_loss = _leg(series[STH_LOSS], at)
         lth_profit = _leg(series[LTH_PROFIT], at)
         lth_loss = _leg(series[LTH_LOSS], at)
-        if (
+        if not o3 and (
             price is None
             or sth_profit is None
             or sth_loss is None
@@ -171,28 +240,49 @@ def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pre
             _Row(
                 at,
                 price,
-                _units(lth_profit),
-                _units(lth_loss),
-                _units(max(0.0, sth_profit - young_profit)),
-                _units(max(0.0, sth_loss - young_loss)),
+                _units_of(lth_profit),
+                _units_of(lth_loss),
+                _units_of(_less(sth_profit, young_profit)),
+                _units_of(_less(sth_loss, young_loss)),
             )
         )
     if not kept:
         return None
 
     loss = [
-        PressureLossPoint(at=r.at, lth=float(r.lth_loss * QUANTUM), sth=float(r.sth_loss * QUANTUM))
+        PressureLossPoint(
+            at=r.at,
+            lth=_dollars(r.lth_loss),
+            sth=_dollars(r.sth_loss),
+            no_block=r.no_block,
+            gap=r.lth_loss is None or r.sth_loss is None,
+        )
         for r in kept
     ]
-    loss_totals = [(r.at, float((r.lth_loss + r.sth_loss) * QUANTUM)) for r in kept]
+    # One unknown leg leaves the total unknown.
+    loss_totals = [
+        (
+            r.at,
+            None
+            if r.lth_loss is None or r.sth_loss is None
+            else float((r.lth_loss + r.sth_loss) * QUANTUM),
+        )
+        for r in kept
+    ]
 
-    share: list[tuple[datetime, float]] = []
+    share: list[PressurePoint] = []
     for r in kept:
+        if r.lth_profit is None or r.lth_loss is None or r.sth_profit is None or r.sth_loss is None:
+            share.append(PressurePoint(at=r.at, value=None, gap=True))
+            continue
         total = r.lth_profit + r.lth_loss + r.sth_profit + r.sth_loss
         if total > 0:
-            share.append((r.at, r.sth_loss / total))
+            share.append(PressurePoint(at=r.at, value=r.sth_loss / total))
+        elif o3:
+            # Without a block, or with nothing realized, there is no share; it is not 0.
+            share.append(PressurePoint(at=r.at, value=None, no_block=r.no_block))
 
-    supply: list[tuple[datetime, float]] = []
+    supply: list[PressurePoint] = []
     for r in kept:
         in_loss, in_profit = series[STH_IN_LOSS].get(r.at), series[STH_IN_PROFIT].get(r.at)
         young_in_loss, young_in_profit = (
@@ -200,13 +290,22 @@ def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pre
             series[YOUNG_IN_PROFIT].get(r.at),
         )
         if in_loss is None or in_profit is None or young_in_loss is None or young_in_profit is None:
+            if o3:
+                supply.append(PressurePoint(at=r.at, value=None, no_block=r.no_block, gap=True))
             continue
         old_loss, old_profit = in_loss - young_in_loss, in_profit - young_in_profit
         if old_loss + old_profit > 0:
-            supply.append((r.at, old_loss / (old_loss + old_profit)))
+            supply.append(
+                PressurePoint(
+                    at=r.at, value=old_loss / (old_loss + old_profit), no_block=r.no_block
+                )
+            )
+        elif o3:
+            supply.append(PressurePoint(at=r.at, value=None, no_block=r.no_block))
 
     qc: list[QcCode] = []
-    if any(b.at - a.at > MAX_STEP for a, b in pairwise(kept)):
+    max_step = O3_MAX_STEP if o3 else MAX_STEP
+    if any(b.at - a.at > max_step for a, b in pairwise(kept)):
         qc.append("hour_gap")
     if xgap:
         qc.append("intraday_legs")
@@ -216,17 +315,23 @@ def seller_pressure(rows: dict[str, list[tuple[datetime, float | None]]]) -> Pre
     ):
         qc.append("sth_supply")
 
+    # Under v1 the last row has a price, so it is never newer than the newest priced hour. Under O3
+    # it may lack only its price and still be the newest hour BRK has.
+    priced = [at for at, value in series[PRICE].items() if value is not None]
     return Pressure(
         last_at=kept[-1].at,
         loss=loss,
-        share=[PressurePoint(at=at, value=value) for at, value in share],
-        supply=[PressurePoint(at=at, value=value) for at, value in supply],
-        price=[PressurePoint(at=r.at, value=r.price) for r in kept],
+        share=share,
+        supply=supply,
+        price=[
+            PressurePoint(at=r.at, value=r.price, no_block=r.no_block, gap=r.price is None)
+            for r in kept
+        ],
         loss_levels=_levels(loss_totals),
-        share_levels=_levels(share),
-        supply_levels=_levels(supply),
+        share_levels=_levels([(p.at, p.value) for p in share]),
+        supply_levels=_levels([(p.at, p.value) for p in supply]),
         kept=len(kept),
         xgap=xgap,
         qc=qc,
-        latest_at=max(at for at, value in series[PRICE].items() if value is not None),
+        latest_at=max([*priced, kept[-1].at]),
     )

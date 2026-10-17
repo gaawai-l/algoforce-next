@@ -228,6 +228,60 @@ describe("on-chain seller pressure contract", () => {
     expect(nullLevel.share_levels?.p95).toBeNull();
   });
 
+  it("accepts O3 points: null values with their marks", () => {
+    const sample = pressureSample();
+    const parsed = sellerPressureSchema.parse({
+      ...sample,
+      loss: [
+        {
+          at: "2026-10-16T07:00:00Z",
+          lth: 0,
+          sth: 0,
+          no_block: true,
+          gap: false,
+        },
+        {
+          at: "2026-10-16T08:00:00Z",
+          lth: null,
+          sth: 5,
+          no_block: false,
+          gap: true,
+        },
+      ],
+      share: [
+        { at: "2026-10-16T07:00:00Z", value: null, no_block: true, gap: false },
+      ],
+      rules: ["O3"],
+    });
+    expect(parsed.loss[0]).toMatchObject({ lth: 0, no_block: true });
+    expect(parsed.loss[1].lth).toBeNull();
+    expect(parsed.share[0].value).toBeNull();
+    // Under v1 no point is marked.
+    for (const series of [
+      sample.loss,
+      sample.share,
+      sample.supply,
+      sample.price,
+    ])
+      expect(series.some((point) => point.no_block || point.gap)).toBe(false);
+  });
+
+  it("rejects a point without its marks", () => {
+    const sample = pressureSample();
+    expect(
+      sellerPressureSchema.safeParse({
+        ...sample,
+        share: [{ at: "2026-10-16T08:00:00Z", value: 0.4 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      sellerPressureSchema.safeParse({
+        ...sample,
+        loss: [{ at: "2026-10-16T08:00:00Z", lth: 1, sth: 1, no_block: false }],
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects a point with a missing value or a datetime without an offset", () => {
     const sample = pressureSample();
     expect(

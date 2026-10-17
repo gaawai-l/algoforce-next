@@ -1235,6 +1235,26 @@ def test_o4_reaches_the_derived_cycle(tmp_path: Path):
     assert (v1.as_of, v1.state, v1.changes) == (o4.as_of, o4.state, o4.changes)
 
 
+def test_o3_reaches_the_derived_pressure(tmp_path: Path):
+    def derived(rules: Rules) -> Pressure:
+        store = OnchainStore(tmp_path / f"{'-'.join(sorted(rules)) or 'v1'}.sqlite")
+        transport, _ = brk_transport()
+        assert run(store, transport, NOW, rules)
+        return pressure_of(store)
+
+    v1, o3 = derived(frozenset()), derived(frozenset({"O3"}))
+
+    # v1 drops the 11 hours without a block and the 11 after them; O3 keeps them all.
+    assert (v1.rules, v1.kept, v1.loss_levels.n) == ([], 2577, 716)
+    assert (o3.rules, o3.kept, o3.loss_levels.n, o3.share_levels.n) == (["O3"], 2599, 720, 718)
+    assert not any(point.no_block for point in v1.loss)
+    assert [point.at for point in o3.loss if point.no_block][-2:] == [
+        datetime(2026, 10, 3, 14, tzinfo=UTC),
+        datetime(2026, 10, 3, 18, tzinfo=UTC),
+    ]
+    assert (v1.last_at, v1.qc) == (o3.last_at, o3.qc)
+
+
 def test_o1_reaches_the_derived_cycle(tmp_path: Path):
     def derived(rules: Rules) -> Cycle:
         store = OnchainStore(tmp_path / f"{'-'.join(sorted(rules)) or 'v1'}.sqlite")

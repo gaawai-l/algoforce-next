@@ -131,13 +131,13 @@ def test_payloads_stored_before_rules_existed_read_as_no_rules(tmp_path: Path):
     assert cycle is not None
     assert Cycle.model_validate_json(cycle[0]).latest_day is None
 
-    # The pressure has no rule implemented, so under every rule only it is not derived again.
+    # Every view has a rule implemented, so under every rule each is derived again.
     views = read_views(path, ALL_RULES)
     assert labels(views) == {
         "cycle": ([], True),
         "levels": ([], True),
         "costbasis": ([], True),
-        "pressure": ([], False),
+        "pressure": ([], True),
     }
     # Without the newest days, freshness follows the dates read, the fixture's last day.
     assert (views["cycle"]["data_state"], views["cycle"]["as_of"]) == ("fresh", "2026-10-16")
