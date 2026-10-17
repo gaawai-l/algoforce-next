@@ -6,6 +6,11 @@ import {
   levelsViewSchema,
   sellerPressureSchema,
 } from "./onchain-contract";
+import {
+  perpStatesViewSchema,
+  perpsStatusSchema,
+  type PerpStatesView,
+} from "./perps-contract";
 import { marketContextSchema } from "./regime-contract";
 import type { components } from "./api-schema";
 
@@ -211,6 +216,18 @@ export const getSellerPressure = (signal?: AbortSignal) =>
   query("/onchain/seller-pressure", sellerPressureSchema, { signal });
 export const getCostBasis = (signal?: AbortSignal) =>
   query("/onchain/cost-basis", costBasisViewSchema, { signal });
+export const getPerpStates = (
+  exchange: PerpStatesView["exchange"],
+  window: PerpStatesView["window"],
+  signal?: AbortSignal,
+) =>
+  query(
+    `/perps/states?${new URLSearchParams({ exchange, window })}`,
+    perpStatesViewSchema,
+    { signal },
+  );
+export const getPerpStatus = (signal?: AbortSignal) =>
+  query("/perps/status", perpsStatusSchema, { signal });
 export const getJob = (id: string, signal?: AbortSignal) =>
   query(`/jobs/${encodeURIComponent(id)}`, jobSchema, { signal });
 export const getJobEvents = (id: string, signal?: AbortSignal) =>

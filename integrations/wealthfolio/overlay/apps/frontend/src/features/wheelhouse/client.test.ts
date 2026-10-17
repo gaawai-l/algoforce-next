@@ -3,6 +3,8 @@ import {
   getCostBasis,
   getOnchainCycle,
   getOnchainLevels,
+  getPerpStates,
+  getPerpStatus,
   getSellerPressure,
   getServiceStatus,
 } from "./client";
@@ -12,6 +14,7 @@ import {
   levelsSample,
   pressureSample,
 } from "./onchain-contract";
+import { perpStatesSample } from "./perps-contract";
 
 const validResponse = {
   service: "wheelhouse-python",
@@ -232,6 +235,97 @@ describe("on-chain client", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify(incomplete))),
     );
     await expect(getCostBasis()).rejects.toThrow("incompatible");
+  });
+
+  it("reads a perp states view for the exchange and window asked", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(perpStatesSample())));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await getPerpStates(
+      "bybit",
+      "8h",
+      new AbortController().signal,
+    );
+    expect(view.data_state).toBe("fresh");
+    expect(view.blocks).toHaveLength(181);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/wheelhouse/v1/perps/states?exchange=bybit&window=8h",
+    ]);
+  });
+
+  it("keeps a collecting perp view as served, with nothing judged", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify(perpStatesSample("collecting"))),
+        ),
+    );
+    const view = await getPerpStates("all", "4h");
+    expect(view.collecting).toBe(true);
+    expect(view.blocks.every((block) => block.state === null)).toBe(true);
+  });
+
+  it("rejects a perp states payload outside the contract", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ ...perpStatesSample(), data_state: "live" }),
+          ),
+        ),
+    );
+    await expect(getPerpStates("all", "4h")).rejects.toThrow("incompatible");
+  });
+
+  it("surfaces a perp states failure instead of an empty view", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("Unavailable", { status: 503 })),
+    );
+    await expect(getPerpStates("all", "4h")).rejects.toThrow("HTTP 503");
+  });
+
+  it("reads the perps status from the read-only endpoint", async () => {
+    const payload = {
+      last_run_at: "2026-10-17T11:05:04Z",
+      last_error: null,
+      hosts: [
+        {
+          host: "fapi.binance.com",
+          last_success: "2026-10-17T11:05:04Z",
+          error: null,
+          backoff_until: null,
+        },
+      ],
+      collectors: perpStatesSample().collectors,
+      direction: "pending",
+      direction_check: null,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(payload)));
+    vi.stubGlobal("fetch", fetchMock);
+    const status = await getPerpStatus(new AbortController().signal);
+    expect(status.direction).toBe("pending");
+    expect(status.collectors).toHaveLength(3);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/wheelhouse/v1/perps/status",
+    ]);
+  });
+
+  it("rejects a perps status payload outside the contract", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(new Response(JSON.stringify({ last_run_at: null }))),
+    );
+    await expect(getPerpStatus()).rejects.toThrow("incompatible");
   });
 
   it("rejects an on-chain payload outside the contract", async () => {
