@@ -50,8 +50,9 @@ BYBIT_PING = '{"op":"ping"}'
 
 RECV_TIMEOUT = 1.0
 READ_CAP = 1_000  # frames read in one step at most
-# The client stops reading the socket past this many queued frames. It exceeds what one step
-# reads, so a read that finds the queue empty means the socket is drained too.
+# The client stops reading the socket past this many queued frames. Only while it has never
+# paused does a read that finds the queue empty mean the socket is drained too; reaching a pause
+# takes a backlog of more than one step reads, and the guard bounds the rest.
 QUEUE_CAP = 10 * READ_CAP
 HEARTBEAT = 20.0  # seconds between pings; also the longest wait for a pong or a subscription ack
 MARGIN = 2.0  # an interval ends this long before its last proof of life, for clock error
@@ -311,7 +312,8 @@ class Collector:
             try:
                 frame = ws.recv(timeout=timeout)
             except TimeoutError:
-                self._caught_up = self._clock()
+                # No later than the read window: a pause inside the read must not hide the gap.
+                self._caught_up = min(self._clock(), now + RECV_TIMEOUT)
                 return
             except (OSError, WebSocketException):
                 self._fail(now, "closed")

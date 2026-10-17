@@ -799,6 +799,52 @@ def test_suspension_between_steps_ends_coverage_before_it(tmp_path: Path):
     assert not slow_ws.closed
 
 
+def test_suspension_inside_the_read_ends_coverage_before_it(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    first = FakeWs()
+    rig = Rig(store, "binance_liq", first, FakeWs())
+    rig.at(0)
+    rig.quiet(4)
+    first.frames.append(BTC_FORCE_ORDER)
+    rig.at(5)  # the last proof of life is at 5
+
+    def sleep() -> None:
+        rig.t += 94  # the process sleeps inside the read
+
+    first.frames.extend([sleep, BTC_FORCE_ORDER])  # the frame is queued meanwhile
+    rig.at(6)
+    rig.at(rig.t)  # the next step starts where this one ended, at 100
+    assert first.closed
+    assert first.frames == [BTC_FORCE_ORDER]
+    assert coverage_rows(store) == [
+        ("binance_liq", 0, 0, 3, 0),
+        ("binance_liq", 0, 100, 100, 1),
+    ]
+
+
+def test_dropped_event_after_a_good_one_in_the_same_read(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    base = 1792186090.0
+    ws = FakeWs()
+    rig = Rig(store, "binance_liq", ws)
+    rig.at(base)
+    rig.quiet(base + 8)  # the queue is last seen empty at base + 8
+    # Both arrive after that: a good event, then one that cannot be read.
+    good = edited(BTC_FORCE_ORDER, T=1792186098500)
+    bad = edited(BTC_FORCE_ORDER, S="SHORT", T=1792186098700)
+    ws.frames.extend([good, bad])
+    rig.at(base + 9)
+    assert ws.recv_calls == 8 + 3  # one in each quiet step; then both frames and an empty read
+    rows = coverage_rows(store)
+    assert rows == [
+        ("binance_liq", 0, base, base + 7, 0),
+        ("binance_liq", 0, base + 9, base + 9, 1),
+    ]
+    # The split ends before the bad frame could have arrived, so its event is in the hole.
+    assert rows[0][3] < base + 8 < 1792186098.7 < rows[1][2]
+    assert len(store.liquidations("binance", 0)) == 1
+
+
 def test_dropped_event_splits_coverage_around_it(tmp_path: Path):
     store = PerpsStore(tmp_path / "perps.sqlite3")
     base = 1792186090.0  # the fixture event's T is base + 10.113
