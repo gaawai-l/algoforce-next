@@ -132,13 +132,15 @@ def create_router(
         assert store is not None, "On-chain lifespan has not started"
         return store
 
-    # The views' reasons follow the configured rules, which the worker derives under.
+    # Without a payload the views' reasons follow the configured rules, which the worker derives
+    # under; a payload's follow the rules it was derived under.
     levels_shared = levels_reasons(frozenset(rules_for_view("levels", rules)))
     cost_shared = cost_basis_shared(frozenset(rules_for_view("costbasis", rules)))
 
     def pending(view: View, stored: list[Rule]) -> bool:
-        """Whether a payload was derived under other rules than the configured ones."""
-        return set(stored) != set(rules_for_view(view, rules))
+        """Whether a payload was derived under other rules than the configured ones, which the
+        worker derives it under. A process without the worker never derives it again."""
+        return start_worker and set(stored) != set(rules_for_view(view, rules))
 
     def stored_cycle() -> Cycle | None:
         derived = db().derived("cycle")
@@ -268,9 +270,10 @@ def create_router(
     def levels() -> LevelsView:
         now = clock()
         state = db().state()
-        reasons = only(stored_reasons(state), levels_shared)
-        refreshing = state["refreshing"] == "true"
         result = stored_levels()
+        shared = levels_shared if result is None else levels_reasons(frozenset(result.rules))
+        reasons = only(stored_reasons(state), shared)
+        refreshing = state["refreshing"] == "true"
         if result is None:
             return LevelsView(
                 data_state="unavailable",
@@ -300,9 +303,10 @@ def create_router(
     def cost_basis() -> CostBasisView:
         now = clock()
         state = db().state()
-        reasons = only(stored_reasons(state), cost_shared)
-        refreshing = state["refreshing"] == "true"
         stored = stored_cost_basis()
+        shared = cost_shared if stored is None else cost_basis_shared(frozenset(stored[0].rules))
+        reasons = only(stored_reasons(state), shared)
+        refreshing = state["refreshing"] == "true"
         if stored is None:
             return CostBasisView(
                 data_state="unavailable",

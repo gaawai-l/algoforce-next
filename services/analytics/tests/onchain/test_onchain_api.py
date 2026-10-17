@@ -23,6 +23,7 @@ from wheelhouse_service.rules import Rules
 PREFIX = "/api/wheelhouse/v1/onchain"
 NOW = datetime(2026, 10, 16, 10, 40, tzinfo=UTC)
 LINES = {"true_mean", "short_term", "average", "long_term", "median"}
+LEVEL_ROUTES = ("levels", "cost-basis")
 # The cost-basis golden sample: its URPD set has every cohort and bucket width.
 GOLDEN = Path(__file__).parent / "fixtures" / "brk-2026-10-16T1829Z"
 
@@ -288,6 +289,31 @@ def test_o5_missing_1d_1w_series_concerns_the_levels_and_the_cost_basis(tmp_path
     assert levels["reasons"] == [f"series_missing:{missing}"]
     assert (cost["data_state"], cost["buckets"]) == ("unavailable", [])
     assert cost["reasons"] == [f"series_missing:{missing}"]
+
+
+def test_levels_and_cost_basis_reasons_follow_the_rules_of_their_payload(tmp_path: Path):
+    missing = "series_missing:utxos_1d_to_1w_old_realized_price"
+    o5: Rules = frozenset({"O5"})
+
+    def reasons(path: Path, configured: Rules) -> list[list[str]]:
+        with TestClient(router_app(path, NOW, rules=configured)) as http:
+            return [http.get(f"{PREFIX}/{route}").json()["reasons"] for route in LEVEL_ROUTES]
+
+    for derived in (frozenset(), o5):
+        directory = tmp_path / ("o5" if derived else "v1")
+        directory.mkdir()
+        path = synced(directory, rules=derived, urpd_dir=GOLDEN)
+        # A synthetic state; only the filter is under test. The payloads need the series under O5
+        # alone, whatever the configured rules, which the worker has not derived under yet.
+        OnchainStore(path).set_state(reasons=json.dumps([missing]))
+        for configured in (frozenset(), o5):
+            assert reasons(path, configured) == ([[missing]] * 2 if derived else [[], []])
+
+    # Without a payload, the configured rules decide.
+    empty = tmp_path / "onchain.sqlite"
+    OnchainStore(empty).set_state(reasons=json.dumps([missing]))
+    assert reasons(empty, o5) == [[missing]] * 2
+    assert reasons(empty, frozenset()) == [["brk_unavailable"]] * 2
 
 
 def test_failed_first_sync_is_unavailable_with_reason(tmp_path: Path):

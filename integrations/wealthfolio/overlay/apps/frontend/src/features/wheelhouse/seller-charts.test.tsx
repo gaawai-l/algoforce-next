@@ -754,6 +754,38 @@ it("draws each threshold as a step line that follows the hour it belongs to", as
   }
 });
 
+it("redraws the step lines on the 7d span, one 168th of the plot per hour", async () => {
+  const view = rolled(["O2"], (i, name) => ({
+    p95: (i < 2100 ? 4 : 5) * unit(name),
+    p75: 2 * unit(name),
+  }));
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  for (const name of SERIES) {
+    const panel = chart(container, name);
+    fireEvent.click(within(panel).getByRole("button", { name: "7d" }));
+    // Rows 2032 to 2199: the first slot starts at the left edge, each one is 610 / 168 wide and
+    // the last ends at the right edge, 52 + 610.
+    const slot = 610 / 168;
+    for (const key of ["extreme", "warning"] as const) {
+      const d = pathOf(panel, `path.wh-seller-${key}-line`);
+      expect(moves(d)).toBe(1);
+      expect(d.startsWith("M52,")).toBe(true);
+      const ends = numbers(d, "H");
+      expect(ends).toHaveLength(168);
+      expect(ends[0]).toBeCloseTo(52 + slot, 1);
+      expect(ends.at(-1)).toBeCloseTo(662, 1);
+    }
+    // The extreme line steps up where hour 2100 begins.
+    const extreme = pathOf(panel, "path.wh-seller-extreme-line");
+    const step = extreme.indexOf("V");
+    expect(numbers(extreme.slice(0, step), "H").at(-1)).toBeCloseTo(
+      52 + (2100 - 2032) * slot,
+      1,
+    );
+  }
+});
+
 it("breaks a step line where the threshold is null, at the left edge and in the middle", async () => {
   const view = rolled(["O2"], (i, name) => ({
     // Fewer than 168 samples at the window's left edge, and a short cut in the middle.
@@ -960,17 +992,50 @@ it("opens the legend on the last row without O1, even when closed_at is set", as
   expect(share).not.toContain("Latest closed");
 });
 
-it("opens on the last row when the closed hour has no row on that chart", async () => {
+it("opens on the newest closed row when the closed hour has no row on that chart", async () => {
   const view = closedView();
-  // A share whose denominator was not positive in the closed hour has no row there.
+  // A share whose denominator was not positive in the closed hour has no row there; the last row
+  // is still forming, so the legend opens on the hour before the closed one.
   view.share = view.share.filter((p) => p.at !== view.closed_at);
   const { container } = show(view);
   await screen.findByText(/Resolution 1h/);
-  expect(legendOf(container, "share")).toContain(
-    "Latest · 2026-10-16 08:00 UTC",
-  );
+  const share = () => legendOf(container, "share");
+  expect(share()).toContain("Latest closed · 2026-10-16 06:00 UTC");
+  expect(share()).not.toContain("41.9%");
   expect(legendOf(container, "loss")).toContain(
     "Latest closed · 2026-10-16 07:00 UTC",
+  );
+  // The keys start from it, and Escape comes back to it.
+  const svg = chart(container, "share").querySelector("svg")!;
+  fireEvent.keyDown(svg, { key: "ArrowRight" });
+  expect(share()).toContain("2026-10-16 08:00 UTC");
+  fireEvent.keyDown(svg, { key: "Escape" });
+  expect(share()).toContain("Latest closed · 2026-10-16 06:00 UTC");
+});
+
+it("says that Escape returns to the latest closed hour only when the legend rests on one", async () => {
+  const label = (container: HTMLElement) =>
+    chart(container, "share").querySelector("svg")!.getAttribute("aria-label");
+  const closed = show(closedView());
+  await screen.findByText(/Resolution 1h/);
+  expect(label(closed.container)).toBe(
+    "Chart 2 — STH realized loss as a share of the sell side (%). Use the left and right arrow keys to read one hour; Escape returns to the latest closed hour.",
+  );
+  cleanup();
+  // Without O1, and under O1 before any hour has closed, it returns to the last row.
+  for (const view of [
+    { ...closedView(), rules: [] },
+    { ...closedView(), closed_at: null },
+  ]) {
+    const { container } = show(view);
+    await screen.findByText(/Resolution 1h/);
+    expect(label(container)).toBe(
+      "Chart 2 — STH realized loss as a share of the sell side (%). Use the left and right arrow keys to read one hour; Escape returns to the latest.",
+    );
+    cleanup();
+  }
+  expect(messages.zh["seller.ariaClosed"]).toBe(
+    "{{title}}。用左右方向键逐小时读取；按 Esc 回到最近已收盘的小时。",
   );
 });
 

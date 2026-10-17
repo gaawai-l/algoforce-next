@@ -155,6 +155,13 @@ function indexAt(rows: Row[], t: number | null) {
   return -1;
 }
 
+// The index of the newest row at or before `t`, or -1.
+function indexUpTo(rows: Row[], t: number | null) {
+  if (t == null) return -1;
+  for (let i = rows.length - 1; i >= 0; i -= 1) if (rows[i].t <= t) return i;
+  return -1;
+}
+
 const round = (value: number) => Math.round(value * 100) / 100;
 const isNumber = (value: number | null | undefined): value is number =>
   value != null;
@@ -643,8 +650,9 @@ function Panel({
   const hint = (name: "seller.extremeHint" | "seller.warningHint") =>
     levels ? text(name, { n: levels.n }) : undefined;
   const index = hover != null && hover < rows.length ? hover : null;
-  // Without a hover the legend reads the closed row when this chart has one, else the last row.
-  const closedIndex = indexAt(rows, closedT);
+  // Without a hover the legend reads the newest closed row: the one at closedT, or the newest
+  // before it when this chart has none there. Without a closed row, the last row.
+  const closedIndex = indexUpTo(rows, closedT);
   const rest = closedIndex >= 0 ? closedIndex : rows.length - 1;
   const row = rows[index ?? rest];
   // The level and run belong to the current reading, whatever span or hour is shown.
@@ -752,7 +760,10 @@ function Panel({
             formingT={formingT}
             axis={axis}
             height={chart.height}
-            label={text("seller.aria", { title })}
+            label={text(
+              closedIndex >= 0 ? "seller.ariaClosed" : "seller.aria",
+              { title },
+            )}
             hover={index}
             rest={rest}
             onHover={setHover}

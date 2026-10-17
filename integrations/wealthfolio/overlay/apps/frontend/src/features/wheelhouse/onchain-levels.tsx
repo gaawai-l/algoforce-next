@@ -203,7 +203,9 @@ export function OnchainLevels({
         text("levels.closedDate", { date: utcDay(lv.as_of) })
       : `${utcDay(lv.as_of)} UTC`
     : cy?.as_of
-      ? `${cy.as_of} UTC`
+      ? cy.rules.includes("O1")
+        ? text("levels.closedDate", { date: cy.as_of })
+        : `${cy.as_of} UTC`
       : missing;
   // The reading includes the open day only while it is current; stale data has no open row.
   const forming =

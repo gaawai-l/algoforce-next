@@ -492,6 +492,8 @@ const en = {
   "seller.price": "BTC/USD",
   "seller.aria":
     "{{title}}. Use the left and right arrow keys to read one hour; Escape returns to the latest.",
+  "seller.ariaClosed":
+    "{{title}}. Use the left and right arrow keys to read one hour; Escape returns to the latest closed hour.",
   "seller.read.shows": "What it shows",
   "seller.read.implies": "What extreme values imply",
   "seller.read.how": "How to read",
@@ -1150,6 +1152,8 @@ const zh: Record<MessageKey, string> = {
   "seller.price": "BTC/USD",
   "seller.aria":
     "{{title}}。用左右方向键逐小时读取；按 Esc 回到最新。",
+  "seller.ariaClosed":
+    "{{title}}。用左右方向键逐小时读取；按 Esc 回到最近已收盘的小时。",
   "seller.read.shows": "展示内容",
   "seller.read.implies": "极端值的含义",
   "seller.read.how": "如何解读",

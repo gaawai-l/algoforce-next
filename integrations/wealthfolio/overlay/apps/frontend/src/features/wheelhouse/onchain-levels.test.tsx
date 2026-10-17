@@ -504,6 +504,39 @@ it("says under O1 when no closed day's snapshots are final", () => {
   ).toBeTruthy();
 });
 
+it("says under O1 that the cycle is as of the closed day's close when the levels are missing", () => {
+  const unavailable: LevelsView = {
+    ...levelsSample,
+    data_state: "unavailable",
+    reasons: ["brk_unavailable"],
+    lines: [],
+    as_of: null,
+    urpd_date: null,
+    onchain_close: null,
+    forming_at: null,
+    rules: [],
+  };
+  const cycle: CycleView = {
+    ...cycleSample,
+    rules: ["O1", "O4"],
+    forming_at: null,
+    as_of: "2026-10-15",
+  };
+  render(<OnchainLevels levels={unavailable} cycle={cycle} />);
+  expect(sourceSection().textContent).toContain(
+    "BRK 0.1.0 · as of 2026-10-15 close (UTC)",
+  );
+  cleanup();
+  // Without O1 the cycle keeps the v1 wording.
+  render(
+    <OnchainLevels levels={unavailable} cycle={{ ...cycle, rules: ["O4"] }} />,
+  );
+  expect(sourceSection().textContent).toContain(
+    "BRK 0.1.0 · as of 2026-10-15 UTC",
+  );
+  expect(sourceSection().textContent).not.toMatch(/close \(UTC\)/);
+});
+
 it("keeps the v1 as-of wording without O1", () => {
   render(
     <OnchainLevels

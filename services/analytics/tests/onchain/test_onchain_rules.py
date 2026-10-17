@@ -7,6 +7,7 @@ import threading
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -90,23 +91,29 @@ def labels(views: dict[str, dict[str, Any]]) -> dict[str, tuple[list[str], bool]
 
 
 def read_routes(
-    path: Path, configured: Rules, at: datetime, routes: dict[str, str]
+    path: Path, configured: Rules, at: datetime, routes: dict[str, str], *, worker: bool = True
 ) -> dict[str, dict[str, Any]]:
-    """`routes` at `at` of a router configured with `configured`; it cannot reach BRK."""
+    """`routes` at `at` of a router configured with `configured`; it cannot reach BRK.
+
+    `worker` says whether the process runs the worker. Its thread never starts, so the payloads
+    stay as stored: what a request sees before the worker's first step.
+    """
     client, seen = blocked_client()
     app = FastAPI()
     app.include_router(
-        create_router(path, client, rules=configured, start_worker=False, clock=lambda: at)
+        create_router(path, client, rules=configured, start_worker=worker, clock=lambda: at)
     )
-    with TestClient(app) as http:
+    with patch.object(OnchainSync, "start"), TestClient(app) as http:
         views = {name: http.get(f"{PREFIX}/{route}").json() for name, route in routes.items()}
     assert seen == []
     return views
 
 
-def read_views(path: Path, configured: Rules, at: datetime = NOW) -> dict[str, dict[str, Any]]:
+def read_views(
+    path: Path, configured: Rules, at: datetime = NOW, *, worker: bool = True
+) -> dict[str, dict[str, Any]]:
     """The four views at `at` of a router configured with `configured`; it cannot reach BRK."""
-    return read_routes(path, configured, at, ROUTES)
+    return read_routes(path, configured, at, ROUTES, worker=worker)
 
 
 def test_payloads_are_stored_with_the_rules_they_were_derived_under(
@@ -357,6 +364,16 @@ def test_a_rule_unrelated_to_a_view_does_not_make_it_pending(
     assert seen == []
 
 
+def test_nothing_is_pending_in_a_process_without_the_worker(tmp_path: Path):
+    path = synced(tmp_path, frozenset())
+
+    # Nothing in this process would derive the payloads again, so none says it will.
+    assert labels(read_views(path, ALL_RULES, worker=False)) == {
+        name: ([], False) for name in ROUTES
+    }
+    assert labels(read_views(path, ALL_RULES)) == {name: ([], True) for name in ROUTES}
+
+
 def test_rederive_skips_views_that_were_never_stored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -554,8 +571,14 @@ def test_create_app_rules_default_to_the_setting(tmp_path: Path, monkeypatch: py
     client, seen = blocked_client()
 
     def cycle_label(**options: Any) -> tuple[list[str], bool]:
-        app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client, **options)
-        with TestClient(app) as http:
+        # The app runs its workers, which would derive again, but none of their threads starts.
+        app = create_app(tmp_path / "m.sqlite", start_perps=False, brk_client=client, **options)
+        with (
+            patch("wheelhouse_service.http.Runtime.start"),
+            patch("wheelhouse_service.portfolio.api.BrokerSync.start"),
+            patch.object(OnchainSync, "start"),
+            TestClient(app) as http,
+        ):
             view = http.get(f"{PREFIX}/cycle").json()
         return view["rules"], view["rules_pending"]
 
