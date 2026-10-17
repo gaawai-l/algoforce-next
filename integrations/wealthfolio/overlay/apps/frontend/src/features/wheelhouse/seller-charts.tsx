@@ -15,6 +15,7 @@ import type { SellerPressureView } from "./onchain-contract";
 import { reasonText, rulesNote } from "./onchain-text";
 
 type Levels = NonNullable<SellerPressureView["loss_levels"]>;
+type Rating = NonNullable<SellerPressureView["loss"][number]["level"]>;
 type ChartKey = "loss" | "share" | "supply";
 type Kind = "stack" | "bars" | "line";
 
@@ -27,16 +28,23 @@ const SPANS = [
   { label: "90d", points: 2160 },
 ] as const;
 const DEFAULT_SPAN = 720;
+// What a level or run reads as when it is unknown, which is not 0.
+const DASH = "—";
 
 // A row is one hour of one chart; `parts` is [LTH, STH] for the stacked chart and [value] otherwise.
 // A null part is unknown and is never drawn as 0. `noBlock` and `gap` are the O3 marks: an hour
-// without a block (its flows are a real 0) and a value a series gap left unknown.
+// without a block (its flows are a real 0) and a value a series gap left unknown. `p95`, `p75` and
+// `level` are O2's: the thresholds in force at this hour and the value against them, all null when
+// the thresholds do not roll or are not yet known.
 interface Row {
   at: string;
   t: number;
   parts: (number | null)[];
   noBlock: boolean;
   gap: boolean;
+  p95: number | null;
+  p75: number | null;
+  level: Rating | null;
 }
 interface Pt {
   t: number;
@@ -139,6 +147,14 @@ function nearest(rows: Row[], t: number) {
   return lo > 0 && t - rows[lo - 1].t < rows[lo].t - t ? lo - 1 : lo;
 }
 
+// The index of the row at `t`, or -1; the rows searched are the newest, so it looks from the end.
+function indexAt(rows: Row[], t: number | null) {
+  if (t == null) return -1;
+  for (let i = rows.length - 1; i >= 0 && rows[i].t >= t; i -= 1)
+    if (rows[i].t === t) return i;
+  return -1;
+}
+
 const round = (value: number) => Math.round(value * 100) / 100;
 const isNumber = (value: number | null | undefined): value is number =>
   value != null;
@@ -179,6 +195,8 @@ interface LayerProps {
   rows: Row[];
   price: Pt[];
   levels: Levels | null;
+  // O2: draw each hour's own thresholds as a step line instead of the header levels as flat lines.
+  rolling: boolean;
   formingT: number | null;
   axis: (value: number) => string;
   width: number;
@@ -192,13 +210,18 @@ const Layer = memo(function Layer({
   rows,
   price,
   levels,
+  rolling,
   formingT,
   axis,
   width,
   height,
 }: LayerProps) {
   const f = frame(width, height, rows);
-  const marks = [levels?.p95, levels?.p75].filter(isNumber);
+  const marks = (
+    rolling
+      ? rows.flatMap((row) => [row.p95, row.p75])
+      : [levels?.p95, levels?.p75]
+  ).filter(isNumber);
   const scale = [
     ...rows.map((row) => total(kind, row)).filter(isNumber),
     ...marks,
@@ -239,27 +262,50 @@ const Layer = memo(function Layer({
       )
       .join("");
 
+  // A rolling threshold holds for the whole hour it belongs to, so the line steps at the hour
+  // boundaries; like the other lines it breaks wherever the threshold is unknown.
+  const steps = (key: "p95" | "p75") =>
+    runs(known(rows.map((row) => ({ t: row.t, v: row[key] }))))
+      .map((run) => {
+        let last = NaN;
+        return run
+          .map((p, i) => {
+            const at = round(y(p.v));
+            const to = `H${round(f.x(p.t) + f.slot / 2)}`;
+            const from =
+              i === 0
+                ? `M${round(f.x(p.t) - f.slot / 2)},${at}`
+                : at === last
+                  ? ""
+                  : `V${at}`;
+            last = at;
+            return from + to;
+          })
+          .join("");
+      })
+      .join("");
+
   const forming =
     formingT == null ? undefined : rows.find((r) => r.t === formingT);
+  const formingValue = forming ? total(kind, forming) : null;
   let outline = null;
-  if (forming) {
+  // An unknown value has no marker: it would read as a zero.
+  if (forming && formingValue != null) {
     const cx = f.x(forming.t);
-    const value = total(kind, forming);
     if (kind === "line") {
-      outline =
-        value == null ? null : (
-          <circle
-            className="wh-seller-forming"
-            data-forming="true"
-            data-at={forming.at}
-            cx={round(cx)}
-            cy={round(y(value))}
-            r="4"
-          />
-        );
+      outline = (
+        <circle
+          className="wh-seller-forming"
+          data-forming="true"
+          data-at={forming.at}
+          cx={round(cx)}
+          cy={round(y(formingValue))}
+          r="4"
+        />
+      );
     } else {
       const w = Math.max(barW + 2, 5);
-      const top = value == null ? lineY - 3 : Math.min(y(value), lineY - 3);
+      const top = Math.min(y(formingValue), lineY - 3);
       outline = (
         <rect
           className="wh-seller-forming"
@@ -363,7 +409,22 @@ const Layer = memo(function Layer({
           d={path(known(rows.map((row) => ({ t: row.t, v: row.parts[0] }))), y)}
         />
       )}
-      {isNumber(levels?.p95) && (
+      {rolling &&
+        (["p95", "p75"] as const).map((key) => {
+          const d = steps(key);
+          return d ? (
+            <path
+              key={key}
+              className={
+                key === "p95"
+                  ? "wh-seller-extreme-line"
+                  : "wh-seller-warning-line"
+              }
+              d={d}
+            />
+          ) : null;
+        })}
+      {!rolling && isNumber(levels?.p95) && (
         <line
           className="wh-seller-extreme-line"
           x1={f.left}
@@ -372,7 +433,7 @@ const Layer = memo(function Layer({
           y2={round(y(levels.p95))}
         />
       )}
-      {isNumber(levels?.p75) && (
+      {!rolling && isNumber(levels?.p75) && (
         <line
           className="wh-seller-warning-line"
           x1={f.left}
@@ -422,15 +483,19 @@ function Plot({
   rows,
   price,
   levels,
+  rolling,
   formingT,
   axis,
   height,
   label,
   hover,
+  rest,
   onHover,
 }: Omit<LayerProps, "width"> & {
   label: string;
   hover: number | null;
+  // The row read when nothing is hovered, and the one the arrow keys start from.
+  rest: number;
   onHover: (index: number | null) => void;
 }) {
   const [ref, width] = useChartWidth();
@@ -443,7 +508,7 @@ function Plot({
   };
   const key = (event: KeyboardEvent<SVGSVGElement>) => {
     const last = rows.length - 1;
-    const current = hover ?? last;
+    const current = hover ?? rest;
     const next: Record<string, number | null> = {
       ArrowLeft: Math.max(0, current - 1),
       ArrowRight: Math.min(last, current + 1),
@@ -478,6 +543,7 @@ function Plot({
         rows={rows}
         price={price}
         levels={levels}
+        rolling={rolling}
         formingT={formingT}
         axis={axis}
         width={width}
@@ -523,24 +589,41 @@ interface ChartData {
   height: number;
   rows: Row[];
   levels: Levels | null;
+  // O2's hours in a row at warning or above, back from the current reading; null when unknown.
+  run: number | null;
 }
+
+// A level is named and coloured like the threshold line it crossed; "none" is below Warning.
+const RATINGS = {
+  extreme: { name: "seller.extreme", tone: " wh-seller-extreme" },
+  warning: { name: "seller.warning", tone: " wh-seller-warning" },
+  none: { name: "seller.levelNone", tone: "" },
+} as const satisfies Record<Rating, { name: MessageKey; tone: string }>;
 
 function Panel({
   chart,
   price,
   priceAt,
   formingT,
+  closedT,
+  readT,
+  rolling,
 }: {
   chart: ChartData;
   price: Pt[];
   priceAt: Map<number, number>;
   formingT: number | null;
+  // O1's newest closed row, which the legend opens on; null without O1 or when none has closed.
+  closedT: number | null;
+  // The hour of the current reading: the closed row under O1, else the last row.
+  readT: number | null;
+  rolling: boolean;
 }) {
   const { text } = useWheelhouseText();
   const missing = text("missing");
   const [points, setPoints] = useState<number>(DEFAULT_SPAN);
   const [hover, setHover] = useState<number | null>(null);
-  const { key, kind, levels } = chart;
+  const { key, kind, levels, run } = chart;
   const rows = useMemo(() => chart.rows.slice(-points), [chart.rows, points]);
   // Price points inside the hours this chart covers; the price axis follows the same window.
   const shownPrice = useMemo(
@@ -560,7 +643,12 @@ function Panel({
   const hint = (name: "seller.extremeHint" | "seller.warningHint") =>
     levels ? text(name, { n: levels.n }) : undefined;
   const index = hover != null && hover < rows.length ? hover : null;
-  const row = rows[index ?? rows.length - 1];
+  // Without a hover the legend reads the closed row when this chart has one, else the last row.
+  const closedIndex = indexAt(rows, closedT);
+  const rest = closedIndex >= 0 ? closedIndex : rows.length - 1;
+  const row = rows[index ?? rest];
+  // The level and run belong to the current reading, whatever span or hour is shown.
+  const rating = chart.rows[indexAt(chart.rows, readT)]?.level ?? null;
   const shownPriceValue = row ? priceAt.get(row.t) : undefined;
   const items: { tone: string; label: string; value: string }[] = row
     ? key === "loss"
@@ -637,6 +725,20 @@ function Panel({
               {level(levels?.p75)}
             </b>
           </span>
+          {rolling ? (
+            <span className="wh-seller-reading" title={text("seller.runHint")}>
+              {text("seller.level")}{" "}
+              <b
+                className={`wh-seller-level${rating ? RATINGS[rating].tone : ""}`}
+                data-level={rating ?? undefined}
+              >
+                {rating ? text(RATINGS[rating].name) : DASH}
+              </b>
+              {" · "}
+              {text("seller.run")}{" "}
+              <b>{run == null ? DASH : text("seller.runHours", { n: run })}</b>
+            </span>
+          ) : null}
         </div>
       </div>
       {row ? (
@@ -646,17 +748,24 @@ function Panel({
             rows={rows}
             price={shownPrice}
             levels={levels}
+            rolling={rolling}
             formingT={formingT}
             axis={axis}
             height={chart.height}
             label={text("seller.aria", { title })}
             hover={index}
+            rest={rest}
             onHover={setHover}
           />
           <div className="wh-seller-legend" aria-live="polite">
             <span className="wh-seller-when">
               {index == null
-                ? text("seller.latest", { time: utcStamp(row.t) })
+                ? text(
+                    closedIndex >= 0 ? "seller.latestClosed" : "seller.latest",
+                    {
+                      time: utcStamp(row.t),
+                    },
+                  )
                 : `${utcStamp(row.t)} UTC`}
             </span>
             {note ? <span className="wh-seller-note">{note}</span> : null}
@@ -702,16 +811,25 @@ function Panel({
   );
 }
 
-function toRows<T extends { at: string; no_block: boolean; gap: boolean }>(
-  source: T[],
-  parts: (item: T) => (number | null)[],
-): Row[] {
+function toRows<
+  T extends {
+    at: string;
+    no_block: boolean;
+    gap: boolean;
+    p95: number | null;
+    p75: number | null;
+    level: Rating | null;
+  },
+>(source: T[], parts: (item: T) => (number | null)[]): Row[] {
   return source.map((item) => ({
     at: item.at,
     t: Date.parse(item.at),
     parts: parts(item),
     noBlock: item.no_block,
     gap: item.gap,
+    p95: item.p95,
+    p75: item.p75,
+    level: item.level,
   }));
 }
 
@@ -724,6 +842,7 @@ function Charts({ view }: { view: SellerPressureView }) {
         height: 220,
         rows: toRows(view.loss, (p) => [p.lth, p.sth]),
         levels: view.loss_levels,
+        run: view.loss_run,
       },
       {
         key: "share",
@@ -731,6 +850,7 @@ function Charts({ view }: { view: SellerPressureView }) {
         height: 150,
         rows: toRows(view.share, (p) => [p.value]),
         levels: view.share_levels,
+        run: view.share_run,
       },
       {
         key: "supply",
@@ -738,6 +858,7 @@ function Charts({ view }: { view: SellerPressureView }) {
         height: 150,
         rows: toRows(view.supply, (p) => [p.value]),
         levels: view.supply_levels,
+        run: view.supply_run,
       },
     ],
     [view],
@@ -749,6 +870,14 @@ function Charts({ view }: { view: SellerPressureView }) {
   );
   const priceAt = useMemo(() => new Map(price.map((p) => [p.t, p.v])), [price]);
   const formingT = view.forming_at ? Date.parse(view.forming_at) : null;
+  const rolling = view.rules.includes("O2");
+  // Under O1 the current reading is the newest closed row, which the legend opens on; the newest
+  // row may still be forming. Otherwise it is the last row.
+  const closedT =
+    view.rules.includes("O1") && view.closed_at
+      ? Date.parse(view.closed_at)
+      : null;
+  const readT = closedT ?? (view.last_at ? Date.parse(view.last_at) : null);
   return (
     <>
       {charts.map((chart) => (
@@ -758,6 +887,9 @@ function Charts({ view }: { view: SellerPressureView }) {
           price={price}
           priceAt={priceAt}
           formingT={formingT}
+          closedT={closedT}
+          readT={readT}
+          rolling={rolling}
         />
       ))}
     </>

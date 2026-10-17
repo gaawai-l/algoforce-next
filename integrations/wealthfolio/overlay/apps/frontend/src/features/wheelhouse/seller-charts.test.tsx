@@ -685,3 +685,343 @@ it("says in the header that the charts are being recomputed", async () => {
     screen.getByText("Recomputing with the configured rules"),
   ).toBeTruthy();
 });
+
+// ---- O2 thresholds as a step line, the level and run, and O1's default reading ----
+
+const SERIES = ["loss", "share", "supply"] as const;
+type Series = (typeof SERIES)[number];
+type Level = "extreme" | "warning" | "none" | null;
+interface Rolling {
+  p95: number | null;
+  p75: number | null;
+  level?: Level;
+}
+
+// An O2 view: every point carries its own hour's thresholds. A chart-1 amount is in dollars, the
+// other two are fractions, so the callback gets the series to size its thresholds.
+function rolled(
+  rules: SellerPressureView["rules"],
+  thresholds: (index: number, name: Series) => Rolling,
+): SellerPressureView {
+  const view = pressureSample();
+  const patch = (index: number, name: Series) => {
+    const { p95, p75, level = null } = thresholds(index, name);
+    return { p95, p75, level };
+  };
+  view.loss = view.loss.map((p, i) => ({ ...p, ...patch(i, "loss") }));
+  view.share = view.share.map((p, i) => ({ ...p, ...patch(i, "share") }));
+  view.supply = view.supply.map((p, i) => ({ ...p, ...patch(i, "supply") }));
+  return { ...view, rules };
+}
+const unit = (name: Series) => (name === "loss" ? 10_000_000 : 0.1);
+
+// The sample has 2200 hours and every chart opens on the last 720, rows 1480 to 2199. At the
+// default width the plot is 610 wide from x = 52, so one hour is 610 / 720 wide.
+const FIRST = 1480;
+const SLOT = 610 / 720;
+const numbers = (d: string, command: string) =>
+  [...d.matchAll(new RegExp(`${command}([\\d.]+)`, "g"))].map((m) =>
+    Number(m[1]),
+  );
+const startY = (d: string) => Number(/^M[\d.]+,([\d.]+)/.exec(d)![1]);
+
+it("draws each threshold as a step line that follows the hour it belongs to", async () => {
+  const view = rolled(["O2"], (i, name) => ({
+    // The extreme line steps up once, in the middle of the window; the warning line never moves.
+    p95: (i < 1900 ? 4 : 5) * unit(name),
+    p75: 2 * unit(name),
+  }));
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  for (const name of SERIES) {
+    const panel = chart(container, name);
+    // The rolling thresholds replace the flat lines the header levels would draw.
+    expect(panel.querySelector("line.wh-seller-extreme-line")).toBeNull();
+    expect(panel.querySelector("line.wh-seller-warning-line")).toBeNull();
+    const extreme = pathOf(panel, "path.wh-seller-extreme-line");
+    const warning = pathOf(panel, "path.wh-seller-warning-line");
+    expect(moves(extreme)).toBe(1);
+    expect(moves(warning)).toBe(1);
+    // One step, up (a smaller y), at the hour whose threshold changed; the warning line is flat.
+    expect(numbers(extreme, "V")).toHaveLength(1);
+    expect(numbers(warning, "V")).toHaveLength(0);
+    expect(numbers(extreme, "V")[0]).toBeLessThan(startY(extreme));
+    expect(startY(extreme)).toBeLessThan(startY(warning));
+    // The line covers the first slot of the window to the last one, edge to edge.
+    expect(extreme.startsWith("M52,")).toBe(true);
+    expect(numbers(extreme, "H").at(-1)).toBeCloseTo(662, 1);
+    expect(numbers(warning, "H").at(-1)).toBeCloseTo(662, 1);
+  }
+});
+
+it("breaks a step line where the threshold is null, at the left edge and in the middle", async () => {
+  const view = rolled(["O2"], (i, name) => ({
+    // Fewer than 168 samples at the window's left edge, and a short cut in the middle.
+    p95: i < FIRST + 100 || (i >= 1700 && i < 1710) ? null : 4 * unit(name),
+    p75: 2 * unit(name),
+  }));
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  for (const name of SERIES) {
+    const panel = chart(container, name);
+    const extreme = pathOf(panel, "path.wh-seller-extreme-line");
+    // Two pieces: the line neither starts at the left edge nor crosses the cut.
+    expect(moves(extreme)).toBe(2);
+    const starts = [...extreme.matchAll(/M([\d.]+),/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(starts[0]).toBeCloseTo(52 + 100 * SLOT, 1);
+    expect(starts[1]).toBeCloseTo(52 + (1710 - FIRST) * SLOT, 1);
+    const firstEnds = numbers(extreme.split("M")[1], "H").at(-1)!;
+    expect(firstEnds).toBeCloseTo(52 + (1700 - FIRST) * SLOT, 1);
+    // The warning line has all of its thresholds.
+    expect(moves(pathOf(panel, "path.wh-seller-warning-line"))).toBe(1);
+  }
+});
+
+it("draws a single known hour between two nulls and breaks at a missing row", async () => {
+  const view = rolled(["O2"], (i, name) => ({
+    p95: i === 1800 ? 4 * unit(name) : null,
+    p75: 2 * unit(name),
+  }));
+  // Chart 3 also lost the row of hour 2000, so its warning line is cut there.
+  view.supply = without(view.supply, 2000);
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  const alone = pathOf(chart(container, "loss"), "path.wh-seller-extreme-line");
+  expect(moves(alone)).toBe(1);
+  expect(
+    numbers(alone, "H")[0] - Number(/^M([\d.]+),/.exec(alone)![1]),
+  ).toBeCloseTo(SLOT, 1);
+  expect(
+    moves(pathOf(chart(container, "supply"), "path.wh-seller-warning-line")),
+  ).toBe(2);
+  expect(
+    moves(pathOf(chart(container, "loss"), "path.wh-seller-warning-line")),
+  ).toBe(1);
+});
+
+it("draws no threshold line and no NaN when every threshold is null", async () => {
+  const view = rolled(["O2"], () => ({ p95: null, p75: null }));
+  view.loss_levels = { p95: null, p75: null, n: 0 };
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  for (const name of SERIES) {
+    const panel = chart(container, name);
+    expect(panel.querySelector(".wh-seller-extreme-line")).toBeNull();
+    expect(panel.querySelector(".wh-seller-warning-line")).toBeNull();
+    expect(panel.querySelector("svg")!.innerHTML).not.toMatch(/NaN|Infinity/);
+  }
+});
+
+it("keeps flat threshold lines from the header levels without O2", async () => {
+  const { container } = show(pressureSample());
+  await screen.findByText(/Resolution 1h/);
+  for (const name of SERIES) {
+    const panel = chart(container, name);
+    expect(panel.querySelectorAll("line.wh-seller-extreme-line")).toHaveLength(
+      1,
+    );
+    expect(panel.querySelector("path.wh-seller-extreme-line")).toBeNull();
+    expect(panel.querySelector("path.wh-seller-warning-line")).toBeNull();
+    // Nothing about a level or a run is shown when the thresholds do not roll.
+    expect(panel.querySelector(".wh-seller-reading")).toBeNull();
+  }
+});
+
+const reading = (container: HTMLElement, name: Series) =>
+  chart(container, name).querySelector(".wh-seller-reading")?.textContent;
+
+it("shows the level and the run of the current reading in each header", async () => {
+  const view = rolled(["O2"], (_, name) => ({
+    p95: 4 * unit(name),
+    p75: 2 * unit(name),
+  }));
+  view.loss[view.loss.length - 1].level = "warning";
+  view.share[view.share.length - 1].level = "extreme";
+  view.supply[view.supply.length - 1].level = "none";
+  view.loss_run = 5;
+  view.share_run = 12;
+  view.supply_run = 0;
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  expect(reading(container, "loss")).toBe("Level Warning · run 5 h");
+  expect(reading(container, "share")).toBe("Level Extreme · run 12 h");
+  // Below the warning line is a level of its own, and a run of 0 is a real count.
+  expect(reading(container, "supply")).toBe("Level Normal · run 0 h");
+  // The level takes the colour of its threshold line.
+  const level = (name: Series) =>
+    chart(container, name).querySelector<HTMLElement>(".wh-seller-level")!;
+  expect(level("loss").className).toContain("wh-seller-warning");
+  expect(level("share").className).toContain("wh-seller-extreme");
+  expect(level("supply").className).not.toMatch(/wh-seller-(warning|extreme)/);
+  expect(level("loss").getAttribute("data-level")).toBe("warning");
+  // The thresholds beside it are the header levels, as before.
+  expect(
+    chart(container, "loss").querySelector(".wh-seller-extreme")?.textContent,
+  ).toBe("$41.3M");
+});
+
+it("shows a dash, not 0, when the current reading has no level or run", async () => {
+  // Thresholds are null while fewer than 168 hours exist, so the level and the run are too.
+  const view = rolled(["O2"], () => ({ p95: null, p75: null }));
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  for (const name of SERIES)
+    expect(reading(container, name)).toBe("Level — · run —");
+
+  // One chart with a level but no run (cannot happen, yet a missing number is never read as 0).
+  const second = rolled(["O2"], (_, name) => ({
+    p95: 4 * unit(name),
+    p75: 2 * unit(name),
+    level: "warning",
+  }));
+  second.loss_run = null;
+  second.share_run = 3;
+  cleanup();
+  const again = show(second);
+  await screen.findByText(/Resolution 1h/);
+  expect(reading(again.container, "loss")).toBe("Level Warning · run —");
+  expect(reading(again.container, "share")).toBe("Level Warning · run 3 h");
+});
+
+it("reads the level of the closed row under O1, not the forming one", async () => {
+  const view = rolled(["O1", "O2"], (_, name) => ({
+    p95: 4 * unit(name),
+    p75: 2 * unit(name),
+    level: "none",
+  }));
+  const closed = view.loss.length - 2;
+  // The forming hour has no level; the hour before it closed at extreme.
+  for (const name of SERIES) view[name][view.loss.length - 1].level = null;
+  view.loss[closed].level = "extreme";
+  view.loss_run = 2;
+  view.closed_at = view.loss[closed].at;
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  expect(reading(container, "loss")).toBe("Level Extreme · run 2 h");
+});
+
+it("has the level and run copy in both languages", () => {
+  for (const key of [
+    "seller.level",
+    "seller.levelNone",
+    "seller.run",
+    "seller.runHours",
+    "seller.latestClosed",
+  ] as const) {
+    expect(messages.en[key].length).toBeGreaterThan(0);
+    expect(messages.zh[key]).not.toBe(messages.en[key]);
+  }
+});
+
+// Under O1 the legend opens on the newest closed row; the newest row may still be forming.
+function closedView() {
+  const view = pressureSample();
+  const closed = view.loss.length - 2;
+  view.share[closed] = { ...view.share[closed], value: 0.3333 };
+  view.loss[closed] = { ...view.loss[closed], lth: 1_000_000, sth: 2_000_000 };
+  return { ...view, rules: ["O1" as const], closed_at: view.loss[closed].at };
+}
+const legendOf = (container: HTMLElement, name: Series) =>
+  chart(container, name).querySelector(".wh-seller-legend")?.textContent ?? "";
+
+it("opens the legend on the closed row under O1 and returns to it", async () => {
+  const { container } = show(closedView());
+  await screen.findByText(/Resolution 1h/);
+  const share = () => legendOf(container, "share");
+  expect(share()).toContain("Latest closed · 2026-10-16 07:00 UTC");
+  expect(share()).toContain("33.3%");
+  expect(share()).not.toContain("41.9%");
+  expect(legendOf(container, "loss")).toContain("LTH loss $1M");
+  // The keys start from the closed row, can reach the forming one, and Escape comes back.
+  const svg = chart(container, "share").querySelector("svg")!;
+  fireEvent.keyDown(svg, { key: "ArrowLeft" });
+  expect(share()).toContain("2026-10-16 06:00 UTC");
+  fireEvent.keyDown(svg, { key: "Escape" });
+  expect(share()).toContain("Latest closed · 2026-10-16 07:00 UTC");
+  fireEvent.keyDown(svg, { key: "ArrowRight" });
+  expect(share()).toContain("2026-10-16 08:00 UTC");
+  expect(share()).toContain("41.9%");
+  fireEvent.keyDown(svg, { key: "End" });
+  expect(share()).toContain("Latest closed · 2026-10-16 07:00 UTC");
+  // The forming hour is still drawn.
+  expect(
+    chart(container, "share").querySelectorAll('[data-forming="true"]'),
+  ).toHaveLength(1);
+});
+
+it("opens the legend on the last row without O1, even when closed_at is set", async () => {
+  const { container } = show({ ...closedView(), rules: [] });
+  await screen.findByText(/Resolution 1h/);
+  const share = legendOf(container, "share");
+  expect(share).toContain("Latest · 2026-10-16 08:00 UTC");
+  expect(share).toContain("41.9%");
+  expect(share).not.toContain("Latest closed");
+});
+
+it("opens on the last row when the closed hour has no row on that chart", async () => {
+  const view = closedView();
+  // A share whose denominator was not positive in the closed hour has no row there.
+  view.share = view.share.filter((p) => p.at !== view.closed_at);
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  expect(legendOf(container, "share")).toContain(
+    "Latest · 2026-10-16 08:00 UTC",
+  );
+  expect(legendOf(container, "loss")).toContain(
+    "Latest closed · 2026-10-16 07:00 UTC",
+  );
+});
+
+it("opens the legend on the last row under O1 when nothing has closed", async () => {
+  const { container } = show({
+    ...pressureSample(),
+    rules: ["O1"],
+    closed_at: null,
+  });
+  await screen.findByText(/Resolution 1h/);
+  expect(legendOf(container, "share")).toContain(
+    "Latest · 2026-10-16 08:00 UTC",
+  );
+});
+
+it("draws no forming marker at a null value on the bar and stacked charts", async () => {
+  // The forming hour's share is unknown, and so is one leg of its loss.
+  const view = pressureSample();
+  view.share[view.share.length - 1] = {
+    ...view.share[view.share.length - 1],
+    value: null,
+    gap: true,
+  };
+  view.loss[view.loss.length - 1] = {
+    ...view.loss[view.loss.length - 1],
+    sth: null,
+    gap: true,
+  };
+  const { container } = show({ ...view, rules: ["O3"] });
+  await screen.findByText(/Resolution 1h/);
+  expect(
+    chart(container, "share").querySelector('[data-forming="true"]'),
+  ).toBeNull();
+  expect(
+    chart(container, "loss").querySelector('[data-forming="true"]'),
+  ).toBeNull();
+  // The line chart already drew none, and a known value still gets its marker.
+  expect(
+    chart(container, "supply").querySelectorAll('[data-forming="true"]'),
+  ).toHaveLength(1);
+});
+
+it("still marks a forming bar whose value is 0", async () => {
+  const view = pressureSample();
+  view.share[view.share.length - 1] = {
+    ...view.share[view.share.length - 1],
+    value: 0,
+  };
+  const { container } = show(view);
+  await screen.findByText(/Resolution 1h/);
+  expect(
+    chart(container, "share").querySelectorAll('rect[data-forming="true"]'),
+  ).toHaveLength(1);
+});
