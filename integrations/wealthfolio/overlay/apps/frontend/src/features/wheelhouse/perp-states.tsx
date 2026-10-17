@@ -4,7 +4,12 @@ import { useSearchParams } from "react-router-dom";
 import { getPerpStates, getPerpStatus } from "./client";
 import { useWheelhouseText, type MessageKey, type TextFn } from "./i18n";
 import { rulesNote } from "./onchain-text";
-import { PerpCharts, thresholdsText } from "./perp-charts";
+import {
+  PerpCharts,
+  hasJudgedBlocks,
+  thresholdsText,
+  unjudgedWhy,
+} from "./perp-charts";
 import type {
   PerpCollector,
   PerpState,
@@ -222,6 +227,13 @@ function StatesTable({
   // Table 1 marks the last of them.
   const forming = last?.forming && last.state ? last : null;
   const closed = view.rules.includes("O1");
+  // R, the block the view is headed by: under O1 the last closed one. Under O6 it can be covered
+  // and still not judged, which the subtitle explains.
+  const reference = closed && last?.forming ? view.blocks.at(-2) : last;
+  const why =
+    view.rules.includes("O6") && reference?.covered && reference.state == null
+      ? unjudgedWhy(text, view, reference)
+      : [];
   const label = (state: PerpState) =>
     SQUEEZES.includes(state) && !verified
       ? text("perp.unverified", { state: text(stateKey[state]) })
@@ -247,6 +259,14 @@ function StatesTable({
                 closed
                   ? "perp.table.latestClosedUncovered"
                   : "perp.table.latestUncovered",
+              )}`
+            : ""}
+          {why.length
+            ? ` · ${text(
+                closed
+                  ? "perp.table.latestClosedNotJudged"
+                  : "perp.table.latestNotJudged",
+                { list: why.join(", ") },
               )}`
             : ""}
         </p>
@@ -420,11 +440,18 @@ export function PerpStates() {
         : text("missing");
     const late = data.data_state === "delayed" || data.data_state === "stale";
     const o6 = data.rules.includes("O6");
-    // Under O6 collecting reads the liquidation sample of the block heading the view, as the
-    // service's reason does; v1 counts the covered blocks.
+    const perDay = 24 / HOURS[data.window];
+    const lastBlock = data.blocks.at(-1);
+    // The number comes from the sample the flag does, as the service's reason: under O6 the
+    // liquidation sample of the block heading the view; v1 counts the covered blocks, and O1 alone
+    // the covered closed ones, leaving a covered forming block out.
+    const formingCovered =
+      data.rules.includes("O1") && lastBlock?.forming && lastBlock.covered;
     const collected = o6
-      ? data.thresholds && data.thresholds.n_liq / (24 / HOURS[data.window])
-      : data.covered_days;
+      ? data.thresholds && data.thresholds.n_liq / perDay
+      : data.covered_days == null
+        ? null
+        : data.covered_days - (formingCovered ? 1 / perDay : 0);
     notices = (
       <>
         <p className="wh-perp-meta">
@@ -522,8 +549,7 @@ export function PerpStates() {
         <>
           {/* While collecting with nothing judged there is no Table 1 to show. Under O6 earlier
               blocks can be judged while the view collects: those are shown. */}
-          {data.collecting &&
-          !data.blocks.some((block) => block.state != null) ? null : (
+          {data.collecting && !hasJudgedBlocks(data) ? null : (
             <StatesTable
               view={data}
               table={table}

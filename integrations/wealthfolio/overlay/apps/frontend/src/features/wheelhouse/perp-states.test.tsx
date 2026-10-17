@@ -859,6 +859,81 @@ it("says the last closed block is uncovered under O1", async () => {
   expect(screen.queryByRole("img", { name: /Latest/ })).toBeNull();
 });
 
+it("says why the latest closed block is not judged under O6", async () => {
+  // R, the block before the forming one, is covered but has a null threshold.
+  const view = perpStatesSample("ruled");
+  const r = view.blocks.length - 2;
+  view.blocks[r] = {
+    ...view.blocks[r],
+    state: null,
+    thresholds: { ...view.blocks[r].thresholds!, px: null },
+  };
+  view.tables = view.tables.map((item) => ({ ...item, latest: null }));
+  show({ view });
+  await screen.findByText(tableTitle);
+  expect(subtitle()).toBe(
+    "18 judged of 63 blocks in view · share of blocks, not a forecast · latest closed block not judged: fewer than 42 reference blocks",
+  );
+  expect(screen.queryByRole("img", { name: /Latest/ })).toBeNull();
+  cleanup();
+
+  // Without O1, R is the last block; here its inputs were imputed.
+  const last = perpStatesSample("ruled");
+  last.rules = ["O6"];
+  const k = last.blocks.length - 1;
+  last.blocks[k] = {
+    ...last.blocks[k],
+    state: null,
+    imputed: { ...last.blocks[k].imputed, doi: true },
+  };
+  last.tables = last.tables.map((item) => ({ ...item, latest: null }));
+  show({ view: last });
+  await screen.findByText(tableTitle);
+  expect(subtitle()).toMatch(/ · latest block not judged: imputed inputs$/);
+  cleanup();
+
+  // A judged R, or one that is uncovered, says nothing of the kind.
+  show({ view: perpStatesSample("ruled") });
+  await screen.findByText(tableTitle);
+  expect(subtitle()).not.toMatch(/not judged/);
+  for (const key of [
+    "perp.table.latestNotJudged",
+    "perp.table.latestClosedNotJudged",
+  ] as const) {
+    expect(messages.en[key]).toMatch(/\{\{list\}\}/);
+    expect(messages.zh[key]).toMatch(/\{\{list\}\}/);
+    expect(messages.zh[key]).not.toBe(messages.en[key]);
+  }
+});
+
+it("leaves the forming block out of the collecting days under O1, as the flag does", async () => {
+  // 20 covered closed blocks and a covered forming one.
+  const view = { ...perpStatesSample("collecting"), rules: ["O1" as const] };
+  view.reasons = ["collecting:3.3"];
+  show({ view });
+  expect(
+    await screen.findByText(
+      "Collecting liquidations (and Bybit trades) · 3.3 of 7 days (target 90)",
+    ),
+  ).toBeTruthy();
+  cleanup();
+
+  // An uncovered forming block was never counted, so nothing is taken off.
+  const uncovered = {
+    ...perpStatesSample("collecting"),
+    rules: ["O1" as const],
+  };
+  const k = uncovered.blocks.length - 1;
+  uncovered.blocks[k] = { ...uncovered.blocks[k], covered: false };
+  uncovered.covered_days = 20 / 6;
+  show({ view: uncovered });
+  expect(
+    await screen.findByText(
+      "Collecting liquidations (and Bybit trades) · 3.3 of 7 days (target 90)",
+    ),
+  ).toBeTruthy();
+});
+
 it("lists the thresholds heading the view with their samples under O6 only", async () => {
   show({ view: perpStatesSample("ruled") });
   await screen.findByText(tableTitle);

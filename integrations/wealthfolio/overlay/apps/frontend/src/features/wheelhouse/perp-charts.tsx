@@ -35,11 +35,40 @@ const SHADED: Record<PriceChart, readonly PerpState[]> = {
 };
 const SQUEEZES: readonly PerpState[] = ["shortsq", "longsq"];
 const NONE: readonly PerpState[] = [];
-// Under O6 a threshold is null while its sample has fewer blocks than seven days' worth.
-const REFERENCE_BLOCKS: Record<PerpStatesView["window"], number> = {
+// The blocks of seven days: with fewer in its sample a view collects, and under O6 a threshold is
+// null. It mirrors the service's COLLECTING_DAYS × BLOCKS_PER_DAY (perps/states.py); the payload
+// does not carry it.
+export const MIN_SAMPLE_BLOCKS: Record<PerpStatesView["window"], number> = {
   "4h": 42,
   "8h": 21,
 };
+
+// Whether any block of the view is judged: under O6 earlier blocks can be while the view collects.
+export const hasJudgedBlocks = (view: PerpStatesView) =>
+  view.blocks.some((block) => block.state != null);
+
+// Why a covered block was not judged, from its own fields: O1 leaves the forming block out;
+// O6 leaves out blocks with imputed inputs or a null threshold, too few blocks before them.
+export function unjudgedWhy(
+  text: TextFn,
+  view: PerpStatesView,
+  block: PerpBlock,
+) {
+  const why: string[] = [];
+  if (view.rules.includes("O1") && block.forming)
+    why.push(text("perp.chart.why.forming"));
+  const imputed = block.imputed.dpx || block.imputed.doi || block.imputed.sums;
+  if (view.rules.includes("O6") && imputed)
+    why.push(text("perp.chart.why.imputed"));
+  const own = block.thresholds;
+  if (own && [own.s_liq, own.l_liq, own.oi, own.px].includes(null))
+    why.push(
+      text("perp.chart.why.reference", {
+        count: MIN_SAMPLE_BLOCKS[view.window],
+      }),
+    );
+  return why;
+}
 
 // One drawn block of the view; `block` is null for the tail short of half a block, which is
 // drawn but never judged. The tail carries no coverage, so its delta and liquidations are left
@@ -735,23 +764,7 @@ export function PerpCharts({
     !o6 &&
     thresholds != null &&
     (thresholds.s_liq === 0 || thresholds.l_liq === 0);
-  // Why a covered block was not judged, from its own fields: O1 leaves the forming block out;
-  // O6 leaves out blocks with imputed inputs or a null threshold, too few blocks before them.
-  const unjudged = (block: PerpBlock) => {
-    const why: string[] = [];
-    if (o1 && block.forming) why.push(text("perp.chart.why.forming"));
-    const imputed =
-      block.imputed.dpx || block.imputed.doi || block.imputed.sums;
-    if (o6 && imputed) why.push(text("perp.chart.why.imputed"));
-    const own = block.thresholds;
-    if (own && [own.s_liq, own.l_liq, own.oi, own.px].includes(null))
-      why.push(
-        text("perp.chart.why.reference", {
-          count: REFERENCE_BLOCKS[view.window],
-        }),
-      );
-    return why;
-  };
+  const unjudged = (block: PerpBlock) => unjudgedWhy(text, view, block);
   // Notes on what decided a judged block; an unjudged one was decided by nothing. Charts 1 and 2
   // (`judging`) say in the block's value that O1 left a covered forming block unjudged.
   const notes = (item: Item, judging = false) => {
@@ -864,7 +877,7 @@ export function PerpCharts({
       item.block && (!item.block.delta_covered || !item.block.liq_covered),
   );
 
-  const anyJudged = view.blocks.some((block) => block.state != null);
+  const anyJudged = hasJudgedBlocks(view);
 
   const charts: {
     chart: ChartKey;

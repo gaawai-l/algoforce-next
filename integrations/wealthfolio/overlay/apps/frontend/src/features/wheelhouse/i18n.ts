@@ -578,6 +578,9 @@ const en = {
     "{{judged}} judged of {{total}} blocks in view · share of blocks, not a forecast",
   "perp.table.latestUncovered": "latest block uncovered",
   "perp.table.latestClosedUncovered": "latest closed block uncovered",
+  "perp.table.latestNotJudged": "latest block not judged: {{list}}",
+  "perp.table.latestClosedNotJudged":
+    "latest closed block not judged: {{list}}",
   "perp.table.state": "State",
   "perp.table.what": "What it is",
   "perp.table.prob": "Prob. [{{days}}d]",
@@ -1235,6 +1238,8 @@ const zh: Record<MessageKey, string> = {
     "视图内 {{total}} 块，已判定 {{judged}} 块 · 块数占比，不是预测",
   "perp.table.latestUncovered": "最新块未覆盖",
   "perp.table.latestClosedUncovered": "最新已收盘块未覆盖",
+  "perp.table.latestNotJudged": "最新块未判定：{{list}}",
+  "perp.table.latestClosedNotJudged": "最新已收盘块未判定：{{list}}",
   "perp.table.state": "状态",
   "perp.table.what": "含义",
   "perp.table.prob": "占比 [{{days}} 天]",

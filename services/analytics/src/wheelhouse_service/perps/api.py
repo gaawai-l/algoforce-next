@@ -129,14 +129,24 @@ def states_view(
         }
     else:
         if states.collecting:
-            # Under O6 the flag comes from R's liquidation sample, and so does the number.
-            o6 = stored is not None and "O6" in stored.rules
-            days = states.thresholds.n_liq / BLOCKS_PER_DAY[window] if o6 else states.covered_days
+            # The number comes from the sample the flag does: under O6 R's liquidation sample;
+            # under O1 alone the covered closed blocks, so a covered forming block is left out.
+            ruled = stored.rules if stored is not None else []
+            per_day = BLOCKS_PER_DAY[window]
+            last = states.blocks[-1] if states.blocks else None
+            forming = "O1" in ruled and last is not None and last.forming and last.covered
+            days = (
+                states.thresholds.n_liq / per_day
+                if "O6" in ruled
+                else states.covered_days - (1 / per_day if forming else 0)
+            )
             reasons.append(f"collecting:{days:.1f}")
         fields = {name: value for name, value in states if name != "window"}
     # Derived under other rules than the configured ones until the worker's first round, which
-    # is not delayed, derives it again.
-    pending = stored is not None and set(stored.rules) != set(rules_for_view("perps", rules))
+    # is not delayed, derives it again. Without the worker nothing ever does.
+    pending = (
+        enabled and stored is not None and set(stored.rules) != set(rules_for_view("perps", rules))
+    )
     return PerpStatesView(
         exchange=exchange,
         window=window,

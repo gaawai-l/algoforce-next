@@ -436,17 +436,42 @@ def test_collecting_reason_under_o6_counts_the_reference_blocks_liquidations(tmp
         (reason,) = [reason for reason in view["reasons"] if reason.startswith("collecting:")]
         return reason, view["covered_days"]
 
-    # v1 counts the covered blocks, as covered_days does; so does O1 alone, though its flag
-    # leaves the forming block out.
+    # v1 counts the covered blocks, as covered_days does. O1 alone counts the covered closed
+    # ones, as its flag does; covered_days stays v1's.
     assert collecting(V1, "4h") == ("collecting:3.3", pytest.approx(20 / 6))
-    assert collecting(O1, "4h") == ("collecting:3.3", pytest.approx(20 / 6))
+    assert collecting(O1, "4h") == ("collecting:3.2", pytest.approx(20 / 6))  # 19 / 6
     assert collecting(V1, "8h") == ("collecting:3.3", pytest.approx(10 / 3))
+    assert collecting(O1, "8h") == ("collecting:3.0", pytest.approx(10 / 3))  # 9 / 3
     # O6 counts the liquidation sample of R, whose n_liq sets the flag: R is the forming block
     # under O6 alone and the last closed one with O1. covered_days stays v1's.
     assert collecting(O6, "4h") == ("collecting:3.2", pytest.approx(20 / 6))  # 19 / 6
     assert collecting(O1O6, "4h") == ("collecting:3.0", pytest.approx(20 / 6))  # 18 / 6
     assert collecting(O6, "8h") == ("collecting:3.0", pytest.approx(10 / 3))  # 9 / 3
     assert collecting(O1O6, "8h") == ("collecting:2.7", pytest.approx(10 / 3))  # 8 / 3
+
+
+def test_collecting_under_o1_ends_one_forming_block_short_of_seven_days(tmp_path: Path):
+    # 41 closed 4h blocks and a forming one, 20 closed 8h blocks and a forming one, all covered:
+    # seven days of blocks with the forming one, which v1 counts and O1 leaves out.
+    grid = synthetic_grid(
+        datetime(2026, 10, 10, tzinfo=UTC), datetime(2026, 10, 16, 22, 50, tzinfo=UTC)
+    )
+
+    def view(rules: Rules, window: Window) -> tuple[bool, list[str], float]:
+        path = tmp_path / f"{''.join(sorted(rules)) or 'v1'}-{window}.sqlite"
+        states = compute_states(grid, window, rules=rules)
+        save(PerpsStore(path), "all", window, states, rules=sorted(rules))
+        with TestClient(router_app(path, Clock(SAMPLE_NOW), rules=rules)) as http:
+            body = get_states(http, "all", window)
+        assert body["blocks"][-1]["forming"] and body["blocks"][-1]["covered"]
+        collecting = [reason for reason in body["reasons"] if reason.startswith("collecting:")]
+        return body["collecting"], collecting, body["covered_days"]
+
+    assert view(V1, "4h") == (False, [], pytest.approx(7.0))
+    assert view(V1, "8h") == (False, [], pytest.approx(7.0))
+    # The flag and the number come from the same closed blocks: 41 / 6 and 20 / 3, not 7.0.
+    assert view(O1, "4h") == (True, ["collecting:6.8"], pytest.approx(7.0))
+    assert view(O1, "8h") == (True, ["collecting:6.7"], pytest.approx(7.0))
 
 
 def test_unavailable_while_perps_are_off(tmp_path: Path):
@@ -846,10 +871,21 @@ def test_views_carry_the_rules_of_their_payload(tmp_path: Path):
     # A view missing a series keeps the rules of the round that found it so.
     save(store, "bybit", "4h", None, ["series_missing:bybit:oi"], rules=["O1", "O6"])
 
-    def labels(configured: Rules) -> dict[Exchange, tuple[list[str], bool]]:
-        with TestClient(router_app(path, Clock(SAMPLE_NOW), rules=configured)) as http:
+    def labels(configured: Rules, worker: bool = True) -> dict[Exchange, tuple[list[str], bool]]:
+        # Perps run in this process when `worker` holds; their loops are never started.
+        client, connect, seen = blocked()
+        app = router_app(
+            path,
+            Clock(SAMPLE_NOW),
+            rules=configured,
+            start_worker=worker,
+            http=client,
+            connect=connect,
+        )
+        with perps_spied(), TestClient(app) as http:
             views = {exchange: get_states(http, exchange) for exchange in EXCHANGES}
             empty = get_states(http, "all", "8h")
+        assert seen == []
         # Nothing stored: no rules, and nothing to derive again.
         assert (empty["rules"], empty["rules_pending"]) == ([], False)
         return {
@@ -878,6 +914,12 @@ def test_views_carry_the_rules_of_their_payload(tmp_path: Path):
     # Either perps rule alone differs from the payloads derived under both.
     for rules in (O1, O6):
         assert labels(rules)["all"] == (["O1", "O6"], True)
+    # With perps off nothing in this process derives them again, so none says it will.
+    assert labels(V1, worker=False) == {
+        "all": (["O1", "O6"], False),
+        "binance": ([], False),
+        "bybit": (["O1", "O6"], False),
+    }
 
 
 def test_create_app_hands_the_rules_to_perps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

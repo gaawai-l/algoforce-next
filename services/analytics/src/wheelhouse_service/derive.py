@@ -15,22 +15,24 @@ from .onchain.brk import BrkClient
 from .onchain.store import OnchainStore
 from .onchain.sync import VIEWS, OnchainSync
 from .perps.store import PerpsStore
-from .perps.sync import EXCHANGES, WINDOWS, derive_states, derived_key, grid_start
+from .perps.sync import EXCHANGES, WINDOWS, StoredStates, derive_states, derived_key
 from .rules import Rules, parse_rules
 
 
 def derive_perps(path: Path, rules: Rules) -> list[str] | None:
     """Derive the stored perp views again under `rules`, keeping the time they were computed and
-    taking the grid start a round at that time uses; return the rules the payloads recorded, or
-    None when none were stored."""
+    the grid start they were derived from; return the rules the payloads recorded, or None when
+    none were stored."""
     store = PerpsStore(path)
     keys = [derived_key(exchange, window) for exchange in EXCHANGES for window in WINDOWS]
-    stamps = [derived[1] for key in keys if (derived := store.derived(key)) is not None]
-    if not stamps:
+    found = [derived for key in keys if (derived := store.derived(key)) is not None]
+    if not found:
         return None
-    # One round stores all six with one time; the latest, should a round have been cut short.
-    at = max(stamps)
-    derive_states(store, start=grid_start(at), at=at, rules=rules)
+    # One round stores all six with one time and one start; the latest, should a round have been
+    # cut short. The start depends on the worker's horizon, so it is read, not worked out.
+    payload, at = max(found, key=lambda derived: derived[1])
+    start = int(StoredStates.model_validate_json(payload).start.timestamp())
+    derive_states(store, start=start, at=at, rules=rules)
     derived = store.derived(keys[0])
     assert derived is not None
     recorded: list[str] = json.loads(derived[0])["rules"]

@@ -973,6 +973,23 @@ def test_round_backfills_121_days_and_checks_directions_over_the_whole_grid(
     assert judged is not None and not judged.collecting
 
 
+def test_derive_command_keeps_the_grid_start_of_the_stored_payloads(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    # A round with a 90-day horizon starts its grid later than the default one would.
+    store = full_round(tmp_path / "horizon-90", horizon_days=90)
+    OnchainStore(store.path.parent / "onchain.sqlite")  # nothing on-chain was stored
+    original = {(e, w): store.derived(derived_key(e, w)) for e in EXCHANGES for w in WINDOWS}
+    assert payload(store, "all", "4h").start == moment(start_of(90))
+
+    derive.main(["--data-dir", str(store.path.parent), "--rules", "v1"])
+
+    assert capsys.readouterr().out == "derived perps=v1\n"
+    assert {(e, w): store.derived(derived_key(e, w)) for e in EXCHANGES for w in WINDOWS} == (
+        original
+    )
+
+
 def test_derive_command_rederives_the_perps_of_a_copy(
     synced_120: Path,
     tmp_path: Path,
