@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from wheelhouse_service.perps.grid import REQUIRED, build_grid
+from wheelhouse_service.perps.grid import REQUIRED, build_grid, read_liquidations
 from wheelhouse_service.perps.rows import Exchange, Kline, OiPoint, RawLiquidation, Stream, Trade
 from wheelhouse_service.perps.states import Grid
 from wheelhouse_service.perps.store import PerpsStore, Venue
@@ -499,3 +499,26 @@ def test_liquidation_sums_match_the_python_merge(store: PerpsStore, seed: int):
             for a, b in zip(expected["binance"][side], expected["bybit"][side], strict=True)
         ]
         assert_close(views["all"].long_liq if side == 0 else views["all"].short_liq, both)
+
+
+def test_liquidation_coverage_is_read_before_the_events(
+    store: PerpsStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An event is committed before the coverage that spans it: reading the events first could
+    # pair them with coverage that grew in between and so miss events of a covered bucket.
+    calls: list[str] = []
+    coverage, sums = store.coverage, store.liquidation_sums
+
+    def record_coverage(stream: Stream, since: float) -> list[tuple[float, float]]:
+        calls.append(f"coverage:{stream}")
+        return coverage(stream, since)
+
+    def record_sums(venue: Venue, start: int) -> dict[int, tuple[float, float]]:
+        calls.append(f"sums:{venue}")
+        return dict(sums(venue, start))
+
+    monkeypatch.setattr(store, "coverage", record_coverage)
+    monkeypatch.setattr(store, "liquidation_sums", record_sums)
+    read_liquidations(store, "binance", T0)
+    read_liquidations(store, "bybit", T0)
+    assert calls == ["coverage:binance_liq", "sums:binance", "coverage:bybit_liq", "sums:bybit"]

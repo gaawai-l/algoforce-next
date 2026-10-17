@@ -371,8 +371,13 @@ def test_reason_codes(tmp_path: Path):
     cover(store, "bybit_liq", t - DAY, t - 120)
     cover(store, "bybit_trades", t - DAY, t - 10)
 
-    with TestClient(router_app(path, Clock(now))) as http:
-        views = {exchange: get_states(http, exchange) for exchange in EXCHANGES}
+    # Perps run in this process (their loops are never started), so a stale stream is down.
+    client, connect, seen = blocked()
+    with perps_spied():
+        app = router_app(path, Clock(now), start_worker=True, http=client, connect=connect)
+        with TestClient(app) as http:
+            views = {exchange: get_states(http, exchange) for exchange in EXCHANGES}
+    assert seen == []
 
     assert views["all"]["reasons"] == [
         "series_missing:bybit:oi",
@@ -421,8 +426,9 @@ def test_unavailable_while_perps_are_off(tmp_path: Path):
             "exchange": exchange,
             "window": window,
             "data_state": "unavailable",
-            # No worker runs in this process, so nothing will be derived: not "not_derived".
-            "reasons": ["perps_disabled", *(f"collector_down:{stream}" for stream in streams)],
+            # No worker runs in this process, so nothing will be derived: not "not_derived", and
+            # no collector is down, since none is meant to run.
+            "reasons": ["perps_disabled"],
             "computed_at": None,
             "last": None,
             "thresholds": None,
@@ -696,15 +702,11 @@ def test_collector_status_from_store(tmp_path: Path):
             "problems": {},
         },
     ]
-    # A view lists, and reports down, only the streams it reads.
+    # A view lists only the streams it reads; with perps off, none of them is reported down.
     assert binance["collectors"] == status["collectors"][:1]
     assert binance["reasons"] == ["perps_disabled"]
     assert bybit["collectors"] == status["collectors"][1:]
-    assert bybit["reasons"] == [
-        "perps_disabled",
-        "collector_down:bybit_liq",
-        "collector_down:bybit_trades",
-    ]
+    assert bybit["reasons"] == ["perps_disabled"]
 
 
 def check(verdict: Verdict) -> DirectionCheck:

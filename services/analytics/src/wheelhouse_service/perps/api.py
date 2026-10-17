@@ -108,7 +108,9 @@ def states_view(
     reasons = list(stored.reasons) if stored is not None else [missing]
     errors = [(host, hosts[host].error) for host in VIEW_HOSTS[exchange]]
     reasons += [f"rest_error:{host}:{error}" for host, error in errors if error]
-    reasons += [f"collector_down:{status.stream}" for status in collectors if not status.live]
+    if enabled:
+        # With the collectors off by configuration, perps_disabled already says why.
+        reasons += [f"collector_down:{status.stream}" for status in collectors if not status.live]
     fields: dict[str, Any]
     if states is None:
         fields = {

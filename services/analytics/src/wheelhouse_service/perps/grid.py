@@ -24,6 +24,7 @@ LIQ_STREAM: dict[Venue, Stream] = {"binance": "binance_liq", "bybit": "bybit_liq
 Values = list[float | None]
 # A venue's (longs, shorts) by bucket number from the grid's start, as the store sums them.
 LiqSums = Mapping[int, tuple[float, float]]
+Spans = Sequence[tuple[float, float]]
 
 
 @dataclass(frozen=True)
@@ -42,14 +43,15 @@ def build_grid(
     store: PerpsStore,
     exchange: Exchange,
     start: int,
-    liquidations: Mapping[Venue, LiqSums] | None = None,
+    liquidations: Mapping[Venue, tuple[Spans, LiqSums]] | None = None,
 ) -> Grid | list[str]:
     """The view's grid from bucket `start` to its data edge, or the required series that reach no
     bucket from `start` on.
 
     The edge `last` is the earliest of the required series' last buckets: for each series, the
     last bucket its last stored row (NULL or not) can fill. Collected streams only set coverage.
-    `liquidations` holds each venue's sums from `start` when the caller has read them already.
+    `liquidations` holds each venue's coverage and sums from `start` when the caller has read
+    them already, coverage first (see `read_liquidations`).
     """
     venues: tuple[Venue, ...] = (exchange,) if exchange != "all" else ("binance", "bybit")
     spot = store.klines("bybit", start)
@@ -79,18 +81,18 @@ def build_grid(
             series["binance:kline"] = vd
             vd_covered = [True] * len(buckets)
         else:
-            vd_covered = _covered(store, "bybit_trades", start, len(buckets))
+            vd_covered = _covered(store.coverage("bybit_trades", start), start, len(buckets))
             trades = store.trades("bybit", start)
             vd = [
                 (_net(trades[t]) if t in trades else 0.0) if covered else None
                 for t, covered in zip(buckets, vd_covered, strict=True)
             ]
-        liq_covered = _covered(store, LIQ_STREAM[venue], start, len(buckets))
-        sums = (
+        spans, sums = (
             liquidations[venue]
             if liquidations is not None
-            else store.liquidation_sums(venue, start)
+            else read_liquidations(store, venue, start)
         )
+        liq_covered = _covered(spans, start, len(buckets))
         longs, shorts = _liquidations(sums, liq_covered)
         parts[venue] = _Part(oi, vd, vd_covered, longs, shorts, liq_covered)
 
@@ -131,10 +133,17 @@ def _net(buy_sell: tuple[float, float]) -> float:
     return buy_sell[0] - buy_sell[1]
 
 
-def _covered(store: PerpsStore, stream: Stream, start: int, n: int) -> list[bool]:
+def read_liquidations(store: PerpsStore, venue: Venue, start: int) -> tuple[Spans, LiqSums]:
+    """The venue's liquidation coverage and sums from `start`, coverage read first: an event is
+    committed before the coverage that spans it, so no covered bucket can miss one of its events."""
+    spans = store.coverage(LIQ_STREAM[venue], start)
+    return spans, store.liquidation_sums(venue, start)
+
+
+def _covered(spans: Spans, start: int, n: int) -> list[bool]:
     """Whether each bucket [t, t+10m) lies wholly inside the union of the stream's connections."""
     covered = [False] * n
-    for lo, hi in store.coverage(stream, start):
+    for lo, hi in spans:
         first = max(0, math.ceil((lo - start) / STEP))
         stop = min(n, math.floor((hi - start) / STEP))
         for i in range(first, stop):

@@ -15,7 +15,7 @@ from typing import Literal, NamedTuple
 from pydantic import AwareDatetime
 
 from ..market import Model, timestamp
-from .grid import BAR, LiqSums, build_grid
+from .grid import BAR, build_grid, read_liquidations
 from .rows import Exchange, Kline, OiPoint
 from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, PerpsRest, RestError
 from .states import DAY, STEP, Grid, StatesResult, Window, compute_states
@@ -475,10 +475,9 @@ class PerpsSync:
     def _derive(self, start: int, at: datetime) -> dict[Exchange, Grid | list[str]]:
         """Store the six payloads; return each view's grid, or the series it lacks."""
         grids: dict[Exchange, Grid | list[str]] = {}
-        # Each venue's liquidations are summed once: the All view reuses them.
-        liquidations: dict[Venue, LiqSums] = {}
-        for venue in ("binance", "bybit"):
-            liquidations[venue] = self.store.liquidation_sums(venue, start)
+        # Each venue's liquidations are read once: the All view reuses them.
+        venues: tuple[Venue, ...] = ("binance", "bybit")
+        liquidations = {venue: read_liquidations(self.store, venue, start) for venue in venues}
         for exchange in EXCHANGES:
             grid = build_grid(self.store, exchange, start, liquidations)
             grids[exchange] = grid

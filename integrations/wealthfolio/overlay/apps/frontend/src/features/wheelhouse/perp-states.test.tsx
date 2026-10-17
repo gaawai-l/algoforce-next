@@ -636,7 +636,7 @@ it("says when this service runs no perps collection", async () => {
   const view: PerpStatesView = {
     ...perpStatesSample(),
     data_state: "unavailable",
-    reasons: ["perps_disabled", "collector_down:bybit_liq"],
+    reasons: ["perps_disabled"],
     computed_at: null,
     last: null,
     thresholds: null,
@@ -658,9 +658,7 @@ it("says when this service runs no perps collection", async () => {
   }));
   show({ view });
   expect(
-    await screen.findByText(
-      "Perp data collection is turned off in this service · Bybit liquidations collector has not connected yet",
-    ),
+    await screen.findByText("Perp data collection is turned off in this service"),
   ).toBeTruthy();
   expect(screen.queryByRole("table")).toBeNull();
 });
