@@ -1,12 +1,13 @@
 import { useSearchParams } from "react-router-dom";
 import type { Stream } from "./client";
 import { useWheelhouseText } from "./i18n";
+import { PerpStates } from "./perp-states";
 import { SellerCharts } from "./seller-charts";
 
 type Flow = "seller" | "perp";
 const flows: Flow[] = ["seller", "perp"];
 
-// Seller pressure is live; the perp view stays an honest placeholder until its data source exists.
+// Two views of BTC flows, chosen with the `flow` parameter: seller pressure and perp states.
 export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
   const { text } = useWheelhouseText();
   const [search, setSearch] = useSearchParams();
@@ -39,13 +40,7 @@ export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
           </button>
         ))}
       </div>
-      {flow === "seller" ? (
-        <SellerCharts />
-      ) : (
-        <p className="wh-flows-note wh-flows-note--pending">
-          {text("flows.perpPending")}
-        </p>
-      )}
+      {flow === "seller" ? <SellerCharts /> : <PerpStates />}
     </div>
   );
 }

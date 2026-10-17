@@ -1297,7 +1297,7 @@
   border-bottom: 1px solid var(--wh-cyan);
 }
 
-/* Flows tab: the view switch, the perp placeholder and the seller-pressure charts. */
+/* Flows tab: the view switch, its notes and the pending banner (perp states while collecting). */
 .wh-flows-panel {
   margin-top: 16px;
   min-width: 0;
@@ -1578,6 +1578,243 @@
   }
   /* The three notes stay expanded and stack one above the other. */
   .wh-seller-read {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Perp states: notices, the parameters, Table 1 and its notes; the charts follow below. */
+.wh-perp {
+  --wh-sky: #8fcaff;
+  --wh-moss: #7fc98a;
+  --wh-rust: #e0805c;
+  --wh-chop: #3a4556;
+  margin-top: 14px;
+  min-width: 0;
+}
+.wh-perp .wh-perp-meta {
+  margin: 0 0 4px;
+  color: var(--wh-muted);
+  font:
+    12px/1.6 "JetBrains Mono",
+    monospace;
+}
+.wh-perp .wh-onchain-warn,
+.wh-perp .wh-muted {
+  margin: 8px 0;
+}
+.wh-perp-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--wh-edge);
+  border-radius: 8px;
+  background: var(--wh-surface);
+  min-width: 0;
+}
+.wh-market .wh-perp-panel h3 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wh-perp-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 8px;
+}
+.wh-perp-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--wh-muted);
+  font-size: 12px;
+}
+.wh-perp-seg {
+  display: inline-flex;
+  border: 1px solid var(--wh-edge);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.wh-market .wh-perp-seg button {
+  min-height: 32px;
+  padding: 3px 10px;
+  border: 0;
+  border-right: 1px solid var(--wh-edge);
+  border-radius: 0;
+  background: transparent;
+  color: var(--wh-muted);
+  font-size: 11px;
+}
+.wh-market .wh-perp-seg button:last-child {
+  border-right: 0;
+}
+.wh-market .wh-perp-seg button:hover {
+  background: #19303a;
+}
+.wh-market .wh-perp-seg button[aria-pressed="true"] {
+  background: #153338;
+  color: var(--wh-cyan);
+}
+/* The container clips its corners, so the focus ring is drawn inside each button. */
+.wh-market .wh-perp-seg button:focus-visible {
+  outline-offset: -2px;
+}
+.wh-perp-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+}
+.wh-perp .wh-perp-subtitle {
+  margin: 0;
+  color: var(--wh-muted);
+  font-size: 11px;
+}
+.wh-perp-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.wh-perp-table th,
+.wh-perp-table td {
+  padding: 5px 6px;
+  border-bottom: 1px dashed #1c2532;
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+.wh-perp-table thead th {
+  border-bottom: 1px solid var(--wh-edge);
+  color: var(--wh-muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.wh-perp-table tbody th {
+  color: #e5edf6;
+}
+.wh-perp-table td {
+  color: var(--wh-muted);
+}
+.wh-perp-table .wh-perp-num {
+  text-align: right;
+  white-space: nowrap;
+}
+.wh-perp-table td.wh-perp-num {
+  color: #e5edf6;
+  font:
+    12px "JetBrains Mono",
+    monospace;
+}
+.wh-perp-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+.wh-perp-swatch--shortsq,
+.wh-perp-swatch--shortun {
+  background: var(--wh-moss);
+}
+.wh-perp-swatch--longsq,
+.wh-perp-swatch--longun {
+  background: var(--wh-rust);
+}
+/* Unwinds are the voluntary side of the same move, drawn fainter than the squeezes. */
+.wh-perp-swatch--shortun,
+.wh-perp-swatch--longun {
+  opacity: 0.5;
+}
+.wh-perp-swatch--longbd {
+  background: var(--wh-sky);
+}
+.wh-perp-swatch--shortbd {
+  background: var(--wh-violet);
+}
+.wh-perp-swatch--spot {
+  background: var(--wh-cyan);
+}
+.wh-perp-swatch--chop {
+  background: var(--wh-chop);
+}
+.wh-perp-latest {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--wh-cyan);
+  box-shadow: 0 0 6px var(--wh-cyan);
+  vertical-align: 1px;
+}
+.wh-perp-what {
+  margin-top: 6px;
+}
+.wh-perp-what summary {
+  padding: 8px 0;
+  color: var(--wh-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wh-perp-what dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+}
+.wh-perp-what dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wh-perp-what dd {
+  margin: 0;
+  color: var(--wh-muted);
+  text-align: right;
+}
+.wh-perp .wh-perp-forming {
+  font-size: 12px;
+}
+.wh-perp-read {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--wh-edge);
+  color: var(--wh-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.wh-market .wh-perp-read h4 {
+  margin: 0 0 2px;
+  color: #e5edf6;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wh-perp .wh-perp-read p {
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .wh-perp-panel {
+    padding: 10px;
+  }
+  .wh-market .wh-perp-seg button {
+    min-height: 44px;
+    padding-inline: 14px;
+  }
+  .wh-perp-what summary {
+    padding-block: 12px;
+  }
+  /* The three notes stay expanded and stack one above the other. */
+  .wh-perp-read {
     grid-template-columns: 1fr;
   }
 }

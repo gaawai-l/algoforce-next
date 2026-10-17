@@ -33,6 +33,9 @@ vi.mock("./regime-check", () => ({ RegimeCheck: () => null }));
 vi.mock("./seller-charts", () => ({
   SellerCharts: () => <p>seller-charts</p>,
 }));
+vi.mock("./perp-states", () => ({
+  PerpStates: () => <p>perp-states</p>,
+}));
 vi.mock("./language-toggle", () => ({ LanguageToggle: () => null }));
 vi.mock("./i18n", () => ({
   useWheelhouseText: () => ({ text: mocks.text }),
@@ -336,9 +339,9 @@ it("shows the Flows panel without timeframe controls or a chart", async () => {
   expect(mocks.levels).not.toHaveBeenCalled();
 });
 
-it("reaches the perp placeholder from flow=perp", async () => {
+it("reaches the perp states view from flow=perp", async () => {
   openLevels("?symbol=BTCUSDT&method=flows&flow=perp");
-  expect(await screen.findByText("flows.perpPending")).toBeTruthy();
+  expect(await screen.findByText("perp-states")).toBeTruthy();
   expect(screen.queryByText("seller-charts")).toBeNull();
   await settled();
   expect(mocks.chart).not.toHaveBeenCalled();

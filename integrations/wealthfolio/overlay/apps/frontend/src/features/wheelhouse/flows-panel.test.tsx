@@ -4,12 +4,19 @@ import { afterEach, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { FlowsPanel } from "./flows-panel";
 import { pressureSample } from "./onchain-contract";
+import { perpStatesSample } from "./perps-contract";
 import type { Stream } from "./client";
 
-const mocks = vi.hoisted(() => ({ pressure: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  pressure: vi.fn(),
+  perpStates: vi.fn(),
+  perpStatus: vi.fn(),
+}));
 vi.mock("./client", async (original) => ({
   ...(await original<typeof import("./client")>()),
   getSellerPressure: mocks.pressure,
+  getPerpStates: mocks.perpStates,
+  getPerpStatus: mocks.perpStatus,
 }));
 
 afterEach(() => {
@@ -18,14 +25,15 @@ afterEach(() => {
 });
 
 const chartOne = "Chart 1 — Total realized loss by cohorts (USD)";
-const perpPlaceholder =
-  "Not connected — perp data source not chosen yet (Glassnode, Coinalyze or own liquidation collector)";
+const perpTable = "Table 1 — Perp states";
 
 function Where() {
   return <output data-testid="where">{useLocation().search}</output>;
 }
 
 function show(search = "", symbol: Stream["symbol"] = "BTCUSDT") {
+  mocks.perpStates.mockResolvedValue(perpStatesSample());
+  mocks.perpStatus.mockReturnValue(new Promise(() => {}));
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -46,7 +54,8 @@ it("shows the seller pressure charts by default", async () => {
   expect(
     screen.queryByText("Seller pressure is not implemented yet"),
   ).toBeNull();
-  expect(screen.queryByText(/Not connected/)).toBeNull();
+  expect(screen.queryByText(perpTable)).toBeNull();
+  expect(mocks.perpStates).not.toHaveBeenCalled();
   expect(
     screen
       .getByRole("button", { name: "Seller pressure" })
@@ -59,9 +68,16 @@ it("shows the seller pressure charts by default", async () => {
   ).toBe("false");
 });
 
-it("shows the perp states placeholder for flow=perp and does not query seller pressure", () => {
+it("shows the perp states view for flow=perp and does not query seller pressure", async () => {
   show("?flow=perp");
-  expect(screen.getByText(perpPlaceholder)).toBeTruthy();
+  expect(await screen.findByText(perpTable)).toBeTruthy();
+  expect(screen.getByText("Parameters")).toBeTruthy();
+  expect(mocks.perpStates).toHaveBeenCalledWith(
+    "all",
+    "4h",
+    expect.any(AbortSignal),
+  );
+  expect(screen.queryByText(/Not connected/)).toBeNull();
   expect(screen.queryByText(chartOne)).toBeNull();
   expect(screen.queryByText(/not implemented yet/)).toBeNull();
   expect(mocks.pressure).not.toHaveBeenCalled();
@@ -85,11 +101,6 @@ it("invents no number before the seller pressure answer arrives", () => {
   expect(container.textContent ?? "").not.toMatch(/\d/);
 });
 
-it("renders no number in the perp view", () => {
-  const { container } = show("?flow=perp");
-  expect(container.textContent ?? "").not.toMatch(/\d/);
-});
-
 it("writes the chosen view to the flow parameter and keeps other parameters", async () => {
   mocks.pressure.mockResolvedValue(pressureSample());
   show("?symbol=BTCUSDT&method=flows");
@@ -101,7 +112,7 @@ it("writes the chosen view to the flow parameter and keeps other parameters", as
   expect(params.get("flow")).toBe("perp");
   expect(params.get("method")).toBe("flows");
   expect(params.get("symbol")).toBe("BTCUSDT");
-  expect(screen.getByText(perpPlaceholder)).toBeTruthy();
+  expect(await screen.findByText(perpTable)).toBeTruthy();
   expect(screen.queryByText(chartOne)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Seller pressure" }));
   expect(
@@ -122,6 +133,8 @@ it.each(["ETHUSDT", "MUUSDT"] as const)(
     expect(container.querySelector("svg")).toBeNull();
     expect(container.textContent ?? "").not.toMatch(/\d/);
     expect(mocks.pressure).not.toHaveBeenCalled();
+    expect(mocks.perpStates).not.toHaveBeenCalled();
+    expect(mocks.perpStatus).not.toHaveBeenCalled();
   },
 );
 
