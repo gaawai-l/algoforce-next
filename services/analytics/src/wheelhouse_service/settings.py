@@ -10,6 +10,8 @@ class Settings:
     port: int = 8787
     log_level: str = "info"
     data_dir: Path = Path(__file__).resolve().parents[4] / ".local" / "analytics"
+    # The perps REST worker and WebSocket collectors; on unless WHEELHOUSE_PERPS turns them off.
+    perps_enabled: bool = True
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -19,8 +21,12 @@ class Settings:
         level = os.environ.get("WHEELHOUSE_LOG_LEVEL", "info").lower()
         if level not in {"debug", "info", "warning", "error"}:
             raise ValueError("Unsupported WHEELHOUSE_LOG_LEVEL")
+        perps = os.environ.get("WHEELHOUSE_PERPS", "on").lower()
+        if perps not in {"1", "0", "true", "false", "on", "off"}:
+            raise ValueError("WHEELHOUSE_PERPS must be 1/0, true/false or on/off")
         return cls(
             port=port,
             log_level=level,
             data_dir=Path(os.environ.get("WHEELHOUSE_DATA_DIR", str(cls.data_dir))),
+            perps_enabled=perps in {"1", "true", "on"},
         )

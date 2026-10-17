@@ -1182,6 +1182,89 @@
           }
         }
       }
+    },
+    "/api/wheelhouse/v1/perps/states": {
+      "get": {
+        "tags": [
+          "perps"
+        ],
+        "summary": "States",
+        "operationId": "states_api_wheelhouse_v1_perps_states_get",
+        "parameters": [
+          {
+            "name": "exchange",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "binance",
+                "bybit"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Exchange"
+            }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "4h",
+                "8h"
+              ],
+              "type": "string",
+              "default": "4h",
+              "title": "Window"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerpStatesView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/perps/status": {
+      "get": {
+        "tags": [
+          "perps"
+        ],
+        "summary": "Status",
+        "operationId": "status_api_wheelhouse_v1_perps_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerpsStatus"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1570,6 +1653,163 @@
         ],
         "title": "Batch"
       },
+      "Block": {
+        "properties": {
+          "t0": {
+            "type": "string",
+            "format": "date-time",
+            "title": "T0"
+          },
+          "t1": {
+            "type": "string",
+            "format": "date-time",
+            "title": "T1"
+          },
+          "buckets": {
+            "type": "integer",
+            "title": "Buckets"
+          },
+          "forming": {
+            "type": "boolean",
+            "title": "Forming"
+          },
+          "liq_covered": {
+            "type": "boolean",
+            "title": "Liq Covered"
+          },
+          "delta_covered": {
+            "type": "boolean",
+            "title": "Delta Covered"
+          },
+          "covered": {
+            "type": "boolean",
+            "title": "Covered"
+          },
+          "dpx": {
+            "type": "number",
+            "title": "Dpx"
+          },
+          "doi": {
+            "type": "number",
+            "title": "Doi"
+          },
+          "delta": {
+            "type": "number",
+            "title": "Delta"
+          },
+          "lliq": {
+            "type": "number",
+            "title": "Lliq"
+          },
+          "sliq": {
+            "type": "number",
+            "title": "Sliq"
+          },
+          "imputed": {
+            "$ref": "#/components/schemas/Imputed"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "shortsq",
+                  "longsq",
+                  "shortun",
+                  "longun",
+                  "longbd",
+                  "shortbd",
+                  "spot",
+                  "chop"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "price_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Close"
+          },
+          "oi_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oi Close"
+          },
+          "delta_sum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Sum"
+          },
+          "lliq_sum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lliq Sum"
+          },
+          "sliq_sum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sliq Sum"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "t0",
+          "t1",
+          "buckets",
+          "forming",
+          "liq_covered",
+          "delta_covered",
+          "covered",
+          "dpx",
+          "doi",
+          "delta",
+          "lliq",
+          "sliq",
+          "imputed",
+          "state",
+          "price_close",
+          "oi_close",
+          "delta_sum",
+          "lliq_sum",
+          "sliq_sum"
+        ],
+        "title": "Block"
+      },
       "BucketCostBasis": {
         "properties": {
           "bucket": {
@@ -1782,6 +2022,75 @@
           "components"
         ],
         "title": "CohortClusters"
+      },
+      "CollectorStatus": {
+        "properties": {
+          "stream": {
+            "type": "string",
+            "enum": [
+              "binance_liq",
+              "bybit_liq",
+              "bybit_trades"
+            ],
+            "title": "Stream"
+          },
+          "live": {
+            "type": "boolean",
+            "title": "Live"
+          },
+          "last_proof": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Proof"
+          },
+          "down_since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Down Since"
+          },
+          "covered_days": {
+            "type": "number",
+            "title": "Covered Days"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "live",
+          "last_proof",
+          "down_since",
+          "covered_days",
+          "since"
+        ],
+        "title": "CollectorStatus",
+        "description": "One collected stream, from its stored coverage (P4-R10)."
       },
       "Component": {
         "properties": {
@@ -3124,6 +3433,69 @@
         ],
         "title": "DemarkSummary"
       },
+      "DirectionCheck": {
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "inverted",
+              "pending"
+            ],
+            "title": "Verdict"
+          },
+          "samples": {
+            "type": "integer",
+            "title": "Samples"
+          },
+          "down": {
+            "type": "integer",
+            "title": "Down"
+          },
+          "long_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Long Share"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "verdict",
+          "samples",
+          "down",
+          "long_share"
+        ],
+        "title": "DirectionCheck",
+        "description": "One venue's liquidation sides against the price (spec \u00a76), as currently mapped."
+      },
+      "Directions": {
+        "properties": {
+          "binance": {
+            "$ref": "#/components/schemas/DirectionCheck"
+          },
+          "bybit": {
+            "$ref": "#/components/schemas/DirectionCheck"
+          },
+          "bybit_qty": {
+            "$ref": "#/components/schemas/QtyUnits"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "binance",
+          "bybit",
+          "bybit_qty"
+        ],
+        "title": "Directions"
+      },
       "Episode": {
         "properties": {
           "state": {
@@ -3405,6 +3777,83 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HostStatus": {
+        "properties": {
+          "host": {
+            "type": "string",
+            "title": "Host"
+          },
+          "last_success": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "backoff_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backoff Until"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "host",
+          "last_success",
+          "error",
+          "backoff_until"
+        ],
+        "title": "HostStatus"
+      },
+      "Imputed": {
+        "properties": {
+          "dpx": {
+            "type": "boolean",
+            "title": "Dpx"
+          },
+          "doi": {
+            "type": "boolean",
+            "title": "Doi"
+          },
+          "sums": {
+            "type": "boolean",
+            "title": "Sums"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dpx",
+          "doi",
+          "sums"
+        ],
+        "title": "Imputed",
+        "description": "Which features the original's rules set to 0 for missing inputs."
       },
       "Instrument-Input": {
         "properties": {
@@ -4556,6 +5005,237 @@
         ],
         "title": "Peak"
       },
+      "PerpStatesView": {
+        "properties": {
+          "exchange": {
+            "type": "string",
+            "enum": [
+              "all",
+              "binance",
+              "bybit"
+            ],
+            "title": "Exchange"
+          },
+          "window": {
+            "type": "string",
+            "enum": [
+              "4h",
+              "8h"
+            ],
+            "title": "Window"
+          },
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last"
+          },
+          "thresholds": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Thresholds"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/Block"
+            },
+            "type": "array",
+            "title": "Blocks"
+          },
+          "tail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/Table"
+            },
+            "type": "array",
+            "title": "Tables"
+          },
+          "covered_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Covered Days"
+          },
+          "collecting": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collecting"
+          },
+          "qc": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Qc"
+          },
+          "series_missing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Series Missing"
+          },
+          "collectors": {
+            "items": {
+              "$ref": "#/components/schemas/CollectorStatus"
+            },
+            "type": "array",
+            "title": "Collectors"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "exchange",
+          "window",
+          "data_state",
+          "reasons",
+          "computed_at",
+          "last",
+          "thresholds",
+          "blocks",
+          "tail",
+          "tables",
+          "covered_days",
+          "collecting",
+          "qc",
+          "series_missing",
+          "collectors"
+        ],
+        "title": "PerpStatesView",
+        "description": "One exchange view and window. While unavailable, everything from `last` on is null or\nempty and `reasons` say why."
+      },
+      "PerpsStatus": {
+        "properties": {
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "hosts": {
+            "items": {
+              "$ref": "#/components/schemas/HostStatus"
+            },
+            "type": "array",
+            "title": "Hosts"
+          },
+          "collectors": {
+            "items": {
+              "$ref": "#/components/schemas/CollectorStatus"
+            },
+            "type": "array",
+            "title": "Collectors"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "inverted",
+              "pending"
+            ],
+            "title": "Direction"
+          },
+          "direction_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Directions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "last_run_at",
+          "last_error",
+          "hosts",
+          "collectors",
+          "direction",
+          "direction_check"
+        ],
+        "title": "PerpsStatus"
+      },
       "Point": {
         "properties": {
           "at": {
@@ -4964,6 +5644,81 @@
           "bars_ago"
         ],
         "title": "PrevCountdown"
+      },
+      "QtyUnits": {
+        "properties": {
+          "events": {
+            "type": "integer",
+            "title": "Events"
+          },
+          "min_qty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Qty"
+          },
+          "min_notional": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Notional"
+          },
+          "max_notional": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Notional"
+          },
+          "notional_in_range": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notional In Range"
+          },
+          "min_qty_matches": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Qty Matches"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "events",
+          "min_qty",
+          "min_notional",
+          "max_notional",
+          "notional_in_range",
+          "min_qty_matches"
+        ],
+        "title": "QtyUnits",
+        "description": "Bybit's liquidation size `v` checked as BTC: notionals v\u00b7p and the smallest size."
       },
       "Quote-Input": {
         "properties": {
@@ -6411,6 +7166,257 @@
           "end"
         ],
         "title": "SyncRequest"
+      },
+      "Table": {
+        "properties": {
+          "show_days": {
+            "type": "integer",
+            "title": "Show Days"
+          },
+          "view_from": {
+            "type": "string",
+            "format": "date-time",
+            "title": "View From"
+          },
+          "judged": {
+            "type": "integer",
+            "title": "Judged"
+          },
+          "in_view": {
+            "type": "integer",
+            "title": "In View"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/TableRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "shortsq",
+                  "longsq",
+                  "shortun",
+                  "longun",
+                  "longbd",
+                  "shortbd",
+                  "spot",
+                  "chop"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest"
+          },
+          "latest_uncovered": {
+            "type": "boolean",
+            "title": "Latest Uncovered"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "show_days",
+          "view_from",
+          "judged",
+          "in_view",
+          "rows",
+          "latest",
+          "latest_uncovered"
+        ],
+        "title": "Table"
+      },
+      "TableRow": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "shortsq",
+              "longsq",
+              "shortun",
+              "longun",
+              "longbd",
+              "shortbd",
+              "spot",
+              "chop"
+            ],
+            "title": "State"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "share": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share"
+          },
+          "max_move": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Move"
+          },
+          "run_blocks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Blocks"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "count",
+          "share",
+          "max_move",
+          "run_blocks"
+        ],
+        "title": "TableRow"
+      },
+      "Tail": {
+        "properties": {
+          "t0": {
+            "type": "string",
+            "format": "date-time",
+            "title": "T0"
+          },
+          "t1": {
+            "type": "string",
+            "format": "date-time",
+            "title": "T1"
+          },
+          "price_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Close"
+          },
+          "oi_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oi Close"
+          },
+          "delta_sum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Sum"
+          },
+          "lliq_sum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lliq Sum"
+          },
+          "sliq_sum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sliq Sum"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "t0",
+          "t1",
+          "price_close",
+          "oi_close",
+          "delta_sum",
+          "lliq_sum",
+          "sliq_sum"
+        ],
+        "title": "Tail",
+        "description": "The trailing buckets short of a block: drawn, never judged."
+      },
+      "Thresholds": {
+        "properties": {
+          "s_liq": {
+            "type": "number",
+            "title": "S Liq"
+          },
+          "l_liq": {
+            "type": "number",
+            "title": "L Liq"
+          },
+          "oi": {
+            "type": "number",
+            "title": "Oi"
+          },
+          "px": {
+            "type": "number",
+            "title": "Px"
+          },
+          "n_liq": {
+            "type": "integer",
+            "title": "N Liq"
+          },
+          "n_all": {
+            "type": "integer",
+            "title": "N All"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "s_liq",
+          "l_liq",
+          "oi",
+          "px",
+          "n_liq",
+          "n_all"
+        ],
+        "title": "Thresholds"
       },
       "TimeframeContext": {
         "properties": {

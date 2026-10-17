@@ -11,6 +11,7 @@ from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
+import httpx
 from fastapi import FastAPI, Header, Query, Request, Response
 from fastapi import HTTPException as APIException
 from fastapi.exceptions import RequestValidationError
@@ -40,6 +41,8 @@ from .market import (
 )
 from .onchain.api import create_router as onchain_router
 from .onchain.brk import BrkClient
+from .perps.api import create_router as perps_router
+from .perps.collector import Connection
 from .portfolio.api import create_router as portfolio_router
 from .repository import Repository
 from .runtime import Runtime
@@ -55,7 +58,12 @@ def create_app(
     start_worker: bool = True,
     start_broker_worker: bool | None = None,
     brk_client: BrkClient | None = None,
+    start_perps: bool | None = None,
+    perps_http: httpx.Client | None = None,
+    perps_connect: Callable[..., Connection] | None = None,
 ) -> FastAPI:
+    """`start_perps` defaults to the WHEELHOUSE_PERPS setting; nothing starts without
+    `start_worker`."""
     repository: Repository | None = None
 
     def repo() -> Repository:
@@ -174,6 +182,7 @@ def create_app(
                 "scheduled_refresh",
                 "market_context",
                 "onchain",
+                "perps",
             ],
         )
 
@@ -313,5 +322,13 @@ def create_app(
     )
     app.include_router(
         onchain_router(data_dir / "onchain.sqlite", brk_client, start_worker=start_worker)
+    )
+    run_perps = start_worker and (
+        Settings.from_env().perps_enabled if start_perps is None else start_perps
+    )
+    app.include_router(
+        perps_router(
+            data_dir / "perps.sqlite", perps_http, start_worker=run_perps, connect=perps_connect
+        )
     )
     return app

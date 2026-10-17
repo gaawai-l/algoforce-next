@@ -497,6 +497,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/perps/states": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** States */
+        get: operations["states_api_wheelhouse_v1_perps_states_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/perps/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_wheelhouse_v1_perps_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -638,6 +672,52 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** Block */
+        Block: {
+            /**
+             * T0
+             * Format: date-time
+             */
+            t0: string;
+            /**
+             * T1
+             * Format: date-time
+             */
+            t1: string;
+            /** Buckets */
+            buckets: number;
+            /** Forming */
+            forming: boolean;
+            /** Liq Covered */
+            liq_covered: boolean;
+            /** Delta Covered */
+            delta_covered: boolean;
+            /** Covered */
+            covered: boolean;
+            /** Dpx */
+            dpx: number;
+            /** Doi */
+            doi: number;
+            /** Delta */
+            delta: number;
+            /** Lliq */
+            lliq: number;
+            /** Sliq */
+            sliq: number;
+            imputed: components["schemas"]["Imputed"];
+            /** State */
+            state: ("shortsq" | "longsq" | "shortun" | "longun" | "longbd" | "shortbd" | "spot" | "chop") | null;
+            /** Price Close */
+            price_close: number | null;
+            /** Oi Close */
+            oi_close: number | null;
+            /** Delta Sum */
+            delta_sum: number | null;
+            /** Lliq Sum */
+            lliq_sum: number | null;
+            /** Sliq Sum */
+            sliq_sum: number | null;
+        };
         /** BucketCostBasis */
         BucketCostBasis: {
             /**
@@ -699,6 +779,27 @@ export interface components {
             peaks: components["schemas"]["Peak"][];
             /** Components */
             components: components["schemas"]["GmmComponent"][];
+        };
+        /**
+         * CollectorStatus
+         * @description One collected stream, from its stored coverage (P4-R10).
+         */
+        CollectorStatus: {
+            /**
+             * Stream
+             * @enum {string}
+             */
+            stream: "binance_liq" | "bybit_liq" | "bybit_trades";
+            /** Live */
+            live: boolean;
+            /** Last Proof */
+            last_proof: string | null;
+            /** Down Since */
+            down_since: string | null;
+            /** Covered Days */
+            covered_days: number;
+            /** Since */
+            since: string | null;
         };
         /** Component */
         Component: {
@@ -1147,6 +1248,29 @@ export interface components {
             /** Close */
             close: string;
         };
+        /**
+         * DirectionCheck
+         * @description One venue's liquidation sides against the price (spec §6), as currently mapped.
+         */
+        DirectionCheck: {
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "ok" | "inverted" | "pending";
+            /** Samples */
+            samples: number;
+            /** Down */
+            down: number;
+            /** Long Share */
+            long_share: number | null;
+        };
+        /** Directions */
+        Directions: {
+            binance: components["schemas"]["DirectionCheck"];
+            bybit: components["schemas"]["DirectionCheck"];
+            bybit_qty: components["schemas"]["QtyUnits"];
+        };
         /** Episode */
         Episode: {
             /**
@@ -1244,6 +1368,29 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HostStatus */
+        HostStatus: {
+            /** Host */
+            host: string;
+            /** Last Success */
+            last_success: string | null;
+            /** Error */
+            error: string | null;
+            /** Backoff Until */
+            backoff_until: string | null;
+        };
+        /**
+         * Imputed
+         * @description Which features the original's rules set to 0 for missing inputs.
+         */
+        Imputed: {
+            /** Dpx */
+            dpx: boolean;
+            /** Doi */
+            doi: boolean;
+            /** Sums */
+            sums: boolean;
         };
         /** Instrument */
         "Instrument-Input": {
@@ -1631,6 +1778,67 @@ export interface components {
             /** Strength */
             strength: number;
         };
+        /**
+         * PerpStatesView
+         * @description One exchange view and window. While unavailable, everything from `last` on is null or
+         *     empty and `reasons` say why.
+         */
+        PerpStatesView: {
+            /**
+             * Exchange
+             * @enum {string}
+             */
+            exchange: "all" | "binance" | "bybit";
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "4h" | "8h";
+            /**
+             * Data State
+             * @enum {string}
+             */
+            data_state: "fresh" | "delayed" | "stale" | "unavailable";
+            /** Reasons */
+            reasons: string[];
+            /** Computed At */
+            computed_at: string | null;
+            /** Last */
+            last: string | null;
+            thresholds: components["schemas"]["Thresholds"] | null;
+            /** Blocks */
+            blocks: components["schemas"]["Block"][];
+            tail: components["schemas"]["Tail"] | null;
+            /** Tables */
+            tables: components["schemas"]["Table"][];
+            /** Covered Days */
+            covered_days: number | null;
+            /** Collecting */
+            collecting: boolean | null;
+            /** Qc */
+            qc: string[];
+            /** Series Missing */
+            series_missing: string[];
+            /** Collectors */
+            collectors: components["schemas"]["CollectorStatus"][];
+        };
+        /** PerpsStatus */
+        PerpsStatus: {
+            /** Last Run At */
+            last_run_at: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Hosts */
+            hosts: components["schemas"]["HostStatus"][];
+            /** Collectors */
+            collectors: components["schemas"]["CollectorStatus"][];
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "ok" | "inverted" | "pending";
+            direction_check: components["schemas"]["Directions"] | null;
+        };
         /** Point */
         Point: {
             /**
@@ -1772,6 +1980,24 @@ export interface components {
             qualified: boolean;
             /** Bars Ago */
             bars_ago: number;
+        };
+        /**
+         * QtyUnits
+         * @description Bybit's liquidation size `v` checked as BTC: notionals v·p and the smallest size.
+         */
+        QtyUnits: {
+            /** Events */
+            events: number;
+            /** Min Qty */
+            min_qty: number | null;
+            /** Min Notional */
+            min_notional: number | null;
+            /** Max Notional */
+            max_notional: number | null;
+            /** Notional In Range */
+            notional_in_range: boolean | null;
+            /** Min Qty Matches */
+            min_qty_matches: boolean | null;
         };
         /** Quote */
         "Quote-Input": {
@@ -2336,6 +2562,83 @@ export interface components {
              * Format: date
              */
             end: string;
+        };
+        /** Table */
+        Table: {
+            /** Show Days */
+            show_days: number;
+            /**
+             * View From
+             * Format: date-time
+             */
+            view_from: string;
+            /** Judged */
+            judged: number;
+            /** In View */
+            in_view: number;
+            /** Rows */
+            rows: components["schemas"]["TableRow"][];
+            /** Latest */
+            latest: ("shortsq" | "longsq" | "shortun" | "longun" | "longbd" | "shortbd" | "spot" | "chop") | null;
+            /** Latest Uncovered */
+            latest_uncovered: boolean;
+        };
+        /** TableRow */
+        TableRow: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "shortsq" | "longsq" | "shortun" | "longun" | "longbd" | "shortbd" | "spot" | "chop";
+            /** Count */
+            count: number;
+            /** Share */
+            share: number | null;
+            /** Max Move */
+            max_move: number | null;
+            /** Run Blocks */
+            run_blocks: number | null;
+        };
+        /**
+         * Tail
+         * @description The trailing buckets short of a block: drawn, never judged.
+         */
+        Tail: {
+            /**
+             * T0
+             * Format: date-time
+             */
+            t0: string;
+            /**
+             * T1
+             * Format: date-time
+             */
+            t1: string;
+            /** Price Close */
+            price_close: number | null;
+            /** Oi Close */
+            oi_close: number | null;
+            /** Delta Sum */
+            delta_sum: number | null;
+            /** Lliq Sum */
+            lliq_sum: number | null;
+            /** Sliq Sum */
+            sliq_sum: number | null;
+        };
+        /** Thresholds */
+        Thresholds: {
+            /** S Liq */
+            s_liq: number;
+            /** L Liq */
+            l_liq: number;
+            /** Oi */
+            oi: number;
+            /** Px */
+            px: number;
+            /** N Liq */
+            n_liq: number;
+            /** N All */
+            n_all: number;
         };
         /** TimeframeContext */
         TimeframeContext: {
@@ -3244,6 +3547,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SellerPressureView"];
+                };
+            };
+        };
+    };
+    states_api_wheelhouse_v1_perps_states_get: {
+        parameters: {
+            query?: {
+                exchange?: "all" | "binance" | "bybit";
+                window?: "4h" | "8h";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PerpStatesView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    status_api_wheelhouse_v1_perps_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PerpsStatus"];
                 };
             };
         };
