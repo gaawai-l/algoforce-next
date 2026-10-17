@@ -568,6 +568,60 @@ const en = {
   "perp.what.shortbd": "Fresh short risk arriving",
   "perp.what.spot": "Move came from cash, not leverage",
   "perp.what.chop": "None of the above",
+  "perp.chart.aria":
+    "{{title}}. Use the left and right arrow keys to read one block; Escape returns to the latest.",
+  "perp.chart.latest": "Latest · {{span}} UTC",
+  "perp.chart.price": "BTC/USD",
+  "perp.chart.block": "Block",
+  "perp.chart.oi": "Open interest",
+  "perp.chart.oiKey": "Open interest (BTC)",
+  "perp.chart.delta": "Volume delta",
+  "perp.chart.buy": "Taker buy (BTC)",
+  "perp.chart.sell": "Taker sell (BTC)",
+  "perp.chart.shortLiq": "Short liquidations",
+  "perp.chart.longLiq": "Long liquidations",
+  "perp.chart.liquidations": "Liquidations",
+  "perp.chart.uncovered": "uncovered",
+  "perp.chart.uncoveredKey": "Uncovered",
+  "perp.chart.uncoveredCount": "(+{{count}} uncovered)",
+  "perp.chart.notJudged": "not judged",
+  "perp.chart.partial": "partial block, not judged",
+  "perp.chart.forming": "forming",
+  "perp.chart.imputed": "imputed: {{list}}",
+  "perp.chart.imputed.dpx": "price change",
+  "perp.chart.imputed.doi": "OI change",
+  "perp.chart.imputed.sums": "sums",
+  "perp.chart.zeroThreshold": "liquidation threshold is 0",
+  "perp.chart.toggle": "Click to hide or show",
+  "perp.chart.noData": "No blocks in this view",
+  "perp.c1.title": "Chart 1 — Price: long/short squeezes and unwinds",
+  "perp.c1.shows":
+    "The BTC price at each block's close, with the block shaded when it was a squeeze or an unwind: rust for the long side, moss for the short side, squeezes stronger than unwinds. Hatched blocks were not judged because liquidations or Bybit trades were not collected for all of them.",
+  "perp.c1.implies":
+    "A squeeze is a forced exit: one side's liquidations in the top 10% of covered blocks and at least three times the other side's, with price moving at least its 75th-percentile amount the same way. An unwind is open interest falling by a top-quarter amount without that pressure, positions closed by choice. Squeezes back to back mark a violent, forced move.",
+  "perp.c1.how":
+    "Compare blocks within one view: each label is ranked against the last 90 days, so it is relative, not absolute. Liquidations are a lower bound, so a forced exit can read as an unwind. k / n counts the judged blocks centred in view; click a state to hide its shading.",
+  "perp.c2.title": "Chart 2 — Price: new long, new short, spot-led",
+  "perp.c2.shows":
+    "The same price line, shaded where a block was a new long build, a new short build or spot-led. The blocks and thresholds are Chart 1's, and hatched blocks were not judged.",
+  "perp.c2.implies":
+    "A new long build is open interest rising by a top-quarter amount while price and taker flow both rise; a new short build is the same with both falling. Spot-led is a top-quarter price move with open interest roughly unchanged: cash moved price, not leverage.",
+  "perp.c2.how":
+    "Builds add positions that a later squeeze can force out; spot-led moves leave less of that behind. An unshaded block is chop or one of Chart 1's states.",
+  "perp.c3.title": "Chart 3 — Price vs open interest",
+  "perp.c3.shows":
+    "Open interest on the selected venues, in BTC, at each block's close (left axis), and the BTC price at the same points (right axis).",
+  "perp.c3.implies":
+    "A sharp rise in open interest is new leverage arriving; a sharp fall is positions closing, by choice or by force. A high level means more positions a move can force out, not which way price goes next.",
+  "perp.c3.how":
+    "Read the lines together: open interest rising with price is longs adding, rising as price falls is shorts adding, and falling with either is positions leaving. Charts 1 and 2 name which of these each block was.",
+  "perp.c4.title": "Chart 4 — Volume delta and liquidations",
+  "perp.c4.shows":
+    "For each block, taker buy minus taker sell volume on the perpetuals (upper panel) and, in the band beneath, short liquidations drawn up and long liquidations drawn down. Unit: BTC. A hatched slot means that input was not collected for the block, so nothing is drawn there.",
+  "perp.c4.implies":
+    "Tall bars above zero are aggressive buying, below zero aggressive selling. A tall liquidation bar means that side was being closed out for it; one beside a large delta bar pushing the same way is what a squeeze looks like.",
+  "perp.c4.how":
+    "Cyan is net buying and rose net selling; in the band, moss bars are short liquidations and rust bars long ones, the colours of Chart 1's squeezes. Liquidations are what the exchanges report, a lower bound, and Binance sends at most one per second. Watch for one side's liquidations repeating while delta pushes the same way.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1118,6 +1172,59 @@ const zh: Record<MessageKey, string> = {
   "perp.what.shortbd": "新的空头杠杆进场",
   "perp.what.spot": "行情来自现货资金，而非杠杆",
   "perp.what.chop": "不属于以上任何一种",
+  "perp.chart.aria": "{{title}}。用左右方向键逐块读取；按 Esc 回到最新。",
+  "perp.chart.latest": "最新 · {{span}} UTC",
+  "perp.chart.price": "BTC/USD",
+  "perp.chart.block": "块",
+  "perp.chart.oi": "持仓量",
+  "perp.chart.oiKey": "持仓量（BTC）",
+  "perp.chart.delta": "主动买卖差",
+  "perp.chart.buy": "主动买入（BTC）",
+  "perp.chart.sell": "主动卖出（BTC）",
+  "perp.chart.shortLiq": "空头清算",
+  "perp.chart.longLiq": "多头清算",
+  "perp.chart.liquidations": "清算",
+  "perp.chart.uncovered": "未覆盖",
+  "perp.chart.uncoveredKey": "未覆盖",
+  "perp.chart.uncoveredCount": "（另有 {{count}} 块未覆盖）",
+  "perp.chart.notJudged": "未判定",
+  "perp.chart.partial": "不足半块，未判定",
+  "perp.chart.forming": "形成中",
+  "perp.chart.imputed": "按 0 补入：{{list}}",
+  "perp.chart.imputed.dpx": "价格变动",
+  "perp.chart.imputed.doi": "OI 变动",
+  "perp.chart.imputed.sums": "块内合计",
+  "perp.chart.zeroThreshold": "清算阈值为 0",
+  "perp.chart.toggle": "点击隐藏或显示",
+  "perp.chart.noData": "视图内没有块",
+  "perp.c1.title": "图 1 — 价格：多空挤压与离场",
+  "perp.c1.shows":
+    "每块收盘时的 BTC 价格；块为挤压或离场时加底色：锈红为多头一侧，苔绿为空头一侧，挤压比离场颜色更深。斜线块没有判定，因为块内的清算或 Bybit 成交没有全部采集到。",
+  "perp.c1.implies":
+    "挤压是被迫离场：一侧清算量进入已覆盖块的前 10%，且至少是另一侧的 3 倍，同时价格朝同一方向变动到第 75 百分位以上。离场是持仓量下降到前四分之一、但没有这种清算压力，即主动平仓。连续出现挤压，说明行情剧烈且由强平推动。",
+  "perp.c1.how":
+    "只在同一视图内比较各块：标签都相对近 90 天排名，是相对值而不是绝对值。清算只能当下限，所以被迫平仓也可能显示为离场。k / n 统计中心落在视图内的已判定块；点击状态可隐藏其底色。",
+  "perp.c2.title": "图 2 — 价格：新开多头、新开空头、现货主导",
+  "perp.c2.shows":
+    "同一条价格线，块为新开多头、新开空头或现货主导时加底色。块与阈值都与图 1 相同，斜线块没有判定。",
+  "perp.c2.implies":
+    "新开多头是持仓量升幅进入前四分之一，同时价格和主动买卖差都向上；新开空头则是两者都向下。现货主导是价格变动进入前四分之一而持仓量基本不变：推动价格的是现货资金，不是杠杆。",
+  "perp.c2.how":
+    "新开仓会累积日后可能被挤压强平的仓位；现货主导的行情留下的这类风险较少。没有底色的块是震荡，或属于图 1 的某个状态。",
+  "perp.c3.title": "图 3 — 价格与持仓量",
+  "perp.c3.shows":
+    "所选交易所在每块收盘时的持仓量（BTC，左轴），以及同一时点的 BTC 价格（右轴）。",
+  "perp.c3.implies":
+    "持仓量急升表示新杠杆进场；急降表示仓位在关闭，可能是主动平仓，也可能是被强平。持仓量高意味着行情反向时可被强平的仓位多，但不说明价格接下来往哪走。",
+  "perp.c3.how":
+    "把两条线放在一起看：持仓量随价格上升是多头加仓，价格下跌时上升是空头加仓，随任一方向下降都是仓位离场。图 1 和图 2 标明每块属于哪一种。",
+  "perp.c4.title": "图 4 — 主动买卖差与清算",
+  "perp.c4.shows":
+    "每块永续合约的主动买入量减主动卖出量（上半区），以及下方带状区里的清算：空头清算向上，多头清算向下。单位为 BTC。斜线格表示该块的这项数据没有采集到，因此不画。",
+  "perp.c4.implies":
+    "零线以上的高柱是主动买入强，以下是主动卖出强。清算柱高说明这一侧的仓位正被强制关闭；若旁边还有同方向的大买卖差柱，就是挤压的样子。",
+  "perp.c4.how":
+    "青色为净买入，玫红为净卖出；带状区里苔绿柱是空头清算，锈红柱是多头清算，与图 1 挤压的颜色一致。清算是交易所上报的数，只能当下限，Binance 每秒最多推送一条。留意一侧清算接连出现、同时买卖差也朝同一方向推的情形。",
 };
 
 export const messages = { en, zh };

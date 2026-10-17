@@ -1582,7 +1582,7 @@
   }
 }
 
-/* Perp states: notices, the parameters, Table 1 and its notes; the charts follow below. */
+/* Perp states: notices, the parameters, Table 1 and Charts 1–4, each with its notes. */
 .wh-perp {
   --wh-moss: #7fc98a;
   --wh-rust: #e0805c;
@@ -1801,9 +1801,183 @@
 .wh-perp .wh-perp-read p {
   margin: 0;
 }
+.wh-perp-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 6px;
+  touch-action: pan-y;
+}
+.wh-perp-grid {
+  stroke: var(--wh-edge);
+  stroke-width: 1;
+}
+.wh-perp-tick {
+  fill: var(--wh-muted);
+  font:
+    10px "JetBrains Mono",
+    monospace;
+}
+/* Squeezes are shaded stronger than unwinds; the hues match Table 1's swatches. */
+.wh-perp-band--longsq {
+  fill: var(--wh-rust);
+  fill-opacity: 0.34;
+}
+.wh-perp-band--shortsq {
+  fill: var(--wh-moss);
+  fill-opacity: 0.34;
+}
+.wh-perp-band--longun {
+  fill: var(--wh-rust);
+  fill-opacity: 0.14;
+}
+.wh-perp-band--shortun {
+  fill: var(--wh-moss);
+  fill-opacity: 0.14;
+}
+.wh-perp-band--longbd {
+  fill: var(--wh-sky);
+  fill-opacity: 0.22;
+}
+.wh-perp-band--shortbd {
+  fill: var(--wh-violet);
+  fill-opacity: 0.22;
+}
+.wh-perp-band--spot {
+  fill: var(--wh-cyan);
+  fill-opacity: 0.16;
+}
+/* Uncovered blocks are hatched grey, never shaded, so they cannot pass for chop or a state. */
+.wh-perp-hatch {
+  stroke: var(--wh-muted);
+  stroke-width: 1.2;
+  opacity: 0.5;
+}
+.wh-perp-price,
+.wh-perp-oi {
+  fill: none;
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.wh-perp-price {
+  stroke: #e5edf6;
+}
+.wh-perp-oi {
+  stroke: var(--wh-td-thirteen);
+}
+.wh-perp-liqband {
+  fill: #0c121b;
+}
+.wh-perp-bar--buy {
+  fill: var(--wh-cyan);
+  fill-opacity: 0.75;
+}
+.wh-perp-bar--sell {
+  fill: var(--wh-rose);
+  fill-opacity: 0.75;
+}
+.wh-perp-bar--short {
+  fill: var(--wh-moss);
+  fill-opacity: 0.85;
+}
+.wh-perp-bar--long {
+  fill: var(--wh-rust);
+  fill-opacity: 0.85;
+}
+.wh-perp-zero {
+  stroke: var(--wh-muted);
+  stroke-width: 1;
+  opacity: 0.45;
+}
+.wh-perp-bandlabel {
+  fill: var(--wh-muted);
+  font-size: 10px;
+}
+.wh-perp-cursor {
+  fill: color-mix(in srgb, var(--wh-cyan) 8%, transparent);
+  stroke: var(--wh-cyan);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.wh-perp-legend,
+.wh-perp .wh-perp-reading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 14px;
+  margin: 4px 0 0;
+  color: var(--wh-muted);
+  font:
+    11px/1.6 "JetBrains Mono",
+    monospace;
+}
+.wh-perp-legend b,
+.wh-perp-reading b {
+  font-weight: 500;
+  color: #e5edf6;
+  white-space: nowrap;
+}
+.wh-market .wh-perp-legend button {
+  min-height: 30px;
+  padding: 2px 8px;
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.wh-market .wh-perp-legend button:hover {
+  border-color: var(--wh-edge);
+}
+/* A hidden state keeps its count; only its shading is off. */
+.wh-market .wh-perp-legend button[aria-pressed="false"] {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.wh-perp-when {
+  color: #e5edf6;
+}
+.wh-perp-notes {
+  color: var(--wh-td-thirteen);
+}
+.wh-perp-swatch--price,
+.wh-perp-swatch--oi {
+  height: 2px;
+  vertical-align: 3px;
+}
+.wh-perp-swatch--price {
+  background: #e5edf6;
+}
+.wh-perp-swatch--oi {
+  background: var(--wh-td-thirteen);
+}
+.wh-perp-swatch--buy {
+  background: var(--wh-cyan);
+}
+.wh-perp-swatch--sell {
+  background: var(--wh-rose);
+}
+.wh-perp-swatch--short {
+  background: var(--wh-moss);
+}
+.wh-perp-swatch--long {
+  background: var(--wh-rust);
+}
+.wh-perp-swatch--uncovered {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--wh-muted) 0 1px,
+    transparent 1px 4px
+  );
+  box-shadow: inset 0 0 0 1px var(--wh-edge);
+}
 @media (max-width: 600px) {
   .wh-perp-panel {
     padding: 10px;
+  }
+  .wh-market .wh-perp-legend button {
+    min-height: 44px;
   }
   .wh-market .wh-perp-seg button {
     min-height: 44px;

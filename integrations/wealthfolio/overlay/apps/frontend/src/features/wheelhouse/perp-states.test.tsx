@@ -577,9 +577,10 @@ it("keeps three columns on a narrow screen and folds What it is into details", a
 it("keeps Table 1's three notes expanded, outside any details element, on every width", async () => {
   for (const wide of [true, false]) {
     viewport(wide);
-    const { container } = show();
+    show();
     await screen.findByText(tableTitle);
-    const headings = [...container.querySelectorAll(".wh-perp-read h4")];
+    const panel = table().closest("section")!;
+    const headings = [...panel.querySelectorAll(".wh-perp-read h4")];
     expect(headings.map((heading) => heading.textContent)).toEqual([
       "What it shows",
       "What extreme values imply",
@@ -593,6 +594,46 @@ it("keeps Table 1's three notes expanded, outside any details element, on every 
     }
     cleanup();
   }
+});
+
+const chartTitles = [
+  "Chart 1 — Price: long/short squeezes and unwinds",
+  "Chart 2 — Price: new long, new short, spot-led",
+  "Chart 3 — Price vs open interest",
+  "Chart 4 — Volume delta and liquidations",
+];
+const oiPoints = () =>
+  (
+    document
+      .querySelector('[data-chart="c3"] path.wh-perp-oi')
+      ?.getAttribute("d")
+      ?.match(/[ML]/g) ?? []
+  ).length;
+
+it("draws the four charts under Table 1 for the chosen Show", async () => {
+  show();
+  await screen.findByText(tableTitle);
+  const headings = screen
+    .getAllByRole("heading", { level: 3 })
+    .map((heading) => heading.textContent);
+  expect(headings).toEqual(["Parameters", tableTitle, ...chartTitles]);
+  expect(oiPoints()).toBe(181);
+  fireEvent.click(screen.getByRole("button", { name: "7d" }));
+  expect(oiPoints()).toBe(43);
+});
+
+it("draws only Charts 3 and 4 while collecting", async () => {
+  show({ view: perpStatesSample("collecting") });
+  await screen.findByText(chartTitles[2]);
+  expect(screen.getByText(chartTitles[3])).toBeTruthy();
+  expect(screen.queryByText(chartTitles[0])).toBeNull();
+  expect(screen.queryByText(chartTitles[1])).toBeNull();
+});
+
+it("draws no chart when the view is unavailable or the request fails", async () => {
+  show({ view: new Error("down"), cached: perpStatesSample() });
+  await screen.findByText("Perp states unavailable");
+  expect(document.querySelector("[data-chart]")).toBeNull();
 });
 
 it("has Chinese copy for every perp key, written apart from the English", () => {

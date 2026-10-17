@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getPerpStates, getPerpStatus } from "./client";
 import { useWheelhouseText, type MessageKey, type TextFn } from "./i18n";
+import { PerpCharts } from "./perp-charts";
 import type {
   PerpCollector,
   PerpState,
@@ -300,8 +301,7 @@ function StatesTable({
   );
 }
 
-// Flows → Perp states: the notices about the view, the parameters, then Table 1 (Charts 1–4
-// follow in their slot below).
+// Flows → Perp states: the notices about the view, the parameters, then Table 1 and Charts 1–4.
 export function PerpStates() {
   const { text } = useWheelhouseText();
   const [search, setSearch] = useSearchParams();
@@ -441,25 +441,27 @@ export function PerpStates() {
           {text("perp.showMissing", { days: show })}
         </p>
       );
-    // Nothing is judged while collecting, so there is no Table 1 to show.
-    else if (!data.collecting)
+    else
       body = (
-        <StatesTable
-          view={data}
-          table={table}
-          wide={wide}
-          verified={verified}
-        />
+        <>
+          {/* Nothing is judged while collecting, so there is no Table 1 to show. */}
+          {data.collecting ? null : (
+            <StatesTable
+              view={data}
+              table={table}
+              wide={wide}
+              verified={verified}
+            />
+          )}
+          <PerpCharts view={data} show={table.show_days} verified={verified} />
+        </>
       );
   }
 
   return (
     <div className="wh-perp">
       {notices}
-      <section
-        className="wh-perp-panel"
-        aria-labelledby="wh-perp-params"
-      >
+      <section className="wh-perp-panel" aria-labelledby="wh-perp-params">
         <h3 id="wh-perp-params">{text("perp.params")}</h3>
         <div className="wh-perp-choices">
           <Choice
@@ -489,8 +491,6 @@ export function PerpStates() {
         </div>
       </section>
       {body}
-      {/* Charts 1–4 (Task 7b) go here, drawn from `data` and `show`; while collecting only
-          Charts 3 and 4. */}
     </div>
   );
 }
