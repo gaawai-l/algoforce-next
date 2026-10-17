@@ -98,8 +98,9 @@ class QtyUnits(Model):
     min_qty: float | None
     min_notional: float | None
     max_notional: float | None
-    notional_in_range: bool
-    min_qty_matches: bool
+    # None while there are no events: nothing has been checked, which is not a failed check.
+    notional_in_range: bool | None
+    min_qty_matches: bool | None
 
 
 class Directions(Model):
@@ -189,8 +190,8 @@ def qty_units(events: Iterable[tuple[int, float, str, str]]) -> QtyUnits:
         min_qty=min(qtys, default=None),
         min_notional=min(notionals, default=None),
         max_notional=max(notionals, default=None),
-        notional_in_range=bool(notionals) and low <= min(notionals) and max(notionals) <= high,
-        min_qty_matches=bool(qtys) and math.isclose(min(qtys), MIN_QTY),
+        notional_in_range=low <= min(notionals) and max(notionals) <= high if sizes else None,
+        min_qty_matches=math.isclose(min(qtys), MIN_QTY) if sizes else None,
     )
 
 
@@ -290,11 +291,14 @@ class PerpsSync:
                 or (state.until is not None and state.until > at)
             }
         )
-        self._fetch(run, start, now)
-        self._record_hosts(run, hosts, clock())
-        grids = self._derive(start, clock())
-        self._check_directions(grids, start)
-        self.store.prune(now - RETENTION_DAYS * DAY, now - TRADE_IDS_SECONDS)
+        try:
+            self._fetch(run, start, now)
+            self._record_hosts(run, hosts, clock())
+            grids = self._derive(start, clock())
+            self._check_directions(grids, start)
+        finally:
+            # Retention holds even when a step above fails unexpectedly.
+            self.store.prune(now - RETENTION_DAYS * DAY, now - TRADE_IDS_SECONDS)
 
     def _fetch(self, run: _Round, start: int, now: int) -> None:
         end = now + 1  # ranges are half-open and reach now
@@ -374,7 +378,8 @@ class PerpsSync:
         """Binance OI: the history for the last HIST_DAYS days, archive files before that up to
         the boundary's day. At one stamp the history wins (the store sees to it)."""
         stored = self.store.oi("binance", 0)
-        boundary = (end - 1 - HIST_DAYS * DAY) // BAR * BAR
+        # Rounded up to a 5m stamp: a margin inside the history Binance keeps.
+        boundary = -(-(end - 1 - HIST_DAYS * DAY) // BAR) * BAR
         write = partial(self.store.upsert_oi, "binance")
         for gap in gaps(stored, start, end):
             steps: list[Callable[[], bool]] = []

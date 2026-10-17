@@ -27,6 +27,7 @@ from wheelhouse_service.perps.sync import (
     StoredStates,
     derived_key,
     next_slot,
+    qty_units,
 )
 
 BAR = 300
@@ -287,7 +288,9 @@ def test_backfill_hist_29d_then_archive(
     store: PerpsStore, rest: FakeRest, clock: Clock, monkeypatch: pytest.MonkeyPatch
 ):
     start = start_of(31)
-    boundary = (NOW_TS - 29 * DAY) // BAR * BAR
+    # Rounded up to the next 5m stamp: the history is asked for a little less than 29 days.
+    boundary = -(-(NOW_TS - 29 * DAY) // BAR) * BAR
+    assert boundary > NOW_TS - 29 * DAY
     days = [moment(start).date() + timedelta(days=n) for n in range(4)]
     assert days[-1] == moment(boundary).date()  # archive files run up to the boundary's day
     rest.absent = {days[0]}
@@ -549,3 +552,31 @@ def test_prune_keeps_120d_and_1h_trade_ids(store: PerpsStore, rest: FakeRest, cl
         assert [row[0] for row in db.execute("SELECT id FROM trade_ids")] == ["30m"]
     # Only the ids go after an hour; the 10m sums stay.
     assert len(store.trades("bybit", 0)) == 2
+
+
+def test_qty_units_unknown_without_events():
+    units = qty_units([])
+
+    # Nothing to check yet: the checks are unknown, not failed.
+    assert units.events == 0
+    assert (units.min_qty, units.min_notional, units.max_notional) == (None, None, None)
+    assert units.notional_in_range is None
+    assert units.min_qty_matches is None
+
+
+def test_prune_runs_after_a_failed_round(
+    store: PerpsStore, rest: FakeRest, clock: Clock, monkeypatch: pytest.MonkeyPatch
+):
+    old = (NOW_TS - 121 * DAY) // BAR * BAR
+    store.upsert_klines(
+        "binance", [Kline(t=old, close=1.0, volume=1.0, taker_buy=0.5, source="binance_perp")]
+    )
+
+    def broken(*_: object) -> None:
+        raise RuntimeError("derive failed")
+
+    monkeypatch.setattr("wheelhouse_service.perps.sync.build_grid", broken)
+    assert worker(store, rest, clock).run_once()
+
+    assert store.state()["last_error"] == "sync_failed"
+    assert old not in store.klines("binance", 0)
