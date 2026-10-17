@@ -9,6 +9,7 @@ from typing import Literal, NamedTuple
 from pydantic import AwareDatetime, Field
 
 from ..market import Model
+from ..rules import Rule
 from .brk import HOUR1_SERIES
 
 # Only the most recent hours count, whatever else the store holds.
@@ -73,6 +74,8 @@ class Pressure(Model):
     qc: list[QcCode] = Field(default_factory=list)
     # The newest hour with a price, kept or not: BRK is current even when that hour was dropped.
     latest_at: AwareDatetime | None = None
+    # The rules it was derived under; payloads stored before rules existed read as none.
+    rules: list[Rule] = []
 
 
 class _Row(NamedTuple):

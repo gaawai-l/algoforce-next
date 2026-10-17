@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import AwareDatetime
 
 from ..market import Model
+from ..rules import Rule
 from .costbasis import BucketCostBasis
 from .cycle import Component, CycleState, Episode
 from .levels import ModelLine
@@ -75,6 +76,10 @@ class CycleView(Model):
     # Null when there is no cycle: an absent count is not zero.
     changes: int | None
     brk_version: str | None
+    # The rules the payload was derived under, and whether they differ from the configured ones
+    # until it is derived again. Empty and false when there is no payload; likewise below.
+    rules: list[Rule]
+    rules_pending: bool
 
 
 class LevelsView(Model):
@@ -87,6 +92,8 @@ class LevelsView(Model):
     onchain_close: float | None
     lines: list[ModelLine]
     brk_version: str | None
+    rules: list[Rule]
+    rules_pending: bool
 
 
 class CostBasisView(Model):
@@ -103,6 +110,8 @@ class CostBasisView(Model):
     # Only the bucket widths whose snapshots are all stored; the reasons name the rest.
     buckets: list[BucketCostBasis]
     brk_version: str | None
+    rules: list[Rule]
+    rules_pending: bool
 
 
 class SellerPressureView(Model):
@@ -125,3 +134,5 @@ class SellerPressureView(Model):
     # The QC checks that failed; empty when they all pass or there is no data.
     qc: list[QcCode]
     brk_version: str | None
+    rules: list[Rule]
+    rules_pending: bool

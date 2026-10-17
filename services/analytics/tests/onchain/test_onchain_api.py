@@ -42,7 +42,7 @@ def synced(tmp_path: Path, *, at: datetime = NOW, **transport_options: Any) -> P
     path = tmp_path / "onchain.sqlite"
     transport, _ = brk_transport(**transport_options)
     client = BrkClient(httpx.Client(transport=transport), clock=lambda: at)
-    OnchainSync(OnchainStore(path), client).run_once(now=at)
+    OnchainSync(OnchainStore(path), client, rules=frozenset()).run_once(now=at)
     return path
 
 
@@ -50,13 +50,17 @@ def router_app(path: Path, now: datetime = NOW, *, start_worker: bool = False) -
     """Only the on-chain router, with a fixed clock and a client that cannot reach the network."""
     client, _ = blocked_client()
     app = FastAPI()
-    app.include_router(create_router(path, client, start_worker=start_worker, clock=lambda: now))
+    app.include_router(
+        create_router(path, client, rules=frozenset(), start_worker=start_worker, clock=lambda: now)
+    )
     return app
 
 
 def test_empty_store_is_unavailable_with_200(tmp_path: Path):
     client, seen = blocked_client()
-    app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client)
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
     with TestClient(app) as http:
         cycle = http.get(f"{PREFIX}/cycle")
         levels = http.get(f"{PREFIX}/levels")
@@ -92,7 +96,9 @@ def test_empty_store_is_unavailable_with_200(tmp_path: Path):
 def test_read_routes_never_touch_network(tmp_path: Path):
     synced(tmp_path)
     client, seen = blocked_client()
-    app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client)
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
     with TestClient(app) as http:
         cycle = http.get(f"{PREFIX}/cycle").json()
         levels = http.get(f"{PREFIX}/levels").json()
@@ -209,7 +215,7 @@ def test_urpd_outage_with_a_recent_snapshot_keeps_its_date(tmp_path: Path):
     later = NOW + timedelta(hours=1)
     outage, _ = brk_transport(fail_paths={"/api/urpd"})
     client = BrkClient(httpx.Client(transport=outage), clock=lambda: later)
-    OnchainSync(OnchainStore(path), client).run_once(now=later)
+    OnchainSync(OnchainStore(path), client, rules=frozenset()).run_once(now=later)
 
     with TestClient(router_app(path, later)) as http:
         cycle = http.get(f"{PREFIX}/cycle").json()
@@ -296,7 +302,9 @@ def test_day1_state_midnight_grace(now: datetime, last: date | None, expected: s
 
 def test_worker_not_started_when_disabled(tmp_path: Path):
     client, seen = blocked_client()
-    app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client)
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
     with TestClient(app):
         names = {thread.name for thread in threading.enumerate()}
 
@@ -313,7 +321,9 @@ def test_worker_runs_only_while_the_app_runs(tmp_path: Path):
 
 def test_capability_and_get_only_schema(tmp_path: Path):
     client, _ = blocked_client()
-    app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client)
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
     with TestClient(app) as http:
         capabilities = http.get("/api/wheelhouse/v1/status").json()["capabilities"]
         paths = http.get("/api/wheelhouse/v1/openapi.json").json()["paths"]
@@ -432,7 +442,9 @@ def test_forming_lasts_until_the_last_second_of_the_hour(tmp_path: Path):
 
 def test_pressure_unavailable_with_200_and_no_zero(tmp_path: Path):
     client, seen = blocked_client()
-    app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client)
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
     with TestClient(app) as http:
         response = http.get(f"{PREFIX}/seller-pressure")
     view = response.json()
@@ -749,7 +761,9 @@ def test_cost_basis_forming(
 
 def test_cost_basis_unavailable_before_sync(tmp_path: Path):
     client, seen = blocked_client()
-    app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client)
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
     with TestClient(app) as http:
         response = http.get(f"{PREFIX}/cost-basis")
 
@@ -831,7 +845,9 @@ def test_status_urpd_reasons_include_snapshot_codes(tmp_path: Path):
 def test_cost_basis_read_does_not_touch_network(tmp_path: Path):
     synced(tmp_path, urpd_dir=GOLDEN)
     client, seen = blocked_client()
-    app = create_app(tmp_path / "m.sqlite", start_worker=False, brk_client=client)
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
     with TestClient(app) as http:
         view = http.get(f"{PREFIX}/cost-basis").json()
 

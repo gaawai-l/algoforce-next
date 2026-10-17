@@ -214,6 +214,8 @@ describe("on-chain seller pressure contract", () => {
       xgap: null,
       qc: [],
       brk_version: null,
+      rules: [],
+      rules_pending: false,
     };
     const parsed = sellerPressureSchema.parse(empty);
     expect(parsed.loss_levels).toBeNull();
@@ -459,6 +461,8 @@ describe("on-chain cost basis contract", () => {
       computed_at: null,
       buckets: [],
       brk_version: null,
+      rules: [],
+      rules_pending: false,
     };
     const parsed = costBasisViewSchema.parse(empty);
     expect(parsed.buckets).toEqual([]);
@@ -478,4 +482,43 @@ describe("on-chain cost basis contract", () => {
     });
     expect(parsed.buckets[0].lth.in_profit).toBeNull();
   });
+});
+
+describe("on-chain rules label", () => {
+  const views = [
+    ["cycle", cycleViewSchema, cycleSample],
+    ["levels", levelsViewSchema, levelsSample],
+    ["cost basis", costBasisViewSchema, costBasisSample],
+    ["seller pressure", sellerPressureSchema, pressureSample()],
+  ] as const;
+
+  it.each(views)(
+    "%s carries the rules and whether they are pending",
+    (_, schema, sample) => {
+      const parsed = schema.parse({
+        ...sample,
+        rules: ["O1", "O4"],
+        rules_pending: true,
+      });
+      expect(parsed.rules).toEqual(["O1", "O4"]);
+      expect(parsed.rules_pending).toBe(true);
+      expect(schema.parse(sample).rules).toEqual([]);
+    },
+  );
+
+  it.each(views)(
+    "%s rejects an unknown rule or a missing label",
+    (_, schema, sample) => {
+      expect(schema.safeParse({ ...sample, rules: ["O7"] }).success).toBe(
+        false,
+      );
+      expect(schema.safeParse({ ...sample, rules: ["v1"] }).success).toBe(
+        false,
+      );
+      const { rules: _rules, ...noRules } = sample;
+      expect(schema.safeParse(noRules).success).toBe(false);
+      const { rules_pending: _pending, ...noPending } = sample;
+      expect(schema.safeParse(noPending).success).toBe(false);
+    },
+  );
 });

@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import AwareDatetime
 
 from ..market import Model
+from ..rules import Rule
 from .brk import Urpd
 from .levels import LineName, ModelLine
 
@@ -108,6 +109,8 @@ class StoredCostBasis(Model):
     snapshot_at: AwareDatetime
     buckets: list[BucketCostBasis]
     reasons: list[str]
+    # The rules it was derived under; payloads stored before rules existed read as none.
+    rules: list[Rule] = []
 
 
 def _total(values: Iterable[float]) -> float:

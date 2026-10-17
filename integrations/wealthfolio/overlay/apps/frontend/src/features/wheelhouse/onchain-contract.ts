@@ -10,6 +10,8 @@ export type BucketCostBasis = components["schemas"]["BucketCostBasis"];
 const time = z.string().datetime({ offset: true });
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const dataState = z.enum(["fresh", "stale", "unavailable"]);
+// The rules a view's payload was derived under; empty means the original v1 rules.
+const rules = z.array(z.enum(["O1", "O2", "O3", "O4", "O5", "O6"]));
 const cycleState = z.enum([
   "advance",
   "breakout",
@@ -47,6 +49,8 @@ export const cycleViewSchema: z.ZodType<CycleView, z.ZodTypeDef, unknown> =
     ),
     changes: z.number().int().nullable(),
     brk_version: z.string().nullable(),
+    rules,
+    rules_pending: z.boolean(),
   });
 
 const lineName = z.enum([
@@ -80,6 +84,8 @@ export const levelsViewSchema: z.ZodType<LevelsView, z.ZodTypeDef, unknown> =
       }),
     ),
     brk_version: z.string().nullable(),
+    rules,
+    rules_pending: z.boolean(),
   });
 
 const cohort = z.enum(["sth", "lth"]);
@@ -147,6 +153,8 @@ export const costBasisViewSchema: z.ZodType<
     }),
   ),
   brk_version: z.string().nullable(),
+  rules,
+  rules_pending: z.boolean(),
 });
 
 export const sellerPressureSchema: z.ZodType<
@@ -169,6 +177,8 @@ export const sellerPressureSchema: z.ZodType<
   xgap: z.number().int().nullable(),
   qc: z.array(z.enum(["hour_gap", "intraday_legs", "sth_supply"])),
   brk_version: z.string().nullable(),
+  rules,
+  rules_pending: z.boolean(),
 });
 
 // Hand-written payloads shared by contract and view tests. The cycle components and the
@@ -196,6 +206,8 @@ export const cycleSample: CycleView = {
   ],
   changes: 48,
   brk_version: "0.1.0",
+  rules: [],
+  rules_pending: false,
 };
 
 // The line prices are illustrative, not a fixture result.
@@ -215,6 +227,8 @@ export const levelsSample: LevelsView = {
     { name: "median", price: 63400.1 },
   ],
   brk_version: "0.1.0",
+  rules: [],
+  rules_pending: false,
 };
 
 // The BucketCostBasis results of `cost_basis()` on the 2026-10-16 18:29Z golden fixtures
@@ -982,6 +996,8 @@ export const costBasisSample: CostBasisView = {
   computed_at: "2026-10-16T18:30:12Z",
   buckets: [bucket200, bucket500, bucket1000],
   brk_version: "0.12.2",
+  rules: [],
+  rules_pending: false,
 };
 
 const PRESSURE_POINTS = 2200;
@@ -1047,5 +1063,7 @@ export function pressureSample(): SellerPressureView {
     xgap: 2,
     qc: [],
     brk_version: "0.1.0",
+    rules: [],
+    rules_pending: false,
   };
 }

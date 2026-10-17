@@ -6,6 +6,7 @@ from datetime import date
 from typing import Literal
 
 from ..market import Model
+from ..rules import Rule
 
 CycleState = Literal["advance", "breakout", "pressure", "repair", "breakdown", "capitulation"]
 ComponentName = Literal["depth", "pvs", "spread"]
@@ -46,6 +47,8 @@ class Cycle(Model):
     components: list[Component]
     episodes: list[Episode]
     changes: int
+    # The rules it was derived under; payloads stored before rules existed read as none.
+    rules: list[Rule] = []
 
 
 def raw_state(depth: float, pvs: float, spread: float) -> CycleState:

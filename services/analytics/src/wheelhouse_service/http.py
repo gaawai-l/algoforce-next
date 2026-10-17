@@ -45,6 +45,7 @@ from .perps.api import create_router as perps_router
 from .perps.collector import Connection
 from .portfolio.api import create_router as portfolio_router
 from .repository import Repository
+from .rules import Rules
 from .runtime import Runtime
 from .settings import Settings
 
@@ -61,9 +62,10 @@ def create_app(
     start_perps: bool | None = None,
     perps_http: httpx.Client | None = None,
     perps_connect: Callable[..., Connection] | None = None,
+    rules: Rules | None = None,
 ) -> FastAPI:
     """`start_perps` defaults to the WHEELHOUSE_PERPS setting; nothing starts without
-    `start_worker`."""
+    `start_worker`. `rules` defaults to the WHEELHOUSE_RULES setting."""
     repository: Repository | None = None
 
     def repo() -> Repository:
@@ -321,7 +323,12 @@ def create_app(
         )
     )
     app.include_router(
-        onchain_router(data_dir / "onchain.sqlite", brk_client, start_worker=start_worker)
+        onchain_router(
+            data_dir / "onchain.sqlite",
+            brk_client,
+            rules=Settings.from_env().rules if rules is None else rules,
+            start_worker=start_worker,
+        )
     )
     run_perps = start_worker and (
         Settings.from_env().perps_enabled if start_perps is None else start_perps

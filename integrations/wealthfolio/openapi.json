@@ -2233,6 +2233,25 @@
               }
             ],
             "title": "Brk Version"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
           }
         },
         "additionalProperties": false,
@@ -2247,7 +2266,9 @@
           "snapshot_at",
           "computed_at",
           "buckets",
-          "brk_version"
+          "brk_version",
+          "rules",
+          "rules_pending"
         ],
         "title": "CostBasisView"
       },
@@ -2571,6 +2592,25 @@
               }
             ],
             "title": "Brk Version"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
           }
         },
         "additionalProperties": false,
@@ -2587,7 +2627,9 @@
           "components",
           "episodes",
           "changes",
-          "brk_version"
+          "brk_version",
+          "rules",
+          "rules_pending"
         ],
         "title": "CycleView"
       },
@@ -4605,6 +4647,25 @@
               }
             ],
             "title": "Brk Version"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
           }
         },
         "additionalProperties": false,
@@ -4618,7 +4679,9 @@
           "urpd_date",
           "onchain_close",
           "lines",
-          "brk_version"
+          "brk_version",
+          "rules",
+          "rules_pending"
         ],
         "title": "LevelsView"
       },
@@ -6431,6 +6494,25 @@
               }
             ],
             "title": "Brk Version"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
           }
         },
         "additionalProperties": false,
@@ -6450,7 +6532,9 @@
           "supply_levels",
           "xgap",
           "qc",
-          "brk_version"
+          "brk_version",
+          "rules",
+          "rules_pending"
         ],
         "title": "SellerPressureView"
       },

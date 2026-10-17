@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from threading import Event, Thread
 
 from ..market import timestamp
+from ..rules import Rules, View, rules_for_view
 from .brk import DAY1_SERIES, HOUR1_BACKFILL, HOUR1_SERIES, START, BrkClient, BrkError, Index, Urpd
 from .costbasis import (
     BUCKETS,
@@ -58,6 +59,9 @@ RETRY_AFTER = timedelta(minutes=5)
 OVERLAP = 3
 IDLE_SECONDS = 30
 STOP_TIMEOUT_SECONDS = 25
+# The derived views: those from the day1 series and URPD, then the seller pressure from hour1.
+DAY1_VIEWS: tuple[View, ...] = ("cycle", "levels", "costbasis")
+VIEWS: tuple[View, ...] = (*DAY1_VIEWS, "pressure")
 
 
 def next_slot(at: datetime) -> datetime:
@@ -67,9 +71,10 @@ def next_slot(at: datetime) -> datetime:
 
 
 class OnchainSync:
-    def __init__(self, store: OnchainStore, client: BrkClient) -> None:
+    def __init__(self, store: OnchainStore, client: BrkClient, *, rules: Rules) -> None:
         self.store = store
         self.client = client
+        self.rules = rules
         self.stopping = Event()
         self.thread: Thread | None = None
 
@@ -103,6 +108,11 @@ class OnchainSync:
 
     def start(self) -> None:
         def loop() -> None:
+            try:
+                self.rederive_if_rules_changed(datetime.now(UTC))
+            except Exception:
+                # Never log the exception: it may carry values. The next refresh derives anyway.
+                logger.error("onchain_rederive_failed")
             while not self.stopping.is_set():
                 try:
                     worked = self.run_once()
@@ -119,6 +129,40 @@ class OnchainSync:
         self.stopping.set()
         if self.thread:
             self.thread.join(timeout=STOP_TIMEOUT_SECONDS)
+
+    def rederive_if_rules_changed(self, now: datetime) -> bool:
+        """Re-derive from the store when a stored payload was derived under other rules.
+
+        The next refresh is then due at `now`, so what the new rules need is fetched at once.
+        """
+        changed = any(
+            set(json.loads(derived[0]).get("rules", [])) != set(rules_for_view(view, self.rules))
+            for view in VIEWS
+            if (derived := self.store.derived(view)) is not None
+        )
+        if not changed:
+            return False
+        self.derive_from_store()
+        self.store.set_state(next_due=timestamp(now))
+        return True
+
+    def derive_from_store(self) -> None:
+        """Derive every stored view again under `self.rules`, reading only the store.
+
+        Each view keeps the time it was computed: the day1 ones the latest of theirs, the seller
+        pressure its own. A view group with nothing stored is left alone.
+        """
+        stamps = [
+            derived[1] for view in DAY1_VIEWS if (derived := self.store.derived(view)) is not None
+        ]
+        pressure = self.store.derived("pressure")
+        hour1_at = pressure[1] if pressure else None
+        hour1_missing = self._stored_hour1_missing()
+        if stamps:
+            at = max(stamps)
+            self._derive(self._recent_urpd(at), at, hour1_missing, hour1_at)
+        else:
+            self._derive_pressure(hour1_missing, hour1_at)
 
     def _refresh(self, at: datetime, clock: Callable[[], datetime]) -> BrkError | None:
         """Run one refresh; return the error of the hour1 or URPD stage when only those failed."""
@@ -293,6 +337,7 @@ class OnchainSync:
         if cycle is None:
             self.store.clear_derived("cycle")
         else:
+            cycle = cycle.model_copy(update={"rules": rules_for_view("cycle", self.rules)})
             self.store.save_derived("cycle", cycle.model_dump_json(), at)
 
         last = last_complete(rows)
@@ -307,6 +352,7 @@ class OnchainSync:
                 "urpd_date": urpd.date.isoformat() if urpd else None,
                 "onchain_close": urpd.close if urpd else None,
                 "lines": [line.model_dump() for line in lines],
+                "rules": rules_for_view("levels", self.rules),
             }
             self.store.save_derived("levels", json.dumps(levels, allow_nan=False), at)
             if urpd is None or len(lines) < len(LINE_ORDER):
@@ -322,7 +368,9 @@ class OnchainSync:
                     self.store.clear_derived("costbasis")
                 else:
                     self.store.save_derived("costbasis", payload, at)
+        self._derive_pressure(hour1_missing, hour1_at)
 
+    def _derive_pressure(self, hour1_missing: set[str], hour1_at: datetime | None) -> None:
         if hour1_at is None:
             # The stored pressure stays, with the time it was computed, until hour1 is fetched.
             return
@@ -338,6 +386,7 @@ class OnchainSync:
         if pressure is None:
             self.store.clear_derived("pressure")
         else:
+            pressure = pressure.model_copy(update={"rules": rules_for_view("pressure", self.rules)})
             self.store.save_derived("pressure", pressure.model_dump_json(), hour1_at)
 
     def _cost_basis(self, day: date, lines_as_of: date, lines: list[ModelLine]) -> StoredCostBasis:
@@ -385,6 +434,7 @@ class OnchainSync:
             snapshot_at=min(stamp for stamp in stamps if stamp is not None),
             buckets=buckets,
             reasons=reasons,
+            rules=rules_for_view("costbasis", self.rules),
         )
 
     def _fail(self, at: datetime, code: str, *, retry: bool, brk: bool) -> None:

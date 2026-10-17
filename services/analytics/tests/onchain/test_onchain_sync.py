@@ -37,7 +37,8 @@ def instant(value: str | None) -> datetime:
 
 
 def sync_for(store: OnchainStore, transport: httpx.MockTransport, now: datetime) -> OnchainSync:
-    return OnchainSync(store, BrkClient(httpx.Client(transport=transport), clock=lambda: now))
+    client = BrkClient(httpx.Client(transport=transport), clock=lambda: now)
+    return OnchainSync(store, client, rules=frozenset())
 
 
 def run(store: OnchainStore, transport: httpx.MockTransport, now: datetime) -> bool:
@@ -159,7 +160,8 @@ def test_first_run_backfills_and_derives(tmp_path: Path):
     cycle = cycle_of(store)
     assert (cycle.state, cycle.as_of) == ("breakout", date(2026, 10, 16))
     levels = levels_of(store)
-    assert set(levels) == {"as_of", "urpd_date", "onchain_close", "lines"}
+    assert set(levels) == {"as_of", "urpd_date", "onchain_close", "lines", "rules"}
+    assert levels["rules"] == []
     assert {line["name"] for line in levels["lines"]} == LINES
     assert instant(levels["as_of"]) == datetime(2026, 10, 16, tzinfo=UTC)
     assert levels["urpd_date"] == "2026-10-16"

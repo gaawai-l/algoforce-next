@@ -845,6 +845,10 @@ export interface components {
             buckets: components["schemas"]["BucketCostBasis"][];
             /** Brk Version */
             brk_version: string | null;
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
         };
         /** Cycle */
         Cycle: {
@@ -934,6 +938,10 @@ export interface components {
             changes: number | null;
             /** Brk Version */
             brk_version: string | null;
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
         };
         /** DatasetStatus */
         DatasetStatus: {
@@ -1632,6 +1640,10 @@ export interface components {
             lines: components["schemas"]["ModelLine"][];
             /** Brk Version */
             brk_version: string | null;
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
         };
         /** Lot */
         Lot: {
@@ -2241,6 +2253,10 @@ export interface components {
             qc: ("hour_gap" | "intraday_legs" | "sth_supply")[];
             /** Brk Version */
             brk_version: string | null;
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
         };
         /** ServiceStatus */
         ServiceStatus: {

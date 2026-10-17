@@ -65,6 +65,8 @@ const unavailable = (reasons: string[]): SellerPressureView => ({
   xgap: null,
   qc: [],
   brk_version: null,
+  rules: [],
+  rules_pending: false,
 });
 
 const chart = (container: HTMLElement, name: "loss" | "share" | "supply") =>

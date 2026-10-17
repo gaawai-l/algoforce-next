@@ -11,6 +11,7 @@ from fastapi import APIRouter, FastAPI
 from pydantic import AwareDatetime
 
 from ..market import Model
+from ..rules import Rule, Rules, View, rules_for_view
 from .brk import DAY1_SERIES, HOUR1_SERIES, BrkClient
 from .costbasis import StoredCostBasis
 from .cycle import Cycle
@@ -57,6 +58,8 @@ class StoredLevels(Model):
     urpd_date: date | None
     onchain_close: float | None
     lines: list[ModelLine]
+    # The rules it was derived under; payloads stored before rules existed read as none.
+    rules: list[Rule] = []
 
 
 def utc_now() -> datetime:
@@ -91,6 +94,7 @@ def create_router(
     path: Path,
     client: BrkClient | None = None,
     *,
+    rules: Rules,
     start_worker: bool = True,
     clock: Callable[[], datetime] = utc_now,
 ) -> APIRouter:
@@ -100,7 +104,7 @@ def create_router(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         nonlocal store
         store = OnchainStore(path)
-        worker = OnchainSync(store, client or BrkClient()) if start_worker else None
+        worker = OnchainSync(store, client or BrkClient(), rules=rules) if start_worker else None
         if worker:
             worker.start()
         yield
@@ -112,6 +116,10 @@ def create_router(
     def db() -> OnchainStore:
         assert store is not None, "On-chain lifespan has not started"
         return store
+
+    def pending(view: View, stored: list[Rule]) -> bool:
+        """Whether a payload was derived under other rules than the configured ones."""
+        return set(stored) != set(rules_for_view(view, rules))
 
     def stored_cycle() -> Cycle | None:
         derived = db().derived("cycle")
@@ -219,6 +227,8 @@ def create_router(
                 episodes=[],
                 changes=None,
                 brk_version=state["brk_version"],
+                rules=[],
+                rules_pending=False,
             )
         return CycleView(
             **result.model_dump(),
@@ -227,6 +237,7 @@ def create_router(
             refreshing=refreshing,
             forming_at=forming_at(day_start(result.as_of), now),
             brk_version=state["brk_version"],
+            rules_pending=pending("cycle", result.rules),
         )
 
     @router.get("/levels", response_model=LevelsView)
@@ -247,6 +258,8 @@ def create_router(
                 onchain_close=None,
                 lines=[],
                 brk_version=state["brk_version"],
+                rules=[],
+                rules_pending=False,
             )
         return LevelsView(
             **result.model_dump(),
@@ -255,6 +268,7 @@ def create_router(
             refreshing=refreshing,
             forming_at=forming_at(result.as_of, now),
             brk_version=state["brk_version"],
+            rules_pending=pending("levels", result.rules),
         )
 
     @router.get("/cost-basis", response_model=CostBasisView)
@@ -276,6 +290,8 @@ def create_router(
                 computed_at=None,
                 buckets=[],
                 brk_version=state["brk_version"],
+                rules=[],
+                rules_pending=False,
             )
         result, computed_at = stored
         # A day is still forming when the data for it was fetched before it ended.
@@ -295,6 +311,7 @@ def create_router(
             forming_at=day_start(max(forming)) if forming else None,
             computed_at=computed_at,
             brk_version=state["brk_version"],
+            rules_pending=pending("costbasis", result.rules),
         )
 
     @router.get("/seller-pressure", response_model=SellerPressureView)
@@ -321,6 +338,8 @@ def create_router(
                 xgap=None,
                 qc=[],
                 brk_version=state["brk_version"],
+                rules=[],
+                rules_pending=False,
             )
         result, computed_at = stored
         return SellerPressureView(
@@ -341,6 +360,8 @@ def create_router(
             xgap=result.xgap,
             qc=result.qc,
             brk_version=state["brk_version"],
+            rules=result.rules,
+            rules_pending=pending("pressure", result.rules),
         )
 
     return router
