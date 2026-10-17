@@ -1915,3 +1915,26 @@ def test_o5_without_the_median_clears_the_cost_basis(
             assert store.derived("costbasis") is None
     # It was never computed, so it never failed.
     assert "onchain_derive_failed" not in caplog.text
+
+
+def test_o1_with_o5_fixes_the_domain_around_f_close(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    seed_golden(store, GOLDEN_DAYS, NOW)
+    store.replace_series({W_SERIES: load_series(W_SERIES, "day1")}, "day1", NOW)
+
+    assert derive(store, frozenset({"O1", "O5"})) is False
+
+    levels = levels_of(store)
+    cost = costbasis_of(store)
+    assert (levels["rules"], cost.rules) == (["O1", "O5"], ["O1", "O5"])
+    # F is C, 10-15: its close is spot, and the domain is that close ± 50%, not D's.
+    assert (levels["urpd_date"], levels["onchain_close"]) == ("2026-10-15", 82203.57)
+    assert cost.urpd_date == C
+    assert {bucket.spot for bucket in cost.buckets} == {levels["onchain_close"]}
+    assert [(b.bucket, b.domain_low, b.domain_high) for b in cost.buckets] == [
+        (200, 41_200.0, 123_400.0),
+        (500, 41_000.0, 123_500.0),
+        (1000, 41_000.0, 123_000.0),
+    ]
+    # The 1d–1w line is C's too: the P1 fixture's 10-15 value of W.
+    assert line_prices(levels)["one_day_to_week"] == 82739.99

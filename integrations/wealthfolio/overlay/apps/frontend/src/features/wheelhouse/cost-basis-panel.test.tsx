@@ -169,11 +169,11 @@ it("explains O5's fixed price domain and names its 1d–1w line", () => {
   });
   expect(
     screen.getByText(
-      "Bands fitted within ±50% of the on-chain close; bandwidth ≈ 2% of that range; SHARE counts weight inside it; lines outside it are not candidates.",
+      "K bands and M components are fitted within ±50% of the on-chain close; KDE smoothing ≈ 2% of that range; a K band's BTC % counts only coins inside it; lines outside it are not candidates.",
     ),
   ).toBeTruthy();
   expect(phrase("zh", "costBasis.domainNote")).toBe(
-    "价带在链上收盘价 ±50% 的范围内拟合；带宽约为该范围的 2%；SHARE 只计该范围内的权重；范围外的成本线不计入候选。",
+    "K 价带与 M 成分在链上收盘价 ±50% 的范围内拟合；KDE 平滑带宽约为该范围的 2%；K 价带读数中的 BTC 占比只计该范围内的筹码；范围外的成本线不计入候选。",
   );
 });
 
@@ -184,7 +184,7 @@ it("has no price-domain note without O5", () => {
       bucket={500}
     />,
   );
-  expect(screen.queryByText(/Bands fitted within/)).toBeNull();
+  expect(screen.queryByText(/fitted within ±50%/)).toBeNull();
 });
 
 it("reads the selected bucket", () => {

@@ -507,6 +507,7 @@ class OnchainSync:
                 reasons.append(f"urpd_grid_partial:{agg}")
             result = cost_basis(today, found, bucket, lines, rules=frozenset(rules))
             if result is None:
+                # Also O5's ±50% domain without a row: unreachable with contiguous URPD buckets.
                 reasons.append(f"urpd_empty:{agg}")
             else:
                 buckets.append(result)

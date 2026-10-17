@@ -553,21 +553,30 @@ def test_o5_fixes_the_domain_to_half_the_close_either_side(bucket: Bucket) -> No
         assert all(low <= peak.price <= high for peak in clusters.peaks)
 
 
-def test_o5_domain_ignores_supply_and_leaves_lines_outside_it_out():
-    # Live rows from 1,000 to 126,000, close 60,000: v1's domain is every row, O5's [30000, 90000].
-    today = market(live(1000, 126_000), close=60_000.0)
-    given = lines({"short_term": 25_000.0, "long_term": 89_000.0, "true_mean": 91_000.0})
-    v1 = cost_basis(today, [], 500, given, rules=V1)
-    o5 = cost_basis(
-        today, [], 500, [*given, ModelLine(name="one_day_to_week", price=OFF)], rules=O5
+def test_o5_domain_keeps_rows_without_supply_and_leaves_lines_outside_it_out():
+    # Every floor from 1,000 to 126,000 is in the grid, but only 40,000-80,000 holds coins.
+    held = {
+        float(floor): 1.0 if 40_000 <= floor < 80_000 else 0.0
+        for floor in range(1000, 126_000, 500)
+    }
+    given = lines(
+        {"short_term": 25_000.0, "average": 35_000.0, "long_term": 89_000.0, "true_mean": 91_000.0}
     )
-    assert v1 is not None and o5 is not None
-    assert (v1.domain_low, v1.domain_high) == (1000.0, 126_000.0)
+    o5_given = [*given, ModelLine(name="one_day_to_week", price=OFF)]
+    v1 = cost_basis(market(held, close=60_000.0), [], 500, given, rules=V1)
+    o5 = cost_basis(market(held, close=60_000.0), [], 500, o5_given, rules=O5)
+    full = cost_basis(market(live(1000, 126_000), close=60_000.0), [], 500, o5_given, rules=O5)
+    assert v1 is not None and o5 is not None and full is not None
+
+    # v1 trims the rows without coins to two either side of the held run. O5 keeps every row
+    # within ±50% of the close, whatever it holds: the same domain as with coins everywhere.
+    assert (v1.domain_low, v1.domain_high) == (39_000.0, 81_000.0)
+    assert (o5.domain_low, o5.domain_high) == (full.domain_low, full.domain_high)
     assert (o5.domain_low, o5.domain_high) == (30_000.0, 90_000.0)
-    # Only the line inside the domain is a candidate.
+    # The lines inside O5's domain count, also where v1 trimmed it away; those outside do not.
     assert spans(o5.above) == [(88_000.0, 90_000.0, ["Long-term"])]
-    assert spans(o5.below) == []
-    assert [label(c) for band in v1.below for c in band.candidates] == ["Short-term"]
+    assert spans(o5.below) == [(34_000.0, 36_000.0, ["Average"])]
+    assert spans(v1.above) == spans(v1.below) == []
 
 
 def test_o5_without_rows_in_the_domain_returns_none():

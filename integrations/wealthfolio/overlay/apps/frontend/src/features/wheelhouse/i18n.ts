@@ -436,7 +436,7 @@ const en = {
   "costBasis.mNote":
     "M is a Gaussian component of that cohort's cost distribution; ±σ is one standard deviation. The % is from the band's midpoint.",
   "costBasis.domainNote":
-    "Bands fitted within ±50% of the on-chain close; bandwidth ≈ 2% of that range; SHARE counts weight inside it; lines outside it are not candidates.",
+    "K bands and M components are fitted within ±50% of the on-chain close; KDE smoothing ≈ 2% of that range; a K band's BTC % counts only coins inside it; lines outside it are not candidates.",
   "costBasis.layers": "Key levels layers",
   "costBasis.lines": "Cost lines",
   "costBasis.sth": "STH bands",
@@ -1077,7 +1077,7 @@ const zh: Record<MessageKey, string> = {
   "costBasis.mNote":
     "M 是该 cohort 成本分布的高斯成分，±σ 是一个标准差。百分比按价带中点计算。",
   "costBasis.domainNote":
-    "价带在链上收盘价 ±50% 的范围内拟合；带宽约为该范围的 2%；SHARE 只计该范围内的权重；范围外的成本线不计入候选。",
+    "K 价带与 M 成分在链上收盘价 ±50% 的范围内拟合；KDE 平滑带宽约为该范围的 2%；K 价带读数中的 BTC 占比只计该范围内的筹码；范围外的成本线不计入候选。",
   "costBasis.layers": "关键位图层",
   "costBasis.lines": "成本线",
   "costBasis.sth": "STH 价带",
