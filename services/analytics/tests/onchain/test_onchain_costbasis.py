@@ -12,6 +12,7 @@ from wheelhouse_service.onchain.brk import Urpd
 from wheelhouse_service.onchain.costbasis import (
     BUCKETS,
     LINE_ORDER,
+    PAST_DAYS,
     Band,
     Bucket,
     BucketCostBasis,
@@ -73,10 +74,15 @@ def golden_today(bucket: int) -> dict[str, Urpd]:
 
 
 def golden_past(bucket: int) -> list[Urpd]:
-    """The D-1, D-7, D-30 and D-90 snapshots of every cohort for one bucket width."""
+    """The D-1, D-7, D-30 and D-90 snapshots of every cohort for one bucket width.
+
+    The directory also holds the past days of D-1, which the page never read.
+    """
+    days = [(DAY - timedelta(days=n)).isoformat() for n in PAST_DAYS]
     return [
         Urpd.model_validate(_json(path.name))
         for path in sorted(GOLDEN.glob(f"urpd_*_lin{bucket}_*.json"))
+        if path.stem.rsplit("_", 1)[1] in days
     ]
 
 

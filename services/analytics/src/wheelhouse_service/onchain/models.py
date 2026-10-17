@@ -33,6 +33,11 @@ def closed_day(at: datetime) -> date:
     return (at.astimezone(UTC) - grace).date() - timedelta(days=1)
 
 
+def final_from(day: date) -> datetime:
+    """From when a URPD snapshot of `day` is final: one fetched earlier may have been forming."""
+    return datetime.combine(day + timedelta(days=1), GRACE_END, tzinfo=UTC)
+
+
 def day1_state(last: date | None, now: datetime) -> DataState:
     """Freshness of daily data whose latest row is dated `last`, judged at `now`."""
     if last is None:

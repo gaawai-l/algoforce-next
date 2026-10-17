@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 import pytest
-from onchain_fixture import EPOCH, brk_transport, load_urpd
+from onchain_fixture import EPOCH, brk_transport, golden_urpd, load_urpd, seed_golden
 
 from wheelhouse_service.onchain.brk import (
     DAY1_SERIES,
@@ -18,8 +18,10 @@ from wheelhouse_service.onchain.brk import (
     START,
     BrkClient,
 )
-from wheelhouse_service.onchain.costbasis import MIN_PRICE, PAST_DAYS, StoredCostBasis
+from wheelhouse_service.onchain.costbasis import BUCKETS, MIN_PRICE, PAST_DAYS, StoredCostBasis
 from wheelhouse_service.onchain.cycle import Cycle
+from wheelhouse_service.onchain.levels import median_cost
+from wheelhouse_service.onchain.models import closed_day
 from wheelhouse_service.onchain.pressure import Pressure
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import URPD_SET, OnchainSync
@@ -171,8 +173,17 @@ def test_first_run_backfills_and_derives(tmp_path: Path):
     cycle = cycle_of(store)
     assert (cycle.state, cycle.as_of) == ("breakout", date(2026, 10, 16))
     levels = levels_of(store)
-    assert set(levels) == {"as_of", "urpd_date", "onchain_close", "lines", "rules"}
+    assert set(levels) == {
+        "as_of",
+        "urpd_date",
+        "onchain_close",
+        "lines",
+        "rules",
+        "latest_day",
+        "latest_urpd_day",
+    }
     assert levels["rules"] == []
+    assert (levels["latest_day"], levels["latest_urpd_day"]) == ("2026-10-16", "2026-10-16")
     assert {line["name"] for line in levels["lines"]} == LINES
     assert instant(levels["as_of"]) == datetime(2026, 10, 16, tzinfo=UTC)
     assert levels["urpd_date"] == "2026-10-16"
@@ -1245,3 +1256,229 @@ def test_o1_closed_day_is_the_one_at_the_start_of_the_round(tmp_path: Path):
     derived = store.derived("cycle")
     assert derived is not None and derived[1] == done
     assert cycle_of(store).as_of == date(2026, 10, 15)
+
+
+# O1 on the levels and the cost basis. In the golden sample C, the closed day at NOW, is D - 1.
+O1: Rules = frozenset({"O1"})
+C = D - timedelta(days=1)
+# D and C, each with the past days of its grid: all nine days the golden sample has.
+GOLDEN_DAYS = sorted({D, C, *(day - timedelta(days=n) for day in (D, C) for n in PAST_DAYS)})
+
+
+def derive(store: OnchainStore, rules: Rules, at: datetime = NOW) -> bool:
+    """`_derive` at `at` from the store alone; D is the stored snapshot a refresh would reuse."""
+    sync = sync_for(store, httpx.MockTransport(lambda request: httpx.Response(503)), at, rules)
+    return sync._derive(sync._recent_urpd(at), at, set(), None, closed=closed_day(at))
+
+
+def line_prices(levels: dict[str, Any]) -> dict[str, float]:
+    return {line["name"]: line["price"] for line in levels["lines"]}
+
+
+def test_v1_levels_and_cost_basis_stay_as_in_p3(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    seed_golden(store, GOLDEN_DAYS, NOW)
+
+    assert derive(store, frozenset()) is False
+
+    levels = levels_of(store)
+    assert {key: value for key, value in levels.items() if key != "lines"} == {
+        "as_of": "2026-10-16T00:00:00+00:00",
+        "urpd_date": "2026-10-16",
+        "onchain_close": 81217.6,
+        "rules": [],
+        # Written whatever the rules; under v1 they are the days the readings are of.
+        "latest_day": "2026-10-16",
+        "latest_urpd_day": "2026-10-16",
+    }
+    assert line_prices(levels) == {
+        "true_mean": 77481.81,
+        "short_term": 74475.07,
+        "average": 53845.04,
+        "long_term": 49245.48,
+        "median": median_cost(golden_urpd("all", "lin500", D)),
+    }
+    cost = costbasis_of(store)
+    assert (cost.urpd_date, cost.lines_as_of, cost.latest_day, cost.rules) == (D, D, D, [])
+    assert cost.reasons == []
+    # Table 2 and the bands of the original page, as the cost-basis tests pin them.
+    for bucket in cost.buckets:
+        expected = json.loads((GOLDEN / f"expected-{bucket.bucket}.json").read_text())
+        assert (bucket.resistance, bucket.support) == (expected["resistance"], expected["support"])
+        for side in ("above", "below"):
+            assert [(band.low, band.high) for band in getattr(bucket, side)] == [
+                (band["low"], band["high"]) for band in expected[side]
+            ]
+    assert [bucket.bucket for bucket in cost.buckets] == list(BUCKETS)
+
+
+def test_o1_derives_from_the_closed_day_and_its_final_snapshots(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    seed_golden(store, GOLDEN_DAYS, NOW)
+    final = golden_urpd("all", "lin500", C)
+
+    assert derive(store, O1) is False
+
+    levels = levels_of(store)
+    # The lines are the closed day's; the median, the date and the close are F's, here C.
+    assert {key: value for key, value in levels.items() if key != "lines"} == {
+        "as_of": "2026-10-15T00:00:00+00:00",
+        "urpd_date": "2026-10-15",
+        "onchain_close": 82203.57,
+        "rules": ["O1"],
+        # The newest complete day and D, whatever the closed day.
+        "latest_day": "2026-10-16",
+        "latest_urpd_day": "2026-10-16",
+    }
+    assert final.close == 82203.57
+    assert line_prices(levels) == {
+        "true_mean": 77467.0,
+        "short_term": 74445.29,
+        "average": 53836.03,
+        "long_term": 49237.52,
+        "median": median_cost(final),
+    }
+    cost = costbasis_of(store)
+    assert (cost.urpd_date, cost.lines_as_of, cost.latest_day, cost.rules) == (C, C, D, ["O1"])
+    # F's own grid days, F-1 to F-90, are all stored.
+    assert cost.reasons == []
+    assert [bucket.bucket for bucket in cost.buckets] == list(BUCKETS)
+    assert {bucket.spot for bucket in cost.buckets} == {82203.57}
+    assert cost.snapshot_at == NOW
+
+
+# Table 2 of the golden sample: Resistance by bucket width, and Support, the same for every width.
+RESISTANCE = {
+    200: [86000, 88000, 96000, 104000],
+    500: [86000, 88000, 96000, 104000],
+    1000: [86000, 90000, 96000, 104000],
+}
+V1_SUPPORT = [76000, 74000, 70000, 64000]
+O1_SUPPORT = [80000, 76000, 74000, 70000]
+
+
+def test_o1_changes_table_2_of_the_golden_sample(tmp_path: Path):
+    def table_2(rules: Rules) -> tuple[set[float], dict[int, tuple[list[float], list[float]]]]:
+        store = OnchainStore(tmp_path / f"{'-'.join(sorted(rules)) or 'v1'}.sqlite")
+        seed_golden(store, GOLDEN_DAYS, NOW)
+        assert derive(store, rules) is False
+        buckets = costbasis_of(store).buckets
+        spots = {bucket.spot for bucket in buckets}
+        return spots, {bucket.bucket: (bucket.resistance, bucket.support) for bucket in buckets}
+
+    (v1_spots, v1), (o1_spots, o1) = table_2(frozenset()), table_2(O1)
+
+    assert v1 == {bucket: (RESISTANCE[bucket], V1_SUPPORT) for bucket in BUCKETS}
+    # F's clusters barely differ from D's. Its close, though, is in the band from 82000, so the
+    # band below it is now the nearest support and 64000 is no longer among the four.
+    assert (v1_spots, o1_spots) == ({81217.6}, {82203.57})
+    assert o1 == {bucket: (RESISTANCE[bucket], O1_SUPPORT) for bucket in BUCKETS}
+
+
+def test_o1_falls_back_to_the_day_before_and_then_to_no_snapshot(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    seed_golden(store, GOLDEN_DAYS, NOW)
+    before = C - timedelta(days=1)
+    with store.connection() as db:
+        db.execute(
+            "DELETE FROM urpd WHERE cohort='sth' AND agg='lin200' AND day=?", (C.isoformat(),)
+        )
+
+    # C lacks one of its nine snapshots, so F is the day before.
+    assert derive(store, O1) is False
+
+    levels = levels_of(store)
+    assert (levels["urpd_date"], levels["onchain_close"], levels["latest_urpd_day"]) == (
+        "2026-10-14",
+        golden_urpd("all", "lin500", before).close,
+        "2026-10-16",
+    )
+    assert line_prices(levels)["median"] == median_cost(golden_urpd("all", "lin500", before))
+    cost = costbasis_of(store)
+    assert (cost.urpd_date, cost.lines_as_of, cost.latest_day) == (before, C, D)
+    # The golden sample has none of F's own past days.
+    assert cost.reasons == [f"urpd_grid_partial:lin{bucket}" for bucket in BUCKETS]
+
+    # One snapshot of the day before was fetched before that day was final: neither day is.
+    store.save_urpd(golden_urpd("all", "lin500", before), datetime(2026, 10, 15, 1, 59, tzinfo=UTC))
+    assert derive(store, O1) is True
+
+    levels = levels_of(store)
+    assert set(line_prices(levels)) == LINES - {"median"}
+    assert (levels["urpd_date"], levels["onchain_close"], levels["latest_urpd_day"]) == (
+        None,
+        None,
+        "2026-10-16",
+    )
+    assert store.derived("costbasis") is None
+
+    # v1 reads D and does not ask for F.
+    assert derive(store, frozenset()) is False
+    assert levels_of(store)["urpd_date"] == "2026-10-16"
+    assert costbasis_of(store).urpd_date == D
+
+
+def test_o1_reaches_the_derived_levels_and_cost_basis(tmp_path: Path):
+    def derived(rules: Rules) -> tuple[dict[str, Any], StoredCostBasis]:
+        store = OnchainStore(tmp_path / f"{'-'.join(sorted(rules)) or 'v1'}.sqlite")
+        transport, _ = brk_transport(urpd_dir=GOLDEN)
+        assert run(store, transport, NOW, rules)
+        assert strings(store.state()["reasons"]) == []
+        return levels_of(store), costbasis_of(store)
+
+    (v1, v1_cost), (o1, o1_cost) = derived(frozenset()), derived(O1)
+
+    # The run fetched D and its past days; D - 1 among them is C, final once fetched at NOW.
+    assert (v1["rules"], v1["as_of"], v1["urpd_date"], v1["onchain_close"]) == (
+        [],
+        "2026-10-16T00:00:00+00:00",
+        "2026-10-16",
+        81217.6,
+    )
+    assert (o1["rules"], o1["as_of"], o1["urpd_date"], o1["onchain_close"]) == (
+        ["O1"],
+        "2026-10-15T00:00:00+00:00",
+        "2026-10-15",
+        82203.57,
+    )
+    assert line_prices(o1)["median"] == median_cost(golden_urpd("all", "lin500", C))
+    assert line_prices(o1)["median"] != line_prices(v1)["median"]
+    for levels in (v1, o1):
+        assert (levels["latest_day"], levels["latest_urpd_day"]) == ("2026-10-16", "2026-10-16")
+    assert (v1_cost.urpd_date, v1_cost.rules, v1_cost.reasons) == (D, [], [])
+    assert (o1_cost.urpd_date, o1_cost.lines_as_of, o1_cost.latest_day, o1_cost.rules) == (
+        C,
+        C,
+        D,
+        ["O1"],
+    )
+    # Fetching F's own past days is Task 3b's: until then its grid is partial.
+    assert o1_cost.reasons == [f"urpd_grid_partial:lin{bucket}" for bucket in BUCKETS]
+
+
+def test_o1_without_a_final_day_reports_urpd_not_final(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # C, fetched as D's past day, lacks sth lin200, and the day before C was never fetched.
+    transport, _ = brk_transport(urpd_dir=GOLDEN, urpd_missing={("sth", "lin200")})
+
+    assert run(store, transport, NOW, O1)
+
+    state = store.state()
+    assert strings(state["reasons"]) == ["urpd_not_final"]
+    assert state["last_error"] is None
+    levels = levels_of(store)
+    assert set(line_prices(levels)) == LINES - {"median"}
+    assert (levels["urpd_date"], levels["latest_urpd_day"]) == (None, "2026-10-16")
+    assert store.derived("costbasis") is None
+
+    # v1 on the same data has D, so no such reason.
+    v1 = OnchainStore(tmp_path / "v1.sqlite")
+    again, _ = brk_transport(urpd_dir=GOLDEN, urpd_missing={("sth", "lin200")})
+    assert run(v1, again, NOW)
+    assert strings(v1.state()["reasons"]) == []
+    assert bucket_widths(v1) == [500, 1000]
+
+    # Deriving that store again under O1 leaves the shared reasons to the next refresh.
+    sync_for(v1, again, NOW, O1).derive_from_store()
+    assert v1.derived("costbasis") is None
+    assert strings(v1.state()["reasons"]) == []

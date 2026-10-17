@@ -11,10 +11,13 @@ from wheelhouse_service.onchain.levels import (
     median_cost,
     model_lines,
 )
+from wheelhouse_service.rules import Rules
 
 NOON = datetime(2026, 10, 16, 12, tzinfo=UTC)
 YESTERDAY = NOON - timedelta(days=1)
 Rows = dict[str, list[tuple[datetime, float | None]]]
+V1: Rules = frozenset()
+O1: Rules = frozenset({"O1"})
 
 
 def urpd(supplies: list[float], aggregation: str = "lin500") -> Urpd:
@@ -74,7 +77,7 @@ def test_median_rejects_unsupported_aggregation():
 def test_last_complete_skips_partial_today():
     today: dict[str, float | None] = {name: 20.0 for name in LINE_SERIES.values()}
     today["realized_price"] = None
-    assert last_complete(rows(today)) == (
+    assert last_complete(rows(today), rules=V1, through=None) == (
         YESTERDAY,
         {
             "true_market_mean": 10.0,
@@ -92,7 +95,7 @@ def test_last_complete_picks_the_latest_of_several_complete_points():
         name: [(middle, 2.0 + i), (newest, 3.0 + i), (older, 1.0 + i)]
         for i, name in enumerate(LINE_SERIES.values())
     }
-    assert last_complete(complete) == (
+    assert last_complete(complete, rules=V1, through=None) == (
         newest,
         {
             "true_market_mean": 3.0,
@@ -107,17 +110,38 @@ def test_last_complete_picks_the_latest_of_several_complete_points():
 def test_last_complete_requires_every_series_positive(bad: float | None):
     today: dict[str, float | None] = {name: 20.0 for name in LINE_SERIES.values()}
     today["lth_realized_price"] = bad
-    found = last_complete(rows(today))
+    found = last_complete(rows(today), rules=V1, through=None)
     assert found is not None
     assert found[0] == YESTERDAY
 
 
 def test_last_complete_is_none_without_a_complete_point():
-    assert last_complete({name: [(NOON, None)] for name in LINE_SERIES.values()}) is None
-    assert last_complete({}) is None
+    empty: Rows = {name: [(NOON, None)] for name in LINE_SERIES.values()}
+    assert last_complete(empty, rules=V1, through=None) is None
+    assert last_complete({}, rules=V1, through=None) is None
     # One series missing from `rows` entirely.
     today: dict[str, float | None] = {name: 20.0 for name in LINE_SERIES.values()}
-    assert last_complete({k: v for k, v in rows(today).items() if k != "realized_price"}) is None
+    partial = {k: v for k, v in rows(today).items() if k != "realized_price"}
+    assert last_complete(partial, rules=V1, through=None) is None
+
+
+def test_last_complete_under_o1_reads_up_to_the_closed_day():
+    today: dict[str, float | None] = {name: 20.0 for name in LINE_SERIES.values()}
+    yesterday = {
+        "true_market_mean": 10.0,
+        "sth_realized_price": 11.0,
+        "realized_price": 12.0,
+        "lth_realized_price": 13.0,
+    }
+    closed = YESTERDAY.date()
+
+    # Today is complete, but only yesterday is closed.
+    assert last_complete(rows(today), rules=O1, through=closed) == (YESTERDAY, yesterday)
+    # Without O1 the closed day is not a limit, and without a limit O1 reads the latest point.
+    assert last_complete(rows(today), rules=V1, through=closed) == (NOON, {**today})
+    assert last_complete(rows(today), rules=O1, through=None) == (NOON, {**today})
+    # No complete point up to the closed day.
+    assert last_complete(rows(today), rules=O1, through=closed - timedelta(days=1)) is None
 
 
 def test_model_lines_without_urpd_has_four_lines():
@@ -127,7 +151,7 @@ def test_model_lines_without_urpd_has_four_lines():
         "realized_price": 2.0,
         "lth_realized_price": 1.0,
     }
-    assert model_lines(last, None) == [
+    assert model_lines(last, None, rules=V1) == [
         ModelLine(name="true_mean", price=4.0),
         ModelLine(name="short_term", price=3.0),
         ModelLine(name="average", price=2.0),
@@ -142,7 +166,7 @@ def test_model_lines_appends_median():
         "realized_price": 2.0,
         "lth_realized_price": 1.0,
     }
-    lines = model_lines(last, urpd([1.0, 2.0, 1.0]))
+    lines = model_lines(last, urpd([1.0, 2.0, 1.0]), rules=V1)
     assert lines[-1] == ModelLine(name="median", price=750.0)
     assert [line.name for line in lines[:-1]] == ["true_mean", "short_term", "average", "long_term"]
 
@@ -156,7 +180,7 @@ def test_fixture_median_is_near_page_value():
 
 def test_fixture_series_last_complete_point_is_the_last_day():
     fixture = {name: _rows(name) for name in LINE_SERIES.values()}
-    found = last_complete(fixture)
+    found = last_complete(fixture, rules=V1, through=None)
     assert found is not None
     time, values = found
     assert time == datetime(2026, 10, 16, tzinfo=UTC)

@@ -1,16 +1,22 @@
 """Replay of public BRK (bitview.space) responses captured on 2026-10-16."""
 
 import json
-from collections.abc import Set
-from datetime import date
+from collections.abc import Iterable, Set
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from wheelhouse_service.onchain.brk import Index, SeriesData, Urpd
+from wheelhouse_service.onchain.levels import LINE_SERIES
+from wheelhouse_service.onchain.store import OnchainStore
+from wheelhouse_service.onchain.sync import URPD_SET
 
 FIXTURES = Path(__file__).parent / "fixtures" / "brk-2026-10-16"
+# The cost-basis golden sample: D = 10-16 has undated files, every other day dated ones.
+GOLDEN = Path(__file__).parent / "fixtures" / "brk-2026-10-16T1829Z"
+GOLDEN_D = date(2026, 10, 16)
 # BRK positions count from 2009-01-01T00:00Z for both day1 and hour1.
 EPOCH = date(2009, 1, 1)
 # Observed on the live API: a bulk request over 320,000 weight is rejected, ~16 weight per point.
@@ -30,6 +36,23 @@ def load_series(name: str, index: Index) -> SeriesData:
 
 def load_urpd(cohort: str) -> Urpd:
     return Urpd.model_validate(_raw(f"urpd_{cohort}_lin500.json"))
+
+
+def golden_urpd(cohort: str, agg: str, day: date) -> Urpd:
+    """One snapshot of the golden sample."""
+    suffix = "" if day == GOLDEN_D else f"_{day.isoformat()}"
+    return Urpd.model_validate_json((GOLDEN / f"urpd_{cohort}_{agg}{suffix}.json").read_text())
+
+
+def seed_golden(store: OnchainStore, days: Iterable[date], fetched_at: datetime) -> None:
+    """Store the golden sample's day1 rows and the URPD_SET snapshots of `days`, all as fetched
+    at `fetched_at`. The sample has no W series, so there is no cycle."""
+    for name in (*LINE_SERIES.values(), "price_close"):
+        data = SeriesData.model_validate_json((GOLDEN / f"day1_{name}.json").read_text())
+        store.replace_series({name: data}, "day1", fetched_at)
+    for day in days:
+        for cohort, agg in URPD_SET:
+            store.save_urpd(golden_urpd(cohort, agg, day), fetched_at)
 
 
 class Calls(list[tuple[str, dict[str, str]]]):

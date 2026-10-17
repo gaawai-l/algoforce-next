@@ -42,6 +42,21 @@ HOUR1_SERIES = (
 )
 # First fill and full refetch of hour1 ask for the last N points (`start=-N`), never for `START`.
 HOUR1_BACKFILL = 3000
+URPD_COHORT = "all"
+URPD_AGG = "lin500"
+# The snapshots the cost basis needs: every cohort at every bucket width. The first one gives the
+# median line and the day D that the others are fetched for.
+URPD_SET: tuple[tuple[str, str], ...] = (
+    (URPD_COHORT, URPD_AGG),
+    ("sth", "lin500"),
+    ("lth", "lin500"),
+    ("all", "lin200"),
+    ("sth", "lin200"),
+    ("lth", "lin200"),
+    ("all", "lin1000"),
+    ("sth", "lin1000"),
+    ("lth", "lin1000"),
+)
 
 Index = Literal["day1", "hour1"]
 

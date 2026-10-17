@@ -8,12 +8,12 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from onchain_fixture import brk_transport
+from onchain_fixture import brk_transport, seed_golden
 
 from wheelhouse_service.http import create_app
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
-from wheelhouse_service.onchain.costbasis import StoredCostBasis
+from wheelhouse_service.onchain.costbasis import PAST_DAYS, StoredCostBasis
 from wheelhouse_service.onchain.models import closed_day, day1_state, hour1_state
 from wheelhouse_service.onchain.pressure import Pressure, seller_pressure
 from wheelhouse_service.onchain.store import OnchainStore
@@ -932,3 +932,108 @@ def test_cost_basis_read_does_not_touch_network(tmp_path: Path):
     assert view["urpd_date"] == "2026-10-16"
     assert len(view["buckets"]) == 3
     assert seen == []
+
+
+# O1 on the levels and the cost basis. The golden sample's D and C = D - 1, each with its grid days.
+GOLDEN_DAYS = sorted(
+    {day - timedelta(days=n) for day in (D, D - timedelta(days=1)) for n in (0, *PAST_DAYS)}
+)
+
+
+def golden_o1(path: Path, at: datetime) -> None:
+    """The golden sample stored as if fetched at `at`, and derived under O1 at `at`.
+
+    The sample has no W series, so there is no cycle: the day1 status is the levels' alone.
+    """
+    store = OnchainStore(path)
+    seed_golden(store, GOLDEN_DAYS, at)
+    client, _ = blocked_client()
+    sync = OnchainSync(store, client, rules=O1)
+    assert sync._derive(sync._recent_urpd(at), at, set(), None, closed=closed_day(at)) is False
+
+
+def o1_views(path: Path, now: datetime) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    with TestClient(router_app(path, now, rules=O1)) as http:
+        return (
+            http.get(f"{PREFIX}/levels").json(),
+            http.get(f"{PREFIX}/cost-basis").json(),
+            http.get(f"{PREFIX}/status").json(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("at", "now"),
+    [(NOW, NOW), (moment(17, 1, 12), moment(17, 1, 30))],
+    ids=["10:40", "01:30"],
+)
+def test_o1_levels_cost_basis_and_status_are_fresh(tmp_path: Path, at: datetime, now: datetime):
+    path = tmp_path / "onchain.sqlite"
+    golden_o1(path, at)
+    levels, cost, status = o1_views(path, now)
+
+    # Both read the closed day 10-15, while the data reaches 10-16.
+    assert levels["data_state"] == "fresh"
+    assert datetime.fromisoformat(levels["as_of"]) == moment(15)
+    assert (levels["urpd_date"], levels["onchain_close"]) == ("2026-10-15", 82203.57)
+    assert levels["forming_at"] is None
+    assert (levels["rules"], levels["rules_pending"]) == (["O1"], False)
+    assert cost["data_state"] == "fresh"
+    assert (cost["urpd_date"], cost["lines_as_of"]) == ("2026-10-15", "2026-10-15")
+    assert cost["forming_at"] is None
+    assert cost["reasons"] == []
+    assert (cost["rules"], cost["rules_pending"]) == (["O1"], False)
+    # How recent the data is stays inside the service.
+    assert {"latest_day", "latest_urpd_day"}.isdisjoint(levels)
+    assert "latest_day" not in cost
+    day1, urpd, _ = status["datasets"]
+    assert (day1["name"], day1["data_state"]) == ("day1", "fresh")
+    assert datetime.fromisoformat(day1["last_at"]) == moment(16)
+    assert (urpd["name"], urpd["data_state"]) == ("urpd", "fresh")
+    assert datetime.fromisoformat(urpd["last_at"]) == moment(16)
+
+
+def test_o1_payloads_without_the_newest_days_are_judged_by_their_dates(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    golden_o1(path, NOW)
+    store = OnchainStore(path)
+    # Payloads stored before the fields existed.
+    for kind, fields in (
+        ("levels", ("latest_day", "latest_urpd_day")),
+        ("costbasis", ("latest_day",)),
+    ):
+        derived = store.derived(kind)
+        assert derived is not None
+        payload = json.loads(derived[0])
+        for field in fields:
+            assert payload.pop(field) == "2026-10-16"
+        store.save_derived(kind, json.dumps(payload), derived[1])
+
+    levels, cost, status = o1_views(path, NOW)
+
+    # Only the closed day is known, and by itself that is a day old at 10:40.
+    assert (levels["data_state"], cost["data_state"]) == ("stale", "stale")
+    day1, urpd, _ = status["datasets"]
+    assert (day1["data_state"], urpd["data_state"]) == ("stale", "stale")
+    assert datetime.fromisoformat(day1["last_at"]) == moment(15)
+    assert datetime.fromisoformat(urpd["last_at"]) == moment(15)
+
+
+def test_o1_without_a_final_day_shows_urpd_not_final(tmp_path: Path):
+    path = synced(tmp_path, rules=O1, urpd_dir=GOLDEN, urpd_missing={("sth", "lin200")})
+    with TestClient(router_app(path, NOW, rules=O1)) as http:
+        levels = http.get(f"{PREFIX}/levels").json()
+        cost = http.get(f"{PREFIX}/cost-basis").json()
+        day1, urpd, hour1 = http.get(f"{PREFIX}/status").json()["datasets"]
+        cycle = http.get(f"{PREFIX}/cycle").json()
+
+    assert levels["reasons"] == ["urpd_not_final"]
+    assert {line["name"] for line in levels["lines"]} == LINES - {"median"}
+    assert (levels["urpd_date"], levels["onchain_close"]) == (None, None)
+    assert (cost["data_state"], cost["reasons"], cost["buckets"]) == (
+        "unavailable",
+        ["urpd_not_final"],
+        [],
+    )
+    # D itself is current: the snapshots are there, just not final.
+    assert (urpd["data_state"], urpd["reasons"]) == ("fresh", ["urpd_not_final"])
+    assert day1["reasons"] == hour1["reasons"] == cycle["reasons"] == []

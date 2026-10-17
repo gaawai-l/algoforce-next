@@ -121,8 +121,9 @@ def test_payloads_stored_before_rules_existed_read_as_no_rules(tmp_path: Path):
     store = OnchainStore(path)
     for name, (payload, computed_at) in stored(store).items():
         assert payload.pop("rules") == []
-        # Nor was the newest day stored then.
+        # Nor were the newest days stored then.
         payload.pop("latest_day", None)
+        payload.pop("latest_urpd_day", None)
         old = json.dumps(payload)
         store.save_derived(name, old, computed_at)
         assert PAYLOADS[name].model_validate_json(old).rules == []
@@ -130,16 +131,21 @@ def test_payloads_stored_before_rules_existed_read_as_no_rules(tmp_path: Path):
     assert cycle is not None
     assert Cycle.model_validate_json(cycle[0]).latest_day is None
 
-    # Only the cycle has rules implemented, so under every rule only it waits to be derived again.
+    # The pressure has no rule implemented, so under every rule only it is not derived again.
     views = read_views(path, ALL_RULES)
     assert labels(views) == {
         "cycle": ([], True),
-        "levels": ([], False),
-        "costbasis": ([], False),
+        "levels": ([], True),
+        "costbasis": ([], True),
         "pressure": ([], False),
     }
-    # Without the newest day, freshness follows `as_of`, the fixture's last day.
+    # Without the newest days, freshness follows the dates read, the fixture's last day.
     assert (views["cycle"]["data_state"], views["cycle"]["as_of"]) == ("fresh", "2026-10-16")
+    assert (views["levels"]["data_state"], views["levels"]["urpd_date"]) == ("fresh", "2026-10-16")
+    assert (views["costbasis"]["data_state"], views["costbasis"]["urpd_date"]) == (
+        "fresh",
+        "2026-10-16",
+    )
     assert views["cycle"]["state"] == "breakout"
     assert views["levels"]["lines"]
     assert views["costbasis"]["buckets"]
@@ -206,13 +212,15 @@ def test_a_rule_unrelated_to_a_view_does_not_make_it_pending(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setitem(rules.IMPLEMENTED, "cycle", frozenset({"O4"}))
+    monkeypatch.setitem(rules.IMPLEMENTED, "levels", frozenset())
+    monkeypatch.setitem(rules.IMPLEMENTED, "costbasis", frozenset())
     monkeypatch.setitem(rules.IMPLEMENTED, "pressure", frozenset({"O2"}))
     path = synced(tmp_path, frozenset({"O2", "O4"}))
     store = OnchainStore(path)
     due = store.state()["next_due"]
     client, seen = blocked_client()
 
-    # O1 and O5 are not implemented for any view, so turning them on changes nothing.
+    # Here O1 and O5 are implemented for no view, so turning them on changes nothing.
     wider: Rules = frozenset({"O1", "O2", "O4", "O5"})
     assert labels(read_views(path, wider)) == {
         "cycle": (["O4"], False),
@@ -375,8 +383,8 @@ def test_derive_command_rederives_a_copy_without_brk(
     copied = stored(OnchainStore(copy / "onchain.sqlite"))
     assert {name: payload["rules"] for name, (payload, _) in copied.items()} == {
         "cycle": ["O1"],
-        "levels": [],
-        "costbasis": [],
+        "levels": ["O1"],
+        "costbasis": ["O1"],
         "pressure": ["O1", "O3"],
     }
     assert {name: at for name, (_, at) in copied.items()} == {name: NOW for name in ROUTES}
@@ -386,7 +394,7 @@ def test_derive_command_rederives_a_copy_without_brk(
         name: [] for name in ROUTES
     }
     # Each view with the rules its payload recorded, not the rules asked for.
-    assert capsys.readouterr().out == "derived cycle=O1 levels=v1 costbasis=v1 pressure=O1,O3\n"
+    assert capsys.readouterr().out == "derived cycle=O1 levels=O1 costbasis=O1 pressure=O1,O3\n"
 
     # Without --rules, WHEELHOUSE_RULES decides.
     monkeypatch.setenv("WHEELHOUSE_RULES", "v1")

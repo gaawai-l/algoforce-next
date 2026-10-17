@@ -33,7 +33,7 @@ from .sync import CYCLE_SERIES, OnchainSync
 
 # `price_close` is in both indexes: the daily code stays as it was, the hourly one says `hour1`.
 DAY1_REASONS = (*(f"series_missing:{name}" for name in DAY1_SERIES), "brk_unavailable")
-URPD_REASONS = ("urpd_missing", "brk_unavailable")
+URPD_REASONS = ("urpd_missing", "urpd_not_final", "brk_unavailable")
 PRESSURE_REASONS = (*(f"series_missing:hour1:{name}" for name in HOUR1_SERIES), "brk_unavailable")
 # The most points of each series that the seller pressure view sends: the widest span on offer.
 PRESSURE_POINTS = 2160
@@ -41,11 +41,13 @@ CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unav
 LEVELS_REASONS = (
     *(f"series_missing:{name}" for name in LINE_SERIES.values()),
     "urpd_missing",
+    "urpd_not_final",
     "brk_unavailable",
 )
 # The snapshot-level codes are stored with the result, not shared: see `StoredCostBasis.reasons`.
 COST_BASIS_SHARED = (
     "urpd_missing",
+    "urpd_not_final",
     *(f"series_missing:{name}" for name in LINE_SERIES.values()),
     "brk_unavailable",
 )
@@ -60,6 +62,11 @@ class StoredLevels(Model):
     lines: list[ModelLine]
     # The rules it was derived under; payloads stored before rules existed read as none.
     rules: list[Rule] = []
+    # The newest day with every series line, and D, the newest snapshot, whatever the rules: how
+    # fresh the data is follows them, while `as_of` and `urpd_date` are the days the readings are
+    # of. Payloads stored before they existed read as None.
+    latest_day: date | None = None
+    latest_urpd_day: date | None = None
 
 
 def utc_now() -> datetime:
@@ -152,8 +159,10 @@ def create_router(
         # The newest day the data has, rather than a closed day the reading may be of.
         days = [current_cycle.latest_day or current_cycle.as_of] if current_cycle else []
         if current_levels:
-            days.append(current_levels.as_of.astimezone(UTC).date())
-        urpd_date = current_levels.urpd_date if current_levels else None
+            days.append(current_levels.latest_day or current_levels.as_of.astimezone(UTC).date())
+        urpd_date = (
+            (current_levels.latest_urpd_day or current_levels.urpd_date) if current_levels else None
+        )
 
         def dataset(
             name: Literal["day1", "urpd", "hour1"],
@@ -265,8 +274,9 @@ def create_router(
                 rules_pending=False,
             )
         return LevelsView(
-            **result.model_dump(),
-            data_state=day1_state(result.as_of.astimezone(UTC).date(), now),
+            **result.model_dump(exclude={"latest_day", "latest_urpd_day"}),
+            # Fresh while the data is, also when the reading is of an earlier, closed day.
+            data_state=day1_state(result.latest_day or result.as_of.astimezone(UTC).date(), now),
             reasons=reasons,
             refreshing=refreshing,
             forming_at=forming_at(result.as_of, now),
@@ -307,8 +317,10 @@ def create_router(
             if fetched_at < day_start(day + timedelta(days=1))
         ]
         return CostBasisView(
-            **result.model_dump(exclude={"reasons"}),
-            data_state=day1_state(min(result.urpd_date, result.lines_as_of), now),
+            **result.model_dump(exclude={"reasons", "latest_day"}),
+            data_state=day1_state(
+                result.latest_day or min(result.urpd_date, result.lines_as_of), now
+            ),
             reasons=[*reasons, *result.reasons],
             refreshing=refreshing,
             forming_at=day_start(max(forming)) if forming else None,

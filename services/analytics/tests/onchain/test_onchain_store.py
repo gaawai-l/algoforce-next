@@ -1,5 +1,5 @@
 import stat
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -7,6 +7,7 @@ from onchain_fixture import load_series, load_urpd
 
 from wheelhouse_service.onchain.brk import SeriesData
 from wheelhouse_service.onchain.store import OnchainStore
+from wheelhouse_service.onchain.sync import URPD_SET
 
 FETCHED = datetime(2026, 10, 16, 10, 0, tzinfo=UTC)
 STAMP = datetime(2026, 10, 16, 9, 0, tzinfo=UTC)
@@ -243,6 +244,39 @@ def test_prune_urpd_keeps_listed_days(tmp_path: Path):
     store.prune_urpd(set())
     with store.connection() as db:
         assert db.execute("SELECT COUNT(*) FROM urpd").fetchone()[0] == 0
+
+
+def test_final_urpd_day_needs_every_snapshot_stored_and_final(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    closed = date(2026, 10, 15)
+    before = closed - timedelta(days=1)
+    candidates = (closed, before)
+    # A snapshot is final once fetched at 02:00 on the next day or later.
+    final = {
+        day: datetime.combine(day + timedelta(days=1), time(2), tzinfo=UTC) for day in candidates
+    }
+
+    def save(day: date, fetched_at: datetime, kinds: tuple[tuple[str, str], ...] = URPD_SET):
+        for cohort, agg in kinds:
+            snapshot = load_urpd(cohort).model_copy(update={"date": day, "aggregation": agg})
+            store.save_urpd(snapshot, fetched_at)
+
+    assert store.final_urpd_day(candidates) is None
+    save(before, final[before])
+    # C lacks one of its nine snapshots, so the day before it is the first that qualifies.
+    save(closed, final[closed], URPD_SET[:-1])
+    assert store.final_urpd_day(candidates) == before
+    # Then all nine are stored, but one was fetched a second before its day was final.
+    save(closed, final[closed] - timedelta(seconds=1), URPD_SET[-1:])
+    assert store.final_urpd_day(candidates) == before
+    # With all nine final, C comes first; the order of the candidates decides.
+    save(closed, final[closed], URPD_SET[-1:])
+    assert store.final_urpd_day(candidates) == closed
+    assert store.final_urpd_day((before, closed)) == before
+    # Neither day qualifies.
+    save(before, final[before] - timedelta(seconds=1), URPD_SET[:1])
+    save(closed, final[closed] - timedelta(seconds=1), URPD_SET[4:5])
+    assert store.final_urpd_day(candidates) is None
 
 
 def test_derived_roundtrip_and_clear(tmp_path: Path):

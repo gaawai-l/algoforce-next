@@ -9,7 +9,19 @@ from threading import Event, Thread
 
 from ..market import timestamp
 from ..rules import Rules, View, rules_for_view
-from .brk import DAY1_SERIES, HOUR1_BACKFILL, HOUR1_SERIES, START, BrkClient, BrkError, Index, Urpd
+from .brk import (
+    DAY1_SERIES,
+    HOUR1_BACKFILL,
+    HOUR1_SERIES,
+    START,
+    URPD_AGG,
+    URPD_COHORT,
+    URPD_SET,
+    BrkClient,
+    BrkError,
+    Index,
+    Urpd,
+)
 from .costbasis import (
     BUCKETS,
     COHORTS,
@@ -21,7 +33,7 @@ from .costbasis import (
 )
 from .cycle import classify
 from .levels import ModelLine, last_complete, model_lines
-from .models import GRACE_END, closed_day
+from .models import closed_day, final_from
 from .pressure import LOOKBACK, seller_pressure
 from .store import OnchainStore
 
@@ -37,21 +49,6 @@ CYCLE_SERIES = (
 # Where a full fetch of each index starts. hour1 asks for its last points: from a date it would ask
 # for years of hourly data.
 BACKFILL: dict[Index, int | date] = {"day1": START, "hour1": -HOUR1_BACKFILL}
-URPD_COHORT = "all"
-URPD_AGG = "lin500"
-# The snapshots the cost basis needs: every cohort at every bucket width. The first one gives the
-# median line and the day D that the others are fetched for.
-URPD_SET: tuple[tuple[str, str], ...] = (
-    (URPD_COHORT, URPD_AGG),
-    ("sth", "lin500"),
-    ("lth", "lin500"),
-    ("all", "lin200"),
-    ("sth", "lin200"),
-    ("lth", "lin200"),
-    ("all", "lin1000"),
-    ("sth", "lin1000"),
-    ("lth", "lin1000"),
-)
 # Refreshes are due at HH:12 UTC.
 SLOT_MINUTE = 12
 RETRY_AFTER = timedelta(minutes=5)
@@ -162,6 +159,7 @@ class OnchainSync:
         hour1_missing = self._stored_hour1_missing()
         if stamps:
             at = max(stamps)
+            # The shared reasons stay as they are: the refresh due at once after this sets them.
             self._derive(self._recent_urpd(at), at, hour1_missing, hour1_at, closed=closed_day(at))
         else:
             self._derive_pressure(hour1_missing, hour1_at)
@@ -207,7 +205,7 @@ class OnchainSync:
             urpd = self._recent_urpd(at)
 
         done = clock()
-        self._derive(urpd, done, hour1_missing, hour1_done, closed=closed)
+        not_final = self._derive(urpd, done, hour1_missing, hour1_done, closed=closed)
         absent = [name for name in DAY1_SERIES if name in missing]
         absent_hour1 = [name for name in HOUR1_SERIES if name in hour1_missing]
         # `price_close` is in both indexes, so day1 reasons keep their form and hour1 ones add it.
@@ -215,6 +213,8 @@ class OnchainSync:
         reasons += [f"series_missing:hour1:{name}" for name in absent_hour1]
         if urpd is None:
             reasons.append("urpd_missing")
+        if not_final:
+            reasons.append("urpd_not_final")
         self.store.set_state(
             missing_series=json.dumps(
                 [f"day1:{name}" for name in absent] + [f"hour1:{name}" for name in absent_hour1]
@@ -298,7 +298,7 @@ class OnchainSync:
             raise
         for day in past:
             # Fetched before the day closed, plus the grace day1 rows get, it may have been forming.
-            final = datetime.combine(day + timedelta(days=1), GRACE_END, tzinfo=UTC)
+            final = final_from(day)
             for cohort, agg in URPD_SET:
                 fetched_at = self.store.urpd_fetched_at(cohort, day, agg)
                 if fetched_at is not None and fetched_at >= final:
@@ -330,10 +330,13 @@ class OnchainSync:
         hour1_at: datetime | None,
         *,
         closed: date,
-    ) -> None:
+    ) -> bool:
         """Derive every view; stamp the pressure `hour1_at`, None when the hour1 stage failed.
 
-        `closed` is the latest closed day: under O1 nothing dated after it is read.
+        `urpd` is D, the newest `all lin500` snapshot. `closed` is the latest closed day: under O1
+        nothing dated after it is read, and the levels and the cost basis use the snapshots of F,
+        the first of the closed day and the day before whose URPD_SET is all stored and final.
+        Returns True when O1 found no such day.
         """
         rows = {name: self.store.read_series(name, "day1") for name in DAY1_SERIES}
 
@@ -354,27 +357,45 @@ class OnchainSync:
             cycle = cycle.model_copy(update={"rules": cycle_rules})
             self.store.save_derived("cycle", cycle.model_dump_json(), at)
 
-        last = last_complete(rows)
-        if last is None:
+        levels_rules = rules_for_view("levels", self.rules)
+        # The snapshot the levels and the cost basis are read from: D, or F under O1.
+        snapshot = urpd
+        not_final = False
+        if "O1" in levels_rules:
+            final = self.store.final_urpd_day((closed, closed - timedelta(days=1)))
+            not_final = final is None
+            snapshot = None if final is None else self.store.urpd(URPD_COHORT, final, URPD_AGG)
+        last = last_complete(rows, rules=frozenset(levels_rules), through=closed)
+        # The newest complete point whatever the closed day: how fresh the levels are follows it.
+        latest = last_complete(rows, rules=frozenset(levels_rules), through=None)
+        if last is None or latest is None:
             self.store.clear_derived("levels")
             self.store.clear_derived("costbasis")
         else:
             as_of, values = last
-            lines = model_lines(values, urpd)
+            latest_day = latest[0].date()
+            lines = model_lines(values, snapshot, rules=frozenset(levels_rules))
             levels = {
                 "as_of": as_of.isoformat(),
-                "urpd_date": urpd.date.isoformat() if urpd else None,
-                "onchain_close": urpd.close if urpd else None,
+                "urpd_date": snapshot.date.isoformat() if snapshot else None,
+                "onchain_close": snapshot.close if snapshot else None,
                 "lines": [line.model_dump() for line in lines],
-                "rules": rules_for_view("levels", self.rules),
+                "rules": levels_rules,
+                "latest_day": latest_day.isoformat(),
+                "latest_urpd_day": urpd.date.isoformat() if urpd else None,
             }
             self.store.save_derived("levels", json.dumps(levels, allow_nan=False), at)
-            if urpd is None or len(lines) < len(LINE_ORDER):
+            if snapshot is None or len(lines) < len(LINE_ORDER):
                 # Without all five lines the bands would quietly change, so there is none.
                 self.store.clear_derived("costbasis")
             else:
                 try:
-                    payload = self._cost_basis(urpd.date, as_of.date(), lines).model_dump_json()
+                    payload = self._cost_basis(
+                        snapshot.date,
+                        as_of.date(),
+                        lines,
+                        latest_day=min(latest_day, urpd.date) if urpd else None,
+                    ).model_dump_json()
                 except Exception:
                     # The pressure and the run's state must not depend on the cost basis. Never
                     # log the exception: it may carry values. A fixed code is enough here.
@@ -383,6 +404,7 @@ class OnchainSync:
                 else:
                     self.store.save_derived("costbasis", payload, at)
         self._derive_pressure(hour1_missing, hour1_at)
+        return not_final
 
     def _derive_pressure(self, hour1_missing: set[str], hour1_at: datetime | None) -> None:
         """Derive the seller pressure and stamp it `hour1_at`.
@@ -407,7 +429,9 @@ class OnchainSync:
             pressure = pressure.model_copy(update={"rules": rules_for_view("pressure", self.rules)})
             self.store.save_derived("pressure", pressure.model_dump_json(), hour1_at)
 
-    def _cost_basis(self, day: date, lines_as_of: date, lines: list[ModelLine]) -> StoredCostBasis:
+    def _cost_basis(
+        self, day: date, lines_as_of: date, lines: list[ModelLine], *, latest_day: date | None
+    ) -> StoredCostBasis:
         """Every bucket width whose snapshots of `day` are all stored; the reasons say what is not.
 
         Only the store is read, so what was fetched in this run does not matter.
@@ -453,6 +477,7 @@ class OnchainSync:
             buckets=buckets,
             reasons=reasons,
             rules=rules_for_view("costbasis", self.rules),
+            latest_day=latest_day,
         )
 
     def _fail(self, at: datetime, code: str, *, retry: bool, brk: bool) -> None:

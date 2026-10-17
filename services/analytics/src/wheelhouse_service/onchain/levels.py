@@ -1,10 +1,11 @@
 """On-chain model cost lines and the URPD median cost."""
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from ..market import Model
+from ..rules import Rules
 from .brk import Urpd
 
 LineName = Literal["true_mean", "short_term", "average", "long_term", "median"]
@@ -27,14 +28,21 @@ class ModelLine(Model):
 
 def last_complete(
     rows: dict[str, list[tuple[datetime, float | None]]],
+    *,
+    rules: Rules,
+    through: date | None,
 ) -> tuple[datetime, dict[str, float]] | None:
     """The latest time at which every line series has a value above 0, keyed by series name.
 
     A partial point, such as today's when one series has not been published yet, is skipped.
+    O1: so is every point dated after `through`, so the lines are of a closed day.
     """
+    limit = through if "O1" in rules else None
     by_time: dict[datetime, dict[str, float]] = {}
     for name in LINE_SERIES.values():
         for time, value in rows.get(name, []):
+            if limit is not None and time.date() > limit:
+                continue
             if value is not None and value > 0:
                 by_time.setdefault(time, {})[name] = value
     complete = [time for time, values in by_time.items() if len(values) == len(LINE_SERIES)]
@@ -63,8 +71,11 @@ def median_cost(urpd: Urpd) -> float | None:
     raise AssertionError("median bucket not found")
 
 
-def model_lines(last: dict[str, float], urpd: Urpd | None) -> list[ModelLine]:
-    """The four series lines, plus the URPD median when a snapshot with supply is given."""
+def model_lines(last: dict[str, float], urpd: Urpd | None, *, rules: Rules) -> list[ModelLine]:
+    """The four series lines, plus the URPD median when a snapshot with supply is given.
+
+    No rule changes them yet: `rules` is for O5.
+    """
     lines = [ModelLine(name=name, price=last[series]) for name, series in LINE_SERIES.items()]
     if urpd is not None:
         median = median_cost(urpd)

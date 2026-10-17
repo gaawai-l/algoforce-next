@@ -3,13 +3,14 @@
 import json
 import os
 import sqlite3
-from collections.abc import Iterator, Set
+from collections.abc import Iterator, Sequence, Set
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from ..market import digest, timestamp
-from .brk import EPOCH, Index, SeriesData, Urpd
+from .brk import EPOCH, URPD_SET, Index, SeriesData, Urpd
+from .models import final_from
 
 STEP: dict[Index, timedelta] = {"day1": timedelta(days=1), "hour1": timedelta(hours=1)}
 STATE_KEYS = (
@@ -187,6 +188,24 @@ class OnchainStore:
                 (cohort, day.isoformat(), agg),
             ).fetchone()
         return None if row is None else datetime.fromisoformat(row["fetched_at"]).astimezone(UTC)
+
+    def final_urpd_day(self, candidates: Sequence[date]) -> date | None:
+        """The first of `candidates` whose URPD_SET snapshots are all stored and final."""
+        for day in candidates:
+            with self.connection() as db:
+                rows = db.execute(
+                    "SELECT cohort, agg, fetched_at FROM urpd WHERE day=?", (day.isoformat(),)
+                ).fetchall()
+            fetched = {
+                (row["cohort"], row["agg"]): datetime.fromisoformat(row["fetched_at"])
+                for row in rows
+            }
+            final = final_from(day)
+            if all(
+                (stamp := fetched.get(kind)) is not None and stamp >= final for kind in URPD_SET
+            ):
+                return day
+        return None
 
     def prune_urpd(self, keep: Set[date]) -> None:
         """Delete the snapshots of every day not in `keep`."""

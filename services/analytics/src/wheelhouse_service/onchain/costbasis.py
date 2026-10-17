@@ -111,6 +111,9 @@ class StoredCostBasis(Model):
     reasons: list[str]
     # The rules it was derived under; payloads stored before rules existed read as none.
     rules: list[Rule] = []
+    # The older of the levels' newest complete day and D, the newest snapshot, whatever the rules:
+    # how fresh the result is follows it. None without D, and in payloads stored before it existed.
+    latest_day: date | None = None
 
 
 def _total(values: Iterable[float]) -> float:
