@@ -76,8 +76,14 @@ const utcDate = (t: string | number) => new Date(t).toISOString().slice(0, 10);
 const seriesName = (text: TextFn, key: string) =>
   key in seriesKey ? text(seriesKey[key]) : key;
 
-// Reason codes from the service; anything unknown is shown as received.
-function reasonText(text: TextFn, reason: string, collectors: PerpCollector[]) {
+// Reason codes from the service; anything unknown is shown as received. `kept` says whether an
+// older view is on screen, which a failing host leaves in place.
+function reasonText(
+  text: TextFn,
+  reason: string,
+  collectors: PerpCollector[],
+  kept: boolean,
+) {
   if (reason === "not_derived") return text("perp.reason.notDerived");
   const series = /^series_missing:(.+)$/.exec(reason);
   if (series)
@@ -86,7 +92,10 @@ function reasonText(text: TextFn, reason: string, collectors: PerpCollector[]) {
     });
   const rest = /^rest_error:([^:]+):(.+)$/.exec(reason);
   if (rest)
-    return text("perp.reason.restError", { host: rest[1], code: rest[2] });
+    return text(kept ? "perp.reason.restError" : "perp.reason.restFailing", {
+      host: rest[1],
+      code: rest[2],
+    });
   const down = /^collector_down:(.+)$/.exec(reason);
   const collector = down && collectors.find((item) => item.stream === down[1]);
   if (collector) {
@@ -118,9 +127,12 @@ function qcText(text: TextFn, code: string) {
 }
 
 // A signed percent and the run's length, e.g. "−2.48% · 4h"; a state without a run reads "—".
+// The sign follows the rounded value, so a tiny fall reads 0.00%, never −0.00%.
 function maxMove(row: PerpTable["rows"][number], window: StateWindow) {
   if (row.max_move == null) return "—";
-  const percent = `${row.max_move < 0 ? "−" : "+"}${Math.abs(row.max_move).toFixed(2)}%`;
+  const rounded = Number(row.max_move.toFixed(2));
+  const sign = rounded < 0 ? "−" : rounded > 0 ? "+" : "";
+  const percent = `${sign}${Math.abs(rounded).toFixed(2)}%`;
   return row.run_blocks == null
     ? percent
     : `${percent} · ${row.run_blocks * HOURS[window]}h`;
@@ -188,18 +200,15 @@ function StatesTable({
 }) {
   const { text } = useWheelhouseText();
   const last = view.blocks.at(-1);
-  const forming = last?.forming ? last : null;
+  // Only a judged block has a state that can still change.
+  const forming = last?.forming && last.state ? last : null;
   const label = (state: PerpState) =>
     SQUEEZES.includes(state) && !verified
       ? text("perp.unverified", { state: text(stateKey[state]) })
       : text(stateKey[state]);
   const marker = text(forming ? "perp.latestForming" : "perp.latest");
   return (
-    <section
-      className="wh-perp-panel"
-      data-table="states"
-      aria-labelledby="wh-perp-table"
-    >
+    <section className="wh-perp-panel" aria-labelledby="wh-perp-table">
       <div className="wh-perp-head">
         <h3 id="wh-perp-table">{text("perp.table.title")}</h3>
         <p className="wh-perp-subtitle">
@@ -326,11 +335,11 @@ export function PerpStates() {
     );
 
   const data = states.data;
-  const reasons = (view: PerpStatesView) => {
+  const reasons = (view: PerpStatesView, kept: boolean) => {
     // The collecting banner already says how far collection is.
     const list = view.reasons
       .filter((reason) => !reason.startsWith("collecting:"))
-      .map((reason) => reasonText(text, reason, view.collectors));
+      .map((reason) => reasonText(text, reason, view.collectors, kept));
     return list.length ? (
       <p className="wh-onchain-warn">{list.join(" · ")}</p>
     ) : null;
@@ -352,7 +361,7 @@ export function PerpStates() {
     notices = (
       <>
         <p className="wh-onchain-warn">{text("perp.unavailable")}</p>
-        {reasons(data)}
+        {reasons(data, false)}
       </>
     );
   } else {
@@ -407,7 +416,7 @@ export function PerpStates() {
             })}
           </p>
         ) : null}
-        {reasons(data)}
+        {reasons(data, true)}
         {data.collecting ? (
           <p className="wh-flows-note wh-flows-note--pending">
             {text(
@@ -425,9 +434,15 @@ export function PerpStates() {
         ) : null}
       </>
     );
-    // Nothing is judged while collecting, so there is no Table 1 to show.
     const table = data.tables.find((item) => item.show_days === Number(show));
-    if (!data.collecting && table)
+    if (!table)
+      body = (
+        <p className="wh-onchain-warn">
+          {text("perp.showMissing", { days: show })}
+        </p>
+      );
+    // Nothing is judged while collecting, so there is no Table 1 to show.
+    else if (!data.collecting)
       body = (
         <StatesTable
           view={data}
@@ -442,7 +457,7 @@ export function PerpStates() {
     <div className="wh-perp">
       {notices}
       <section
-        className="wh-perp-panel wh-perp-params"
+        className="wh-perp-panel"
         aria-labelledby="wh-perp-params"
       >
         <h3 id="wh-perp-params">{text("perp.params")}</h3>

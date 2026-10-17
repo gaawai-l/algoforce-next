@@ -521,6 +521,7 @@ const en = {
     "Not derived yet: the worker has not finished its first round",
   "perp.reason.seriesMissing": "No {{series}} in the last 90 days",
   "perp.reason.restError": "{{host}} failing ({{code}}); older data kept",
+  "perp.reason.restFailing": "{{host}} failing ({{code}})",
   "perp.reason.collectorDown": "{{name}} collector down since {{time}} UTC",
   "perp.reason.collectorNever": "{{name}} collector has not connected yet",
   "perp.params": "Parameters",
@@ -530,6 +531,7 @@ const en = {
   "perp.exchange.bybit": "Bybit",
   "perp.window": "State window",
   "perp.show": "Show",
+  "perp.showMissing": "Table 1 and charts for {{days}}d are unavailable",
   "perp.table.title": "Table 1 — Perp states",
   "perp.table.subtitle":
     "{{judged}} judged of {{total}} blocks in view · share of blocks, not a forecast",
@@ -1069,6 +1071,7 @@ const zh: Record<MessageKey, string> = {
   "perp.reason.notDerived": "尚未派生：worker 还没有完成第一轮",
   "perp.reason.seriesMissing": "近 90 天没有 {{series}}",
   "perp.reason.restError": "{{host}} 请求失败（{{code}}），保留旧数据",
+  "perp.reason.restFailing": "{{host}} 请求失败（{{code}}）",
   "perp.reason.collectorDown": "{{name}} 采集器自 {{time}} UTC 起中断",
   "perp.reason.collectorNever": "{{name}} 采集器尚未连接",
   "perp.params": "参数",
@@ -1078,6 +1081,7 @@ const zh: Record<MessageKey, string> = {
   "perp.exchange.bybit": "Bybit",
   "perp.window": "状态窗口",
   "perp.show": "显示范围",
+  "perp.showMissing": "{{days}} 天的表 1 和图表不可用",
   "perp.table.title": "表 1 — 永续状态",
   "perp.table.subtitle":
     "视图内 {{total}} 块，已判定 {{judged}} 块 · 块数占比，不是预测",

@@ -221,6 +221,65 @@ it("marks no row when the latest block is uncovered, and names the downed collec
     ),
   ).toBeTruthy();
   expect(screen.queryByText(/collector_down/)).toBeNull();
+  // The forming block has no state to change, so there is no forming note.
+  expect(screen.queryByText(/still forming/)).toBeNull();
+});
+
+it("shows — for a share, move or run the payload leaves empty, never 0%", async () => {
+  const view = perpStatesSample();
+  const row = view.tables[1].rows[0];
+  view.tables[1].rows[0] = {
+    ...row,
+    share: null,
+    max_move: null,
+    run_blocks: null,
+  };
+  show({ view });
+  await screen.findByText(tableTitle);
+  expect(cellsOf(bodyRows()[0]).slice(2)).toEqual(["—", "—"]);
+  expect(screen.queryByText("0%")).toBeNull();
+});
+
+it("rounds a move before choosing its sign", async () => {
+  const view = perpStatesSample();
+  const rows = view.tables[1].rows;
+  rows[0] = { ...rows[0], max_move: -0.004, run_blocks: 1 };
+  rows[1] = { ...rows[1], max_move: -0.006, run_blocks: null };
+  show({ view });
+  await screen.findByText(tableTitle);
+  expect(cellsOf(bodyRows()[0])[3]).toBe("0.00% · 4h");
+  expect(cellsOf(bodyRows()[1])[3]).toBe("−0.01%");
+});
+
+it("says the liquidations' start is unavailable when a stream has none", async () => {
+  const view = perpStatesSample();
+  view.collectors[1] = { ...view.collectors[1], since: null };
+  show({ view });
+  expect(
+    await screen.findByText(/liquidations collected since Unavailable$/),
+  ).toBeTruthy();
+});
+
+it("says the requested Show is missing instead of drawing nothing", async () => {
+  const view = perpStatesSample();
+  view.tables = view.tables.filter((table) => table.show_days === 7);
+  show({ view });
+  expect(
+    await screen.findByText("Table 1 and charts for 30d are unavailable"),
+  ).toBeTruthy();
+  expect(screen.queryByRole("table")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "7d" }));
+  expect(await screen.findByText(tableTitle)).toBeTruthy();
+});
+
+it("refreshes the view every five minutes and the status every minute", async () => {
+  const { client } = show();
+  await screen.findByText(tableTitle);
+  const interval = (queryKey: string[]) =>
+    client.getQueryCache().find({ queryKey })?.observers[0].options
+      .refetchInterval;
+  expect(interval(["wh", "perps", "all", "4h"])).toBe(300000);
+  expect(interval(["wh", "perps", "status"])).toBe(60000);
 });
 
 it("says a collector that never connected has not connected yet", async () => {
@@ -444,11 +503,13 @@ it("shows an unavailable view with its reasons and no table", async () => {
   };
   show({ view });
   expect(await screen.findByText("Perp states unavailable")).toBeTruthy();
+  // Nothing older is shown, so the reason does not claim older data is kept.
   expect(
     screen.getByText(
-      "Not derived yet: the worker has not finished its first round · api.bybit.com failing (403); older data kept",
+      "Not derived yet: the worker has not finished its first round · api.bybit.com failing (403)",
     ),
   ).toBeTruthy();
+  expect(screen.queryByText(/older data kept/)).toBeNull();
   expect(screen.queryByRole("table")).toBeNull();
   expect(screen.queryByText(/Resolution 10m/)).toBeNull();
 });
