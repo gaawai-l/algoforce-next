@@ -32,7 +32,7 @@ python deploy/test/verify.py 'https://<test-domain>' --session-file '/absolute/p
 analytics 服务内常驻 perps 的 REST worker 和 WebSocket 采集器，由 `WHEELHOUSE_PERPS` 控制，默认开启（`0`/`false`/`off` 关闭）。
 
 - **出站网络**：需要放行到 `fstream.binance.com` 和 `stream.bybit.com` 的 WSS，以及到 `fapi.binance.com`、`data.binance.vision`、`api.bybit.com` 的 HTTPS。
-- **停机**：Compose 给 analytics 设了 `stop_grace_period: 30s`。收到 SIGTERM 后，worker 在下一个请求前放弃本轮（在途请求最长 20 秒），采集器同时关闭连接并结束覆盖区间（最长 8 秒）。
+- **停机**：Compose 给 analytics 设了 `stop_grace_period: 40s`。收到 SIGTERM 后，worker 在下一个请求前放弃本轮（在途请求最长 20 秒），采集器同时关闭连接并结束覆盖区间（最长 8 秒）；之后等待 worker 线程结束最长 25 秒。
 - **部署后检查**：用合法钱包会话（与 `verify.py --session-file` 相同）请求 `/api/wheelhouse/v1/perps/status`：
   - `collectors` 中 3 个流都是 `live: true`；
   - 各流的 `problems` 是本进程启动以来的计数（`rotated`、`stopped` 属正常生命周期，其余如 `stalled`、`half_open`、`connect_failed`、`coverage_split` 是故障或空洞），用来解释覆盖空洞；
