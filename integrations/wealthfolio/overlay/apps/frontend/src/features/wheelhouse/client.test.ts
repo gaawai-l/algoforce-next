@@ -318,6 +318,32 @@ describe("on-chain client", () => {
     ]);
   });
 
+  it("hands the caller's abort signal to both perps requests", async () => {
+    // Settles only when the signal fetch receives is aborted.
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) =>
+          init.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          ),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const states = new AbortController();
+    const status = new AbortController();
+    const pending = [
+      getPerpStates("all", "4h", states.signal),
+      getPerpStatus(status.signal),
+    ];
+    states.abort();
+    status.abort();
+    for (const request of pending)
+      await expect(request).rejects.toThrow("did not respond");
+    expect(
+      fetchMock.mock.calls.map(([, init]) => init.signal?.aborted),
+    ).toEqual([true, true]);
+  });
+
   it("rejects a perps status payload outside the contract", async () => {
     vi.stubGlobal(
       "fetch",

@@ -9,6 +9,8 @@ import {
 } from "./perps-contract";
 
 const fullSample = () => perpStatesSample();
+// Taken before any test runs, to prove no sample or variant ever writes to the import.
+const pristine = structuredClone(raw);
 
 function status(view: PerpStatesView): PerpsStatus {
   const check = {
@@ -86,8 +88,9 @@ describe("perp states contract", () => {
         perpStatesViewSchema.safeParse(perpStatesSample(variant)).success,
       ).toBe(true);
     }
-    expect(perpStatesSample("full")).toEqual(raw);
-    expect(perpStatesSample()).toEqual(raw);
+    expect(raw).toEqual(pristine);
+    expect(perpStatesSample("full")).toEqual(pristine);
+    expect(perpStatesSample()).toEqual(pristine);
     expect(raw.collecting).toBe(false);
   });
 
@@ -183,6 +186,12 @@ describe("perp states variants", () => {
       expect(table.rows.every((row) => row.run_blocks === null)).toBe(true);
     }
     expect(view.thresholds?.n_all).toBe(view.blocks.length);
+    // The streams started with the first block, so they cover what the view covers.
+    for (const collector of view.collectors) {
+      expect(collector.live).toBe(true);
+      expect(collector.covered_days).toBe(view.covered_days);
+      expect(collector.since).toBe(view.blocks[0].t0);
+    }
   });
 
   it("uncovered: blocks without coverage stay unjudged and their sums null", () => {
@@ -203,6 +212,23 @@ describe("perp states variants", () => {
     }
     expect(view.blocks.filter((block) => block.covered)).toHaveLength(179);
     expect(view.collecting).toBe(false);
+    // Every stream went down inside the forming block, after a past gap over the oldest block:
+    // 32 h before the gap and 717.5 h after it.
+    expect(view.reasons).toEqual([
+      "collector_down:binance_liq",
+      "collector_down:bybit_liq",
+      "collector_down:bybit_trades",
+    ]);
+    const formingStart = Date.parse(uncovered[1].t0);
+    for (const collector of view.collectors) {
+      expect(collector.live).toBe(false);
+      expect(collector.down_since).toBe(collector.last_proof);
+      expect(Date.parse(collector.down_since ?? "")).toBeGreaterThan(
+        formingStart,
+      );
+      expect(collector.covered_days).toBeCloseTo(749.5 / 24, 10);
+      expect(collector.since).toBe(fullSample().collectors[0].since);
+    }
     // Recounted the way the service does: the forming block was the latest.
     expect(view.thresholds?.n_liq).toBe(187);
     expect(view.covered_days).toBeCloseTo(187 / 6, 10);
@@ -226,9 +252,10 @@ describe("perp states variants", () => {
 
   it("qc: carries the service's check codes", () => {
     const view = perpStatesViewSchema.parse(perpStatesSample("qc"));
+    // The service's order: series by series (missing, then gap), then the archive.
     expect(view.qc).toEqual([
-      "missing:bybit:oi",
       "gap:binance:oi:3600",
+      "missing:bybit:oi",
       "archive_quarantined:1",
     ]);
     expect(view.collecting).toBe(false);

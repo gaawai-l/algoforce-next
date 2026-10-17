@@ -174,6 +174,8 @@ function percents(counts: number[]): number[] {
   return whole;
 }
 
+// The thresholds keep the full sample's values; they are not recomputed over the 21 blocks.
+// Nothing is judged while collecting, so they decide nothing here.
 function collecting(view: PerpStatesView): PerpStatesView {
   const blocks = view.blocks
     .slice(-COLLECTING_BLOCKS)
@@ -183,6 +185,12 @@ function collecting(view: PerpStatesView): PerpStatesView {
   return {
     ...view,
     reasons: [`collecting:${coveredDays.toFixed(1)}`],
+    // The streams started with the first block, so they cover what the view covers.
+    collectors: view.collectors.map((collector) => ({
+      ...collector,
+      covered_days: coveredDays,
+      since: blocks[0].t0,
+    })),
     thresholds: view.thresholds && {
       ...view.thresholds,
       n_liq: blocks.length,
@@ -226,6 +234,11 @@ function uncover(block: PerpBlock): PerpBlock {
   };
 }
 
+// Every stream went down inside the forming block, after a past gap over the oldest block.
+const DOWN_SINCE = "2026-10-17T09:30:00Z";
+// From the first coverage to the gap (32 h), and from the gap to DOWN_SINCE (717.5 h).
+const COVERED_DAYS_AFTER_GAP = (32 + 717.5) / 24;
+
 // The oldest block (outside both table views) and the forming latest one lose their coverage.
 // Counts and shares are redone the way the service recounts the tables; the best moves and runs
 // of the other states are unaffected.
@@ -235,6 +248,16 @@ function uncovered(view: PerpStatesView): PerpStatesView {
   const state = latest.state;
   return {
     ...view,
+    reasons: view.collectors.map(
+      (collector) => `collector_down:${collector.stream}`,
+    ),
+    collectors: view.collectors.map((collector) => ({
+      ...collector,
+      live: false,
+      last_proof: DOWN_SINCE,
+      down_since: DOWN_SINCE,
+      covered_days: COVERED_DAYS_AFTER_GAP,
+    })),
     thresholds: view.thresholds && {
       ...view.thresholds,
       n_liq: view.thresholds.n_liq - 2,
@@ -282,9 +305,10 @@ export function perpStatesSample(
     case "qc":
       return {
         ...view,
+        // The service's order: series by series (missing, then gap), then the archive.
         qc: [
-          "missing:bybit:oi",
           "gap:binance:oi:3600",
+          "missing:bybit:oi",
           "archive_quarantined:1",
         ],
       };
