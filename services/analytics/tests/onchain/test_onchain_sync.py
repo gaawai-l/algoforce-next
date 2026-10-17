@@ -1800,7 +1800,7 @@ def test_o2_reaches_the_derived_pressure(tmp_path: Path, monkeypatch: pytest.Mon
     (v1, v1_lengths), (o2, o2_lengths) = derived(frozenset()), derived(o2_rules)
 
     assert v1_lengths == [lookback(frozenset()) + 1] * len(HOUR1_SERIES) == [2601] * 11
-    assert o2_lengths == [lookback(o2_rules) + 1] * len(HOUR1_SERIES) == [2881] * 11
+    assert o2_lengths == [lookback(o2_rules) + 1] * len(HOUR1_SERIES) == [2882] * 11
     assert (v1.rules, o2.rules) == ([], ["O2"])
     assert v1.last_at == o2.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
     # Each point carries its own thresholds and level under O2 only.

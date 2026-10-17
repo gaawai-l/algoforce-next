@@ -749,8 +749,22 @@ TAIL = {395: 0.0, 396: 8_000.0, 397: 1e6, 398: 1e6, 399: 1e6}
 
 
 def test_o2_looks_back_the_widest_span_and_one_window_before_it():
-    assert lookback(O2) == lookback(frozenset({"O1", "O2", "O3"})) == 2160 + 720
+    # One more hour than the two spans: the oldest hour read only serves as the previous row.
+    assert lookback(O2) == lookback(frozenset({"O1", "O2", "O3"})) == 2160 + 720 + 1
     assert lookback(V1) == lookback(O1) == lookback(O3) == 2600
+
+
+def test_o2_oldest_shown_hour_has_a_full_window():
+    # More hours than the lookback, with values that do not repeat in a cycle.
+    rows = rows_of(columns(3000, {LTH_LOSS: lambda h: 100.0 * ((h * 7919) % 1000)}))
+    result = seller_pressure(rows, rules=O2, computed_at=LATER)
+    assert result is not None
+    oldest = result.loss[-2160]
+    # Every hour of [h - 720h, h) is a kept row.
+    assert result.loss[0].at == oldest.at - WINDOW
+    fixed = cut_before(rows, oldest.at, V1)
+    assert fixed.loss_levels.n == 720
+    assert (oldest.p95, oldest.p75) == (fixed.loss_levels.p95, fixed.loss_levels.p75)
 
 
 @pytest.mark.parametrize("rules", [V1, O1, O3, frozenset({"O1", "O3"})])

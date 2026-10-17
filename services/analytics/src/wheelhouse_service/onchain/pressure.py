@@ -146,9 +146,10 @@ class _Thresholds(NamedTuple):
 def lookback(rules: Rules) -> int:
     """How many of the most recent hours count, whatever else the store holds.
 
-    Under O2 the oldest hour on show needs its own window of hours before it.
+    Under O2 the oldest hour on show needs a full window of kept rows before it, and one hour more:
+    the oldest hour read only serves as the previous row.
     """
-    return SHOWN_HOURS + WINDOW // HOUR if "O2" in rules else V1_LOOKBACK
+    return SHOWN_HOURS + WINDOW // HOUR + 1 if "O2" in rules else V1_LOOKBACK
 
 
 def _units(dollars: float) -> int:
