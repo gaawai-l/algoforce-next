@@ -1,10 +1,19 @@
-import { cleanup, fireEvent, render, within } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  within,
+} from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 import { messages } from "./i18n";
 import { PerpCharts } from "./perp-charts";
 import { perpStatesSample, type PerpStatesView } from "./perps-contract";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 type ChartKey = "c1" | "c2" | "c3" | "c4";
 
@@ -250,11 +259,13 @@ it("reads a block from the keyboard with its imputed flags, uncovered and a zero
     ...view.blocks[n - 1],
     imputed: { dpx: true, doi: true, sums: false },
   };
+  // An uncovered block always has imputed sums: its liquidations count as 0 in the rules.
   view.blocks[n - 2] = {
     ...view.blocks[n - 2],
     liq_covered: false,
     covered: false,
     state: null,
+    imputed: { dpx: false, doi: false, sums: true },
   };
   view.thresholds = { ...view.thresholds!, s_liq: 0 };
   draw(view);
@@ -314,7 +325,7 @@ it("draws the tail short of half a block without judging it", () => {
     forming: false,
   };
   view.last = "2026-10-17T12:30:00Z";
-  view.tail = {
+  const tail = {
     t0: "2026-10-17T12:00:00Z",
     t1: "2026-10-17T12:30:00Z",
     price_close: 57010,
@@ -323,16 +334,162 @@ it("draws the tail short of half a block without judging it", () => {
     lliq_sum: 1,
     sliq_sum: 2,
   };
+  view.tail = tail;
   draw(view);
   expect(points(pathOf("c1", "price"))).toBe(182);
   expect(points(pathOf("c3", "oi"))).toBe(182);
-  expect(bars("sell")).toContain("2026-10-17T12:00:00Z");
-  expect(
-    panel("c1").querySelector('[data-t0="2026-10-17T12:00:00Z"]'),
-  ).toBeNull();
-  expect(reading("c1")).toContain("Latest · 2026-10-17 12:00 → 16:00 UTC");
+  // Its coverage is unknown, so Chart 4 leaves it out: no bar, no hatching, no reading.
+  const atTail = '[data-t0="2026-10-17T12:00:00Z"]';
+  expect(panel("c1").querySelector(atTail)).toBeNull();
+  expect(panel("c4").querySelector(atTail)).toBeNull();
+  expect(bars("sell")).not.toContain("2026-10-17T12:00:00Z");
+  // The tail ends at its last bucket, not at a whole block.
+  expect(reading("c1")).toContain("Latest · 2026-10-17 12:00 → 12:40 UTC");
   expect(reading("c1")).toContain("Block partial block, not judged");
   expect(reading("c1")).toContain("BTC/USD $57,010.0");
+  expect(reading("c3")).toContain("Open interest 159k BTC");
+  for (const name of [
+    "Volume delta",
+    "Short liquidations",
+    "Long liquidations",
+  ])
+    expect(reading("c4")).toContain(`${name} —`);
+  // Its sums stay out of the scales too: huge ones leave the axes as no sums do.
+  const ticks = (side: "left" | "right") =>
+    [...panel("c4").querySelectorAll(`.wh-perp-tick--${side}`)].map(
+      (tick) => tick.textContent,
+    );
+  cleanup();
+  view.tail = { ...tail, delta_sum: -5000, sliq_sum: 900 };
+  draw(view);
+  const withHugeTail = [ticks("left"), ticks("right")];
+  cleanup();
+  view.tail = { ...tail, delta_sum: null, sliq_sum: null, lliq_sum: null };
+  draw(view);
+  expect([ticks("left"), ticks("right")]).toEqual(withHugeTail);
+});
+
+it("draws 8h blocks twice as wide, counting and reading them by 8h", () => {
+  const view = perpStatesSample();
+  view.window = "8h";
+  // Synthetic 8h blocks: every 4h block that starts on an 8h boundary, stretched to 48 buckets;
+  // the last 18 buckets (08:00 to 10:50) are short of half an 8h block, so they are the tail.
+  const forming = view.blocks.at(-1)!;
+  view.blocks = view.blocks
+    .filter(
+      (block) =>
+        new Date(block.t0).getUTCHours() % 8 === 0 && block !== forming,
+    )
+    .map((block) => ({
+      ...block,
+      t1: new Date(Date.parse(block.t0) + 470 * 60_000).toISOString(),
+      buckets: 48,
+      forming: false,
+    }));
+  view.tail = {
+    t0: forming.t0,
+    t1: forming.t1,
+    price_close: forming.price_close,
+    oi_close: forming.oi_close,
+    delta_sum: forming.delta_sum,
+    lliq_sum: forming.lliq_sum,
+    sliq_sum: forming.sliq_sum,
+  };
+  draw(view);
+  expect(points(pathOf("c1", "price"))).toBe(91);
+  expect(bands("c1")).toHaveLength(32);
+  expect(legend("c1")[0]).toBe("Long squeeze 8 / 90");
+  const plot = panel("c1").querySelector("clipPath rect")!;
+  const band = panel("c1").querySelectorAll("rect.wh-perp-band")[1];
+  // An 8h block is 1/90 of the 30-day view.
+  expect(
+    Number(band.getAttribute("width")) / Number(plot.getAttribute("width")),
+  ).toBeCloseTo(1 / 90, 3);
+  expect(reading("c1")).toContain("Latest · 2026-10-17 08:00 → 11:00 UTC");
+  fireEvent.keyDown(svg("c1"), { key: "ArrowLeft" });
+  expect(reading("c1")).toContain("2026-10-17 00:00 → 08:00 UTC");
+});
+
+it("moves the reading with ArrowRight, End and leaving the chart", () => {
+  draw();
+  const target = svg("c2");
+  for (let k = 0; k < 3; k += 1)
+    fireEvent.keyDown(target, { key: "ArrowLeft" });
+  expect(reading("c2")).toContain("2026-10-16 20:00 → 00:00 UTC");
+  fireEvent.keyDown(target, { key: "ArrowRight" });
+  expect(reading("c2")).toContain("2026-10-17 00:00 → 04:00 UTC");
+  fireEvent.keyDown(target, { key: "End" });
+  expect(reading("c2")).toContain("Latest · 2026-10-17 08:00 → 12:00 UTC");
+  // ArrowRight stops at the latest block.
+  fireEvent.keyDown(target, { key: "ArrowRight" });
+  expect(reading("c2")).toContain("2026-10-17 08:00 → 12:00 UTC");
+  fireEvent.keyDown(target, { key: "ArrowLeft" });
+  fireEvent.blur(target);
+  expect(reading("c2")).toContain("Latest");
+});
+
+it("reads the block under the pointer, keeping it when a finger lifts", () => {
+  draw();
+  const target = svg("c1");
+  // The chart draws 720 wide in tests, with its plot from 52 to 668: 360 is half way through
+  // the 30-day view, 10-02 10:50, inside the block from 08:00.
+  target.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width: 720, height: 210 }) as DOMRect;
+  fireEvent.pointerMove(target, { clientX: 360, pointerType: "mouse" });
+  expect(reading("c1")).toContain("2026-10-02 08:00 → 12:00 UTC");
+  expect(panel("c1").querySelector("rect.wh-perp-cursor")).toBeTruthy();
+  fireEvent.pointerLeave(target, { pointerType: "touch" });
+  expect(reading("c1")).toContain("2026-10-02 08:00 → 12:00 UTC");
+  fireEvent.pointerLeave(target, { pointerType: "mouse" });
+  expect(reading("c1")).toContain("Latest");
+  expect(panel("c1").querySelector("rect.wh-perp-cursor")).toBeNull();
+  // Left of the plot reads the first block; right of it the latest.
+  fireEvent.pointerDown(target, { clientX: 0, pointerType: "touch" });
+  expect(reading("c1")).toContain("2026-09-17 08:00 → 12:00 UTC");
+  fireEvent.pointerMove(target, { clientX: 719, pointerType: "mouse" });
+  expect(reading("c1")).toContain("2026-10-17 08:00 → 12:00 UTC");
+});
+
+it("draws no delta axis when no block has a delta", () => {
+  const view = perpStatesSample();
+  view.blocks = view.blocks.map((block) => ({ ...block, delta_sum: null }));
+  draw(view);
+  expect(panel("c4").querySelector(".wh-perp-tick--left")).toBeNull();
+  expect(bars("buy").length + bars("sell").length).toBe(0);
+  expect(panel("c4").querySelector(".wh-perp-tick--right")).toBeTruthy();
+});
+
+it("follows the chart's width once it is drawn, also when it appears late", () => {
+  const observed: { el: Element; fire: (width: number) => void }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(el: Element) {
+        observed.push({
+          el,
+          fire: (width) =>
+            this.callback(
+              [{ contentRect: { width } } as ResizeObserverEntry],
+              this as unknown as ResizeObserver,
+            ),
+        });
+      }
+      disconnect() {}
+    },
+  );
+  const empty = { ...perpStatesSample(), blocks: [], tail: null };
+  const { rerender } = draw(empty);
+  expect(within(panel("c3")).getByText("No blocks in this view")).toBeTruthy();
+  expect(observed).toHaveLength(0);
+  rerender(<PerpCharts view={perpStatesSample()} show={30} verified />);
+  const c3 = observed.find((item) => item.el === svg("c3"));
+  expect(c3).toBeTruthy();
+  act(() => c3!.fire(400));
+  expect(svg("c3").getAttribute("viewBox")).toBe("0 0 400 180");
 });
 
 it("breaks the price line where a block has no price", () => {

@@ -1,9 +1,8 @@
 import {
   memo,
-  useEffect,
+  useCallback,
   useId,
   useMemo,
-  useRef,
   useState,
   type KeyboardEvent,
   type PointerEvent,
@@ -16,6 +15,7 @@ import { sigUsd, usdPrice } from "./seller-charts";
 type ChartKey = "c1" | "c2" | "c3" | "c4";
 type PriceChart = "c1" | "c2";
 
+const BUCKET = 600_000;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const BLOCK_MS: Record<PerpStatesView["window"], number> = {
@@ -32,7 +32,8 @@ const SQUEEZES: readonly PerpState[] = ["shortsq", "longsq"];
 const NONE: readonly PerpState[] = [];
 
 // One drawn block of the view; `block` is null for the tail short of half a block, which is
-// drawn but never judged.
+// drawn but never judged. The tail carries no coverage, so its delta and liquidations are left
+// out: a partly collected sum would read as a whole one.
 interface Item {
   at: string;
   t0: number;
@@ -82,9 +83,9 @@ function itemsOf(view: PerpStatesView, from: number, size: number): Item[] {
       block: null,
       price: tail.price_close,
       oi: tail.oi_close,
-      delta: tail.delta_sum,
-      sliq: tail.sliq_sum,
-      lliq: tail.lliq_sum,
+      delta: null,
+      sliq: null,
+      lliq: null,
     });
   return items.filter((item) => item.t0 + size > from);
 }
@@ -156,8 +157,10 @@ function linear(values: number[], top: number, height: number) {
 }
 
 // Symmetric about zero: `mid` is where zero sits and `half` the height up to the largest value.
+// Without values there is no scale, so no axis is drawn.
 function symmetric(values: number[], mid: number, half: number) {
-  const max = Math.max(0, ...values.map(Math.abs)) || 1;
+  if (!values.length) return null;
+  const max = Math.max(...values.map(Math.abs)) || 1;
   return { max, y: (v: number) => mid - (v / max) * half };
 }
 
@@ -354,14 +357,14 @@ const Layer = memo(function Layer({
     const liq = symmetric(
       items
         .filter(liqShown)
-        .flatMap((item) => [item.sliq ?? 0, item.lliq ?? 0]),
+        .flatMap((item) => [item.sliq, item.lliq])
+        .filter(isNumber),
       bandTop + bandH / 2,
       bandH / 2,
     );
-    // Bars sit on the block's nominal centre (the last bucket for the tail), 85% of a block wide.
+    // Bars sit on the block's nominal centre, 85% of a block wide.
     const barW = Math.max(1, (size / f.span) * f.plotW * 0.85);
-    const barX = (item: Item) =>
-      round(f.x(Math.min(item.t0 + size / 2, last)) - barW / 2);
+    const barX = (item: Item) => round(f.x(item.t0 + size / 2) - barW / 2);
     const bar = (item: Item, kind: string, y0: number, y1: number) => (
       <rect
         key={`${kind}${item.at}`}
@@ -399,7 +402,7 @@ const Layer = memo(function Layer({
     for (const item of items) {
       if (!deltaShown(item))
         clipped.push(missing(item, "delta", f.top, deltaH));
-      else if (item.delta)
+      else if (delta && item.delta)
         clipped.push(
           bar(
             item,
@@ -409,7 +412,7 @@ const Layer = memo(function Layer({
           ),
         );
       if (!liqShown(item)) clipped.push(missing(item, "liq", bandTop, bandH));
-      else {
+      else if (liq) {
         // Short liquidations are forced buying, drawn up; long ones forced selling, drawn down.
         if (item.sliq)
           clipped.push(bar(item, "short", liq.y(0), liq.y(item.sliq)));
@@ -417,7 +420,9 @@ const Layer = memo(function Layer({
           clipped.push(bar(item, "long", liq.y(0), liq.y(-item.lliq)));
       }
     }
-    for (const y of [delta.y(0), liq.y(0)])
+    for (const scale of [delta, liq]) {
+      if (!scale) continue;
+      const y = scale.y(0);
       lines.push(
         <line
           key={`zero${y}`}
@@ -428,6 +433,7 @@ const Layer = memo(function Layer({
           y2={round(y)}
         />,
       );
+    }
     lines.push(
       <text
         key="band-label"
@@ -438,12 +444,16 @@ const Layer = memo(function Layer({
         {bandLabel}
       </text>,
     );
-    axes.push(axis("left", niceTicks(-delta.max, delta.max, 4), delta.y, tick));
-    axes.push(
-      axis("right", niceTicks(-liq.max, liq.max, 3), liq.y, (v) =>
-        tick(Math.abs(v)),
-      ),
-    );
+    if (delta)
+      axes.push(
+        axis("left", niceTicks(-delta.max, delta.max, 4), delta.y, tick),
+      );
+    if (liq)
+      axes.push(
+        axis("right", niceTicks(-liq.max, liq.max, 3), liq.y, (v) =>
+          tick(Math.abs(v)),
+        ),
+      );
   }
 
   return (
@@ -485,11 +495,10 @@ const Layer = memo(function Layer({
   );
 });
 
+// Observes the svg whenever it mounts, also when it appears after a "no blocks" message.
 function useChartWidth() {
-  const ref = useRef<SVGSVGElement>(null);
   const [width, setWidth] = useState(720);
-  useEffect(() => {
-    const el = ref.current;
+  const ref = useCallback((el: SVGSVGElement | null) => {
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       const next = entries[0]?.contentRect.width;
@@ -565,8 +574,9 @@ function Panel({
     show(next[event.key]);
   };
   const title = text(`perp.${chart}.title`);
+  // A block spans its full length; the tail ends with its last bucket.
   const span = item
-    ? `${utcMinute(item.t0)} → ${utcClock(item.t0 + size)}`
+    ? `${utcMinute(item.t0)} → ${utcClock(item.block ? item.t0 + size : item.t1 + BUCKET)}`
     : "";
   const reading = item ? read(item) : null;
 

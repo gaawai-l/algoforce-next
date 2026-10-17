@@ -596,32 +596,32 @@ const en = {
   "perp.chart.noData": "No blocks in this view",
   "perp.c1.title": "Chart 1 — Price: long/short squeezes and unwinds",
   "perp.c1.shows":
-    "The BTC price at each block's close, with the block shaded when it was a squeeze or an unwind: rust for the long side, moss for the short side, squeezes stronger than unwinds. Hatched blocks were not judged because liquidations or Bybit trades were not collected for all of them.",
+    "One point per 4h or 8h block: the BTC price where the block closed. Blocks the rules called a squeeze or an unwind are tinted top to bottom, rust when longs were the ones leaving and moss when shorts were, with squeezes in the deeper tint. Grey hatching marks blocks left unjudged because liquidation or Bybit trade collection had gaps.",
   "perp.c1.implies":
-    "A squeeze is a forced exit: one side's liquidations in the top 10% of covered blocks and at least three times the other side's, with price moving at least its 75th-percentile amount the same way. An unwind is open interest falling by a top-quarter amount without that pressure, positions closed by choice. Squeezes back to back mark a violent, forced move.",
+    "Every label is a test against the 90-day distribution. A squeeze needs three things at once: one side's liquidations at or above its 90th percentile among covered blocks, at least triple the other side's, and a price move of at least the 75th-percentile size in the direction those forced orders push. An unwind only needs open interest to drop by at least its 75th-percentile amount; taker delta then says whether longs (net selling) or shorts (net buying) were the ones closing. Squeezes clustered together mean forced exits were driving that stretch.",
   "perp.c1.how":
-    "Compare blocks within one view: each label is ranked against the last 90 days, so it is relative, not absolute. Liquidations are a lower bound, so a forced exit can read as an unwind. k / n counts the judged blocks centred in view; click a state to hide its shading.",
+    "The thresholds are recomputed as the 90-day window rolls and include blocks that came later, so an old label can flip and the tints are not a backtest. Exchanges under-report liquidations, so some forced exits fall short of the squeeze test and show up as unwinds. In the legend, k / n is how many of the n judged blocks centred in view carry that state; clicking an entry switches its tint off.",
   "perp.c2.title": "Chart 2 — Price: new long, new short, spot-led",
   "perp.c2.shows":
-    "The same price line, shaded where a block was a new long build, a new short build or spot-led. The blocks and thresholds are Chart 1's, and hatched blocks were not judged.",
+    "Chart 1's block-close price line again, this time tinted for new long builds (sky), new short builds (violet) and spot-led blocks (cyan). Blocks, thresholds and the grey hatching for unjudged blocks are the same as in Chart 1.",
   "perp.c2.implies":
-    "A new long build is open interest rising by a top-quarter amount while price and taker flow both rise; a new short build is the same with both falling. Spot-led is a top-quarter price move with open interest roughly unchanged: cash moved price, not leverage.",
+    "Builds are leverage arriving: open interest climbs by at least its 75th-percentile amount while price and taker delta agree on direction, both up for a long build and both down for a short one. When open interest climbs but the two disagree, the block stays chop. Spot-led is the opposite case: price moves by at least its 75th-percentile size while open interest changes by less than its own threshold, so new perpetual positions did not do the pushing.",
   "perp.c2.how":
-    "Builds add positions that a later squeeze can force out; spot-led moves leave less of that behind. An unshaded block is chop or one of Chart 1's states.",
+    "Treat builds as stored-up risk: the positions they add are what a later squeeze closes out, and a spot-led rally or drop leaves far less of that behind. A block without a tint here may be chop or may carry one of Chart 1's states, so look at both charts before calling a stretch quiet.",
   "perp.c3.title": "Chart 3 — Price vs open interest",
   "perp.c3.shows":
-    "Open interest on the selected venues, in BTC, at each block's close (left axis), and the BTC price at the same points (right axis).",
+    "Two lines sampled at each block's last bucket: open interest on the venues picked under Exchange, counted in BTC on the left axis, and the BTC spot price on the right axis.",
   "perp.c3.implies":
-    "A sharp rise in open interest is new leverage arriving; a sharp fall is positions closing, by choice or by force. A high level means more positions a move can force out, not which way price goes next.",
+    "Open interest counts contracts not yet closed, so its slope tells whether leverage is being added or taken off. A steep climb is fresh exposure; a steep drop is exposure going away, whether traders closed it or the exchange liquidated it. A high reading sizes what an adverse move could force out but says nothing about which way that move will go.",
   "perp.c3.how":
-    "Read the lines together: open interest rising with price is longs adding, rising as price falls is shorts adding, and falling with either is positions leaving. Charts 1 and 2 name which of these each block was.",
+    "Pair the slopes. Both climbing points to longs opening; open interest climbing into a falling price points to shorts opening; open interest sliding, whatever price does, points to positions being closed. Charts 1 and 2 turn these pairings into one label per block, using the thresholds instead of eyeballed slopes.",
   "perp.c4.title": "Chart 4 — Volume delta and liquidations",
   "perp.c4.shows":
-    "For each block, taker buy minus taker sell volume on the perpetuals (upper panel) and, in the band beneath, short liquidations drawn up and long liquidations drawn down. Unit: BTC. A hatched slot means that input was not collected for the block, so nothing is drawn there.",
+    "Two panels on one time axis with one bar per block. On top, net taker volume on the perpetuals: taker buys minus taker sells. In the shaded band below, liquidated shorts rise from the line and liquidated longs hang under it. Everything is in BTC. A slot with grey hatching and no bar means that input was not collected for the block.",
   "perp.c4.implies":
-    "Tall bars above zero are aggressive buying, below zero aggressive selling. A tall liquidation bar means that side was being closed out for it; one beside a large delta bar pushing the same way is what a squeeze looks like.",
+    "Delta shows who crossed the spread: a tall positive bar means buyers paid up, a tall negative one means sellers hit the bids. The band shows forced exits by side. In a squeeze the two panels agree: one side's liquidations spike while delta leans hard in the direction those forced orders push, for example many shorts liquidated during strong net buying.",
   "perp.c4.how":
-    "Cyan is net buying and rose net selling; in the band, moss bars are short liquidations and rust bars long ones, the colours of Chart 1's squeezes. Liquidations are what the exchanges report, a lower bound, and Binance sends at most one per second. Watch for one side's liquidations repeating while delta pushes the same way.",
+    "Colours: cyan for net buying, pink for net selling, and in the liquidation band moss for shorts and rust for longs, the hues Chart 1 uses for squeezes. Reported liquidations are a lower bound, and Binance publishes at most one per second, so some forced exits never show. When one side keeps getting liquidated block after block while delta keeps leaning its way, forced orders are feeding the move.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1199,32 +1199,32 @@ const zh: Record<MessageKey, string> = {
   "perp.chart.noData": "视图内没有块",
   "perp.c1.title": "图 1 — 价格：多空挤压与离场",
   "perp.c1.shows":
-    "每块收盘时的 BTC 价格；块为挤压或离场时加底色：锈红为多头一侧，苔绿为空头一侧，挤压比离场颜色更深。斜线块没有判定，因为块内的清算或 Bybit 成交没有全部采集到。",
+    "每个 4h 或 8h 块取一个点，即该块收盘时的 BTC 价格。被规则判为挤压或离场的块整列着色：离场的一方是多头时用锈红，是空头时用苔绿，挤压的颜色比离场深。灰色斜线表示该块的清算或 Bybit 成交采集有缺口，因此没有判定。",
   "perp.c1.implies":
-    "挤压是被迫离场：一侧清算量进入已覆盖块的前 10%，且至少是另一侧的 3 倍，同时价格朝同一方向变动到第 75 百分位以上。离场是持仓量下降到前四分之一、但没有这种清算压力，即主动平仓。连续出现挤压，说明行情剧烈且由强平推动。",
+    "每个标签都是拿这块和近 90 天的分布比。判为挤压要同时满足三点：某一侧清算量达到该侧在已覆盖块中的第 90 百分位；至少是另一侧的三倍；价格朝这些强平单推动的方向变动，幅度不低于第 75 百分位。离场只看持仓量，降幅达到第 75 百分位即可，再由主动买卖差的正负区分是多头卖出离场还是空头买回离场。挤压成片出现，说明那段时间行情主要由强平驱动。",
   "perp.c1.how":
-    "只在同一视图内比较各块：标签都相对近 90 天排名，是相对值而不是绝对值。清算只能当下限，所以被迫平仓也可能显示为离场。k / n 统计中心落在视图内的已判定块；点击状态可隐藏其底色。",
+    "阈值随 90 天窗口滚动重算，而且用到了之后的块，所以旧块的标签可能改变，底色不能当作回测结果。交易所上报的清算偏少，部分被迫平仓达不到挤压的门槛，会被标成离场。图例中的 k / n 表示中心落在视图内的 n 个已判定块里，有 k 个属于该状态；点击图例项可关闭该状态的底色。",
   "perp.c2.title": "图 2 — 价格：新开多头、新开空头、现货主导",
   "perp.c2.shows":
-    "同一条价格线，块为新开多头、新开空头或现货主导时加底色。块与阈值都与图 1 相同，斜线块没有判定。",
+    "沿用图 1 的块收盘价格线，这里给新开多头（天蓝）、新开空头（紫）和现货主导（青）的块着色。块、阈值以及表示未判定的灰色斜线都与图 1 相同。",
   "perp.c2.implies":
-    "新开多头是持仓量升幅进入前四分之一，同时价格和主动买卖差都向上；新开空头则是两者都向下。现货主导是价格变动进入前四分之一而持仓量基本不变：推动价格的是现货资金，不是杠杆。",
+    "新开仓看的是杠杆进场：持仓量升幅达到第 75 百分位，并且价格与主动买卖差方向一致，都向上为新开多头，都向下为新开空头。持仓量大增但两者方向相反时，仍算震荡。现货主导正好相反：价格变动达到第 75 百分位，持仓量的变化却低于其阈值，说明推动价格的不是新开的永续仓位。",
   "perp.c2.how":
-    "新开仓会累积日后可能被挤压强平的仓位；现货主导的行情留下的这类风险较少。没有底色的块是震荡，或属于图 1 的某个状态。",
+    "可以把新开仓看成积蓄的风险：新增的仓位正是日后挤压时被强平的对象，现货主导的涨跌留下的这类仓位要少得多。本图没有底色的块，可能是震荡，也可能属于图 1 的某个状态，判断一段行情是否平静要两张图一起看。",
   "perp.c3.title": "图 3 — 价格与持仓量",
   "perp.c3.shows":
-    "所选交易所在每块收盘时的持仓量（BTC，左轴），以及同一时点的 BTC 价格（右轴）。",
+    "两条线都取每块最后一个桶的值：左轴是 Exchange 所选交易所的持仓量（BTC），右轴是 BTC 现货价格。",
   "perp.c3.implies":
-    "持仓量急升表示新杠杆进场；急降表示仓位在关闭，可能是主动平仓，也可能是被强平。持仓量高意味着行情反向时可被强平的仓位多，但不说明价格接下来往哪走。",
+    "持仓量统计的是尚未平掉的合约，它的斜率反映杠杆在增加还是在减少。陡升是新敞口进场；陡降是敞口退出，可能是交易者自己平仓，也可能是被交易所强平。持仓量处在高位，只说明行情反向时可能被强平的规模，并不预示方向。",
   "perp.c3.how":
-    "把两条线放在一起看：持仓量随价格上升是多头加仓，价格下跌时上升是空头加仓，随任一方向下降都是仓位离场。图 1 和图 2 标明每块属于哪一种。",
+    "看两条线斜率的搭配：持仓与价格同升，多半是多头开仓；价格下跌而持仓上升，多半是空头开仓；持仓下滑，不论价格往哪走，多半是仓位在关闭。图 1 和图 2 用阈值而不是目测，把这些搭配落实为每块的一个标签。",
   "perp.c4.title": "图 4 — 主动买卖差与清算",
   "perp.c4.shows":
-    "每块永续合约的主动买入量减主动卖出量（上半区），以及下方带状区里的清算：空头清算向上，多头清算向下。单位为 BTC。斜线格表示该块的这项数据没有采集到，因此不画。",
+    "上下两个区共用时间轴，每块一根柱。上区是永续合约的净主动成交量，即主动买入减主动卖出；下方带状区是清算，空头被强平的量从线往上画，多头被强平的量往下画。单位都是 BTC。某块某项数据没有采集到时，对应位置只有灰色斜线，没有柱。",
   "perp.c4.implies":
-    "零线以上的高柱是主动买入强，以下是主动卖出强。清算柱高说明这一侧的仓位正被强制关闭；若旁边还有同方向的大买卖差柱，就是挤压的样子。",
+    "买卖差反映谁在主动吃单：正向高柱是买方愿意加价成交，负向高柱是卖方主动砸向买盘。带状区按方向显示被迫离场的量。挤压时上下两区会相互印证：一侧清算量骤增，同时买卖差明显倒向这些强平单推动的方向，例如大量空头被强平的同时出现强劲净买入。",
   "perp.c4.how":
-    "青色为净买入，玫红为净卖出；带状区里苔绿柱是空头清算，锈红柱是多头清算，与图 1 挤压的颜色一致。清算是交易所上报的数，只能当下限，Binance 每秒最多推送一条。留意一侧清算接连出现、同时买卖差也朝同一方向推的情形。",
+    "配色：青色为净买入，粉色为净卖出；清算带里苔绿代表空头、锈红代表多头，沿用图 1 挤压的颜色。交易所上报的清算只是下限，Binance 每秒最多推送一条，部分强平不会出现在图上。如果同一侧连续几块都在被强平，买卖差也一直朝那边倾斜，说明行情正被强制单推着走。",
 };
 
 export const messages = { en, zh };
