@@ -782,7 +782,8 @@ export interface components {
         };
         /**
          * CollectorStatus
-         * @description One collected stream, from its stored coverage (P4-R10).
+         * @description One collected stream, from its stored coverage (P4-R10), and what its collectors in this
+         *     process have run into.
          */
         CollectorStatus: {
             /**
@@ -800,6 +801,10 @@ export interface components {
             covered_days: number;
             /** Since */
             since: string | null;
+            /** Problems */
+            problems: {
+                [key: string]: number;
+            };
         };
         /** Component */
         Component: {

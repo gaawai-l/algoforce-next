@@ -29,7 +29,8 @@ def freshness(last: datetime | None, now: datetime) -> DataState:
 
 
 class CollectorStatus(Model):
-    """One collected stream, from its stored coverage (P4-R10)."""
+    """One collected stream, from its stored coverage (P4-R10), and what its collectors in this
+    process have run into."""
 
     stream: Stream
     live: bool  # a connection's last proof of life is at most 60 s old
@@ -37,6 +38,10 @@ class CollectorStatus(Model):
     down_since: AwareDatetime | None  # last_proof while not live; null while live or never run
     covered_days: float  # days covered in the last 90, both connections' union
     since: AwareDatetime | None  # the start of the earliest stored coverage
+    # By code, both connections summed, since this process started them: every connection end
+    # (rotated, stopped, or a failure such as stalled) and every problem counted (coverage_split,
+    # bad_frame, ...). Empty while the collectors do not run in this process.
+    problems: dict[str, int]
 
 
 class PerpStatesView(Model):

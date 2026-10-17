@@ -67,6 +67,9 @@ STAGGER = 60.0  # a stream's second connection starts this much later; rotations
 SIBLING_LIVE = 30.0  # a rotation waits for the sibling's proof of life within this long
 LIVE_WITHIN = 60.0  # a stream is live while a connection proved life within this long (§3.7)
 STOP_WITHIN = 8.0
+# The codes of a connection's planned end, logged at INFO; any other end is a failure, logged at
+# WARNING, as the service's default logging shows only warnings.
+LIFECYCLE = frozenset({"rotated", "stopped"})
 
 logger = logging.getLogger("wheelhouse.perps.collector")
 
@@ -170,6 +173,8 @@ class Collector:
         self._delay = delay
         # Problem codes, never values: dropped events are counted one by one.
         self.counts: Counter[str] = Counter()
+        self.closes: Counter[str] = Counter()  # how each connection ended, by code
+        self._count_lock = threading.Lock()  # the counters are read from other threads
         self._venue = VENUES[stream]
         self._rotate_gate = rotate_gate
         self._connect = connect
@@ -202,6 +207,11 @@ class Collector:
     def last_proof(self) -> float | None:
         """The last proof of life (handshake, frame or pong), at the step that saw it."""
         return self._last_proof
+
+    def problems(self) -> Counter[str]:
+        """Every connection end and every counted problem since this collector was made."""
+        with self._count_lock:
+            return self.counts + self.closes
 
     @property
     def covering_since(self) -> float | None:
@@ -434,7 +444,14 @@ class Collector:
                 ws.close()
         self._retry_at = retry_at
         self._next_flush = min(self._next_flush, now)
-        self._log(code)
+        with self._count_lock:
+            self.closes[code] += 1
+        if code in LIFECYCLE:
+            self._log(code)
+        else:
+            logger.warning(
+                "perps_ws_closed stream=%s conn=%d code=%s", self.stream, self.conn, code
+            )
 
     def _flush(self, now: float) -> None:
         """Commit the buffered events, then write the coverage they back. A failed write keeps
@@ -484,15 +501,17 @@ class Collector:
 
     def _warn(self, code: str, n: int = 1) -> None:
         """Count a problem; log it the first time and each time its count doubles."""
-        before = self.counts[code]
-        self.counts[code] += n
-        if before.bit_length() < self.counts[code].bit_length():
+        with self._count_lock:
+            before = self.counts[code]
+            self.counts[code] += n
+            after = self.counts[code]
+        if before.bit_length() < after.bit_length():
             logger.warning(
                 "perps_ws_problem stream=%s conn=%d code=%s count=%d",
                 self.stream,
                 self.conn,
                 code,
-                self.counts[code],
+                after,
             )
 
     def _log(self, event: str) -> None:
@@ -572,6 +591,14 @@ class Collectors:
             live = last is not None and now - last <= LIVE_WITHIN
             result[stream] = StreamStatus(live=live, last_proof=last)
         return result
+
+    def problems(self, stream: Stream) -> dict[str, int]:
+        """The stream's connection ends and problems by code, both connections summed, since
+        this process started them."""
+        total: Counter[str] = Counter()
+        for conn in (0, 1):
+            total += self.collectors[stream, conn].problems()
+        return dict(sorted(total.items()))
 
     def claim_rotation(self, stream: Stream, conn: int) -> bool:
         """The rotation gate: True, and the rotation recorded, when the sibling has proved life

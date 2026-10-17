@@ -897,6 +897,51 @@ def test_coverage_splits_logged_when_their_count_doubles(
     assert rig.collector.counts == Counter({"bad_frame": 8, "coverage_split": 8})
 
 
+def test_failed_ends_are_counted_and_logged_as_warnings(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    silent, second, third = FakeWs(), FakeWs(), FakeWs()
+    silent.answer_pings = False
+    rig = Rig(store, "binance_liq", silent, second, third)
+    with caplog.at_level(logging.INFO, logger="wheelhouse.perps.collector"):
+        rig.at(0)
+        rig.quiet(40)  # the ping at 20 is never answered: half-open
+        rig.at(40.5, 41)  # backoff 1 s
+        rig.quiet(45)
+        rig.at(100)  # the process slept from 45 to 100: stalled, and connected again
+        rig.collector.stop(rig.t)
+    assert silent.closed and second.closed and third.closed
+    assert rig.collector.problems() == Counter({"half_open": 1, "stalled": 1, "stopped": 1})
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == [
+        "perps_ws_closed stream=binance_liq conn=0 code=half_open",
+        "perps_ws_closed stream=binance_liq conn=0 code=stalled",
+    ]
+    # A planned end stays at INFO.
+    stopped = [r for r in caplog.records if r.getMessage().endswith("event=stopped")]
+    assert [r.levelno for r in stopped] == [logging.INFO]
+
+
+def test_problems_summed_over_both_connections_of_a_stream(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    a1 = FakeWs()
+    fleet = Fleet(store, {A: [OSError("refused"), a1], B: [OSError("refused"), FakeWs()]})
+    fleet.at(0, 1)  # `a` fails, then connects after 1 s
+    a1.frames.append("not json")
+    fleet.at(2)
+    fleet.quiet(60)  # `b` starts a minute later, and fails too
+    fleet.quiet(62)
+    assert fleet.collectors.problems("binance_liq") == {
+        "bad_frame": 1,
+        "connect_failed": 2,
+        "coverage_split": 1,
+    }
+    assert fleet.collectors.problems("bybit_liq") == {}
+    fleet.collectors.stop()
+    assert fleet.collectors.problems("binance_liq")["stopped"] == 2
+
+
 def test_default_wait_is_interrupted_by_stop(tmp_path: Path):
     store = PerpsStore(tmp_path / "perps.sqlite3")
     attempted = threading.Event()

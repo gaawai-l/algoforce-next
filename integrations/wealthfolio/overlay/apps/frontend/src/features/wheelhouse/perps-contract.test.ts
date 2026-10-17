@@ -36,7 +36,14 @@ function status(view: PerpStatesView): PerpsStatus {
         backoff_until: "2026-10-17T11:10:00Z",
       },
     ],
-    collectors: view.collectors,
+    // The service's counts since it started: the first stream rotated twice and stalled once.
+    collectors: view.collectors.map((collector, k) => ({
+      ...collector,
+      problems: (k === 0 ? { rotated: 2, stalled: 1 } : {}) as Record<
+        string,
+        number
+      >,
+    })),
     direction: "ok",
     direction_check: {
       binance: check,
@@ -270,6 +277,8 @@ describe("perps status contract", () => {
     expect(parsed.hosts[1].backoff_until).toBe("2026-10-17T11:10:00Z");
     expect(parsed.direction_check?.bybit_qty.events).toBe(40);
     expect(parsed.collectors).toHaveLength(3);
+    expect(parsed.collectors[0].problems).toEqual({ rotated: 2, stalled: 1 });
+    expect(parsed.collectors[1].problems).toEqual({});
   });
 
   it("keeps a round that has not run yet null", () => {
@@ -315,5 +324,13 @@ describe("perps status contract", () => {
     expect(
       perpsStatusSchema.safeParse({ ...payload, hosts: undefined }).success,
     ).toBe(false);
+    // A count is a whole number, and the counts are always there, if empty.
+    for (const problems of [{ stalled: 1.5 }, undefined])
+      expect(
+        perpsStatusSchema.safeParse({
+          ...payload,
+          collectors: [{ ...payload.collectors[0], problems }],
+        }).success,
+      ).toBe(false);
   });
 });

@@ -90,6 +90,8 @@ const collectorSchema = z.object({
   down_since: time.nullable(),
   covered_days: z.number(),
   since: time.nullable(),
+  // Connection ends and problems by code since the service started; not shown.
+  problems: z.record(int),
 });
 const directionCheckSchema = z.object({
   verdict,

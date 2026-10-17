@@ -4686,7 +4686,8 @@
       "last_proof": "2026-10-17T11:06:54Z",
       "down_since": null,
       "covered_days": 31.463125,
-      "since": "2026-09-16T00:00:00Z"
+      "since": "2026-09-16T00:00:00Z",
+      "problems": {}
     },
     {
       "stream": "bybit_liq",
@@ -4694,7 +4695,8 @@
       "last_proof": "2026-10-17T11:06:54Z",
       "down_since": null,
       "covered_days": 31.463125,
-      "since": "2026-09-16T00:00:00Z"
+      "since": "2026-09-16T00:00:00Z",
+      "problems": {}
     },
     {
       "stream": "bybit_trades",
@@ -4702,7 +4704,8 @@
       "last_proof": "2026-10-17T11:06:54Z",
       "down_since": null,
       "covered_days": 31.463125,
-      "since": "2026-09-16T00:00:00Z"
+      "since": "2026-09-16T00:00:00Z",
+      "problems": {}
     }
   ]
 }

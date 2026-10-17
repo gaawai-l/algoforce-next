@@ -198,7 +198,7 @@ def sample_view() -> PerpStatesView:
     )
     now = SAMPLE_NOW.timestamp()
     spans = [(SAMPLE_START.timestamp(), now - 6.0)]
-    collectors = [collector_status(stream, spans, SAMPLE_NOW) for stream in STREAMS]
+    collectors = [collector_status(stream, spans, SAMPLE_NOW, {}) for stream in STREAMS]
     return states_view(
         "all", "4h", (stored, SAMPLE_COMPUTED), collectors, stored_hosts({}), SAMPLE_NOW
     )
@@ -404,6 +404,7 @@ def test_unavailable_before_first_derive(tmp_path: Path):
         "down_since": None,
         "covered_days": 0.0,
         "since": None,
+        "problems": {},  # the collectors do not run here
     }
 
     with TestClient(router_app(path, Clock(SAMPLE_NOW))) as http:
@@ -554,6 +555,33 @@ def test_perps_run_only_while_the_app_runs(tmp_path: Path):
     assert not names & {thread.name for thread in threading.enumerate()}
 
 
+def test_status_counts_the_running_collectors_problems(tmp_path: Path):
+    client, connect, _ = blocked()
+    app = router_app(
+        tmp_path / "perps.sqlite",
+        Clock(SAMPLE_NOW),
+        start_worker=True,
+        http=client,
+        connect=connect,
+    )
+
+    with TestClient(app) as http:
+        deadline = time.monotonic() + 10
+        # Each stream's first connection fails at once; the second waits a minute.
+        while True:
+            status = http.get(f"{PREFIX}/status").json()
+            if all(item["problems"].get("connect_failed") for item in status["collectors"]):
+                break
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        bybit = get_states(http, "bybit")
+
+    assert [item["stream"] for item in status["collectors"]] == list(STREAMS)
+    assert all(set(item["problems"]) == {"connect_failed"} for item in status["collectors"])
+    assert [item["stream"] for item in bybit["collectors"]] == ["bybit_liq", "bybit_trades"]
+    assert all(item["problems"]["connect_failed"] >= 1 for item in bybit["collectors"])
+
+
 def test_collector_status_from_store(tmp_path: Path):
     path = tmp_path / "perps.sqlite"
     store = PerpsStore(path)
@@ -581,6 +609,7 @@ def test_collector_status_from_store(tmp_path: Path):
             "down_since": None,
             "covered_days": pytest.approx(3 - 60 / DAY),
             "since": at(t - 3 * DAY),
+            "problems": {},
         },
         {
             "stream": "bybit_liq",
@@ -589,6 +618,7 @@ def test_collector_status_from_store(tmp_path: Path):
             "down_since": at(t - 61),
             "covered_days": pytest.approx(1 - 61 / DAY),
             "since": at(t - 100 * DAY),
+            "problems": {},
         },
         {
             "stream": "bybit_trades",
@@ -597,6 +627,7 @@ def test_collector_status_from_store(tmp_path: Path):
             "down_since": None,
             "covered_days": 0.0,
             "since": None,
+            "problems": {},
         },
     ]
     # A view lists, and reports down, only the streams it reads.

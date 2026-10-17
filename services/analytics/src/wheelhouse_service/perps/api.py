@@ -45,9 +45,13 @@ def _at(t: float) -> datetime:
 
 
 def collector_status(
-    stream: Stream, spans: Sequence[tuple[float, float]], now: datetime
+    stream: Stream,
+    spans: Sequence[tuple[float, float]],
+    now: datetime,
+    problems: Mapping[str, int],
 ) -> CollectorStatus:
-    """A stream's status at `now` from the union of its connections' coverage spans."""
+    """A stream's status at `now` from the union of its connections' coverage spans, with the
+    problem counts of this process's collectors."""
     if not spans:
         return CollectorStatus(
             stream=stream,
@@ -56,6 +60,7 @@ def collector_status(
             down_since=None,
             covered_days=0.0,
             since=None,
+            problems=dict(problems),
         )
     t = now.timestamp()
     last = max(end for _, end in spans)
@@ -69,6 +74,7 @@ def collector_status(
         down_since=None if live else _at(last),
         covered_days=covered / DAY,
         since=_at(min(start for start, _ in spans)),
+        problems=dict(problems),
     )
 
 
@@ -148,12 +154,13 @@ def create_router(
     """`start_worker` runs the REST worker and the collectors; `http` and `connect` replace the
     REST client and the WebSocket connection factory."""
     store: PerpsStore | None = None
+    collectors: Collectors | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        nonlocal store
+        nonlocal store, collectors
         store = PerpsStore(path)
-        collectors = worker = None
+        worker = None
         if start_worker:
             collectors = Collectors(store, connect=connect or websocket_connect)
             worker = PerpsSync(store, PerpsRest(http), clock=utc_now)
@@ -172,8 +179,15 @@ def create_router(
         assert store is not None, "Perps lifespan has not started"
         return store
 
+    def problems(stream: Stream) -> dict[str, int]:
+        """The counts of the collectors running in this process; none when they do not run."""
+        return {} if collectors is None else collectors.problems(stream)
+
     def statuses(streams: Sequence[Stream], now: datetime) -> list[CollectorStatus]:
-        return [collector_status(stream, db().coverage(stream, 0), now) for stream in streams]
+        return [
+            collector_status(stream, db().coverage(stream, 0), now, problems(stream))
+            for stream in streams
+        ]
 
     @router.get("/states", response_model=PerpStatesView)
     def states(exchange: Exchange = "all", window: Window = "4h") -> PerpStatesView:

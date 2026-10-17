@@ -2077,6 +2077,13 @@
               }
             ],
             "title": "Since"
+          },
+          "problems": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Problems"
           }
         },
         "additionalProperties": false,
@@ -2087,10 +2094,11 @@
           "last_proof",
           "down_since",
           "covered_days",
-          "since"
+          "since",
+          "problems"
         ],
         "title": "CollectorStatus",
-        "description": "One collected stream, from its stored coverage (P4-R10)."
+        "description": "One collected stream, from its stored coverage (P4-R10), and what its collectors in this\nprocess have run into."
       },
       "Component": {
         "properties": {
