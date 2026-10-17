@@ -560,12 +560,22 @@ const en = {
   "perp.exchange.binance": "Binance",
   "perp.exchange.bybit": "Bybit",
   "perp.window": "State window",
+  "perp.thresholds": "Thresholds",
+  "perp.thresholds.sLiq": "Short liq.",
+  "perp.thresholds.lLiq": "Long liq.",
+  "perp.thresholds.oi": "OI change",
+  "perp.thresholds.px": "Price change",
+  "perp.thresholds.ofLatest":
+    "Of the latest block, ranked on the 90 days before it · samples: liquidations {{liq}}, price {{px}}, OI {{oi}} blocks",
+  "perp.thresholds.ofLatestClosed":
+    "Of the latest closed block, ranked on the 90 days before it · samples: liquidations {{liq}}, price {{px}}, OI {{oi}} blocks",
   "perp.show": "Show",
   "perp.showMissing": "Table 1 and charts for {{days}}d are unavailable",
   "perp.table.title": "Table 1 — Perp states",
   "perp.table.subtitle":
     "{{judged}} judged of {{total}} blocks in view · share of blocks, not a forecast",
   "perp.table.latestUncovered": "latest block uncovered",
+  "perp.table.latestClosedUncovered": "latest closed block uncovered",
   "perp.table.state": "State",
   "perp.table.what": "What it is",
   "perp.table.prob": "Prob. [{{days}}d]",
@@ -577,7 +587,10 @@ const en = {
     "A large squeeze share means forced liquidations drove the period; a large unwind share means traders closed positions by choice. Builds pile up leverage that a later move can force out, while spot-led moves leave less of it behind. Chop is what is left when no threshold is crossed.",
   "perp.table.how":
     "Read Prob. as how often each state happened in this window, not as odds for the next block. The thresholds include blocks that came later, so a label can change as the 90-day window rolls; past labels are not a backtest. Liquidations are what the exchanges report, a lower bound, so a forced exit can show up as an unwind.",
+  "perp.table.howPast":
+    "Read Prob. as how often each state happened in this window, not as odds for the next block. Each block's thresholds use only the 90 days before it, so later blocks never change an earlier label, and a block with too few blocks before it is left unjudged. Liquidations are what the exchanges report, a lower bound, so a forced exit can show up as an unwind.",
   "perp.latest": "Latest block",
+  "perp.latestClosed": "Latest closed block",
   "perp.latestForming": "Latest block (forming)",
   "perp.forming":
     "The latest block was still forming when computed ({{buckets}} of {{total}} ten-minute buckets); its state can change.",
@@ -616,7 +629,13 @@ const en = {
   "perp.chart.uncovered": "uncovered",
   "perp.chart.uncoveredKey": "Uncovered",
   "perp.chart.uncoveredCount": "(+{{count}} uncovered)",
+  "perp.chart.notJudgedCount": "(+{{count}} not judged)",
   "perp.chart.notJudged": "not judged",
+  "perp.chart.notJudgedWhy": "not judged: {{list}}",
+  "perp.chart.threshold": "{{name}} threshold",
+  "perp.chart.why.forming": "still forming",
+  "perp.chart.why.imputed": "imputed inputs",
+  "perp.chart.why.reference": "fewer than {{count}} reference blocks",
   "perp.chart.partial": "partial block, not judged",
   "perp.chart.forming": "forming",
   "perp.chart.imputed": "imputed: {{list}}",
@@ -633,6 +652,8 @@ const en = {
     "Every label is a test against the 90-day distribution. A squeeze needs three things at once: one side's liquidations at or above its 90th percentile among covered blocks, at least triple the other side's, and a price move of at least the 75th-percentile size in the direction those forced orders push. An unwind only needs open interest to drop by at least its 75th-percentile amount; taker delta then says whether longs (net selling) or shorts (net buying) were the ones closing. Squeezes clustered together mean forced exits were driving that stretch.",
   "perp.c1.how":
     "The thresholds are recomputed as the 90-day window rolls and include blocks that came later, so an old label can flip and the tints are not a backtest. Exchanges under-report liquidations, so some forced exits fall short of the squeeze test and show up as unwinds. In the legend, k / n is how many of the n judged blocks centred in view carry that state; clicking an entry switches its tint off.",
+  "perp.c1.howPast":
+    "Each block's thresholds use only the 90 days before it, so later blocks never change an old label, and a block with too few blocks before it stays unjudged and untinted. Exchanges under-report liquidations, so some forced exits fall short of the squeeze test and show up as unwinds. In the legend, k / n is how many of the n judged blocks centred in view carry that state; clicking an entry switches its tint off.",
   "perp.c2.title": "Chart 2 — Price: new long, new short, spot-led",
   "perp.c2.shows":
     "Chart 1's block-close price line again, this time tinted for new long builds (sky), new short builds (violet) and spot-led blocks (cyan). Blocks, thresholds and the grey hatching for unjudged blocks are the same as in Chart 1.",
@@ -1194,12 +1215,22 @@ const zh: Record<MessageKey, string> = {
   "perp.exchange.binance": "Binance",
   "perp.exchange.bybit": "Bybit",
   "perp.window": "状态窗口",
+  "perp.thresholds": "阈值",
+  "perp.thresholds.sLiq": "空头清算",
+  "perp.thresholds.lLiq": "多头清算",
+  "perp.thresholds.oi": "OI 变动",
+  "perp.thresholds.px": "价格变动",
+  "perp.thresholds.ofLatest":
+    "最新块的阈值，按其之前 90 天排名 · 样本：清算 {{liq}} 块、价格 {{px}} 块、OI {{oi}} 块",
+  "perp.thresholds.ofLatestClosed":
+    "最新已收盘块的阈值，按其之前 90 天排名 · 样本：清算 {{liq}} 块、价格 {{px}} 块、OI {{oi}} 块",
   "perp.show": "显示范围",
   "perp.showMissing": "{{days}} 天的表 1 和图表不可用",
   "perp.table.title": "表 1 — 永续状态",
   "perp.table.subtitle":
     "视图内 {{total}} 块，已判定 {{judged}} 块 · 块数占比，不是预测",
   "perp.table.latestUncovered": "最新块未覆盖",
+  "perp.table.latestClosedUncovered": "最新已收盘块未覆盖",
   "perp.table.state": "状态",
   "perp.table.what": "含义",
   "perp.table.prob": "占比 [{{days}} 天]",
@@ -1211,7 +1242,10 @@ const zh: Record<MessageKey, string> = {
     "挤压占比高，说明这段行情由强制平仓推动；离场占比高，说明交易者在主动减仓。新开仓会累积日后可能被强平的杠杆，现货主导的行情留下的这类风险较少。震荡是没有越过任何阈值的块。",
   "perp.table.how":
     "占比是这段时间里各状态出现的频率，不是下一块的概率。阈值用到了之后的块，参考窗口滚动后旧块的标签可能改变，所以历史标签不能当作回测样本。清算是交易所上报的数，只能当下限；一次被迫平仓也可能被标成离场。",
+  "perp.table.howPast":
+    "占比是这段时间里各状态出现的频率，不是下一块的概率。每块的阈值只用该块之前 90 天的数据，之后的块不会改变已有的标签；之前的块不够时，该块不判定。清算是交易所上报的数，只能当下限；一次被迫平仓也可能被标成离场。",
   "perp.latest": "最新块",
+  "perp.latestClosed": "最新已收盘块",
   "perp.latestForming": "最新块（形成中）",
   "perp.forming":
     "计算时最新块仍在形成（{{buckets}} / {{total}} 个 10 分钟桶），其状态可能改变。",
@@ -1248,7 +1282,13 @@ const zh: Record<MessageKey, string> = {
   "perp.chart.uncovered": "未覆盖",
   "perp.chart.uncoveredKey": "未覆盖",
   "perp.chart.uncoveredCount": "（另有 {{count}} 块未覆盖）",
+  "perp.chart.notJudgedCount": "（另有 {{count}} 块未判定）",
   "perp.chart.notJudged": "未判定",
+  "perp.chart.notJudgedWhy": "未判定：{{list}}",
+  "perp.chart.threshold": "{{name}}阈值",
+  "perp.chart.why.forming": "仍在形成中",
+  "perp.chart.why.imputed": "输入按 0 补入",
+  "perp.chart.why.reference": "之前的参考块不足 {{count}} 个",
   "perp.chart.partial": "不足半块，未判定",
   "perp.chart.forming": "形成中",
   "perp.chart.imputed": "按 0 补入：{{list}}",
@@ -1265,6 +1305,8 @@ const zh: Record<MessageKey, string> = {
     "每个标签都是拿这块和近 90 天的分布比。判为挤压要同时满足三点：某一侧清算量达到该侧在已覆盖块中的第 90 百分位；至少是另一侧的三倍；价格朝这些强平单推动的方向变动，幅度不低于第 75 百分位。离场只看持仓量，降幅达到第 75 百分位即可，再由主动买卖差的正负区分是多头卖出离场还是空头买回离场。挤压成片出现，说明那段时间行情主要由强平驱动。",
   "perp.c1.how":
     "阈值随 90 天窗口滚动重算，而且用到了之后的块，所以旧块的标签可能改变，底色不能当作回测结果。交易所上报的清算偏少，部分被迫平仓达不到挤压的门槛，会被标成离场。图例中的 k / n 表示中心落在视图内的 n 个已判定块里，有 k 个属于该状态；点击图例项可关闭该状态的底色。",
+  "perp.c1.howPast":
+    "每块的阈值只用该块之前 90 天的数据，之后的块不会改变旧块的标签；之前的块不够时，该块不判定，也不着色。交易所上报的清算偏少，部分被迫平仓达不到挤压的门槛，会被标成离场。图例中的 k / n 表示中心落在视图内的 n 个已判定块里，有 k 个属于该状态；点击图例项可关闭该状态的底色。",
   "perp.c2.title": "图 2 — 价格：新开多头、新开空头、现货主导",
   "perp.c2.shows":
     "沿用图 1 的块收盘价格线，这里给新开多头（天蓝）、新开空头（紫）和现货主导（青）的块着色。块、阈值以及表示未判定的灰色斜线都与图 1 相同。",

@@ -16,7 +16,7 @@ from .collector import LIVE_WITHIN, STREAMS, Collectors, Connection
 from .models import CollectorStatus, HostStatus, PerpsStatus, PerpStatesView, freshness
 from .rows import Exchange, Stream
 from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, PerpsRest
-from .states import DAY, REFERENCE_DAYS, Window
+from .states import BLOCKS_PER_DAY, DAY, REFERENCE_DAYS, Window
 from .store import PerpsStore
 from .sync import (
     Directions,
@@ -129,7 +129,10 @@ def states_view(
         }
     else:
         if states.collecting:
-            reasons.append(f"collecting:{states.covered_days:.1f}")
+            # Under O6 the flag comes from R's liquidation sample, and so does the number.
+            o6 = stored is not None and "O6" in stored.rules
+            days = states.thresholds.n_liq / BLOCKS_PER_DAY[window] if o6 else states.covered_days
+            reasons.append(f"collecting:{days:.1f}")
         fields = {name: value for name, value in states if name != "window"}
     # Derived under other rules than the configured ones until the worker's first round, which
     # is not delayed, derives it again.

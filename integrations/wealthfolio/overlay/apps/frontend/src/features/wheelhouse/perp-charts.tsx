@@ -8,8 +8,13 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
-import { useWheelhouseText } from "./i18n";
-import type { PerpBlock, PerpState, PerpStatesView } from "./perps-contract";
+import { useWheelhouseText, type TextFn } from "./i18n";
+import type {
+  PerpBlock,
+  PerpState,
+  PerpStatesView,
+  PerpThresholds,
+} from "./perps-contract";
 import { sigUsd, usdPrice } from "./seller-charts";
 
 type ChartKey = "c1" | "c2" | "c3" | "c4";
@@ -30,6 +35,11 @@ const SHADED: Record<PriceChart, readonly PerpState[]> = {
 };
 const SQUEEZES: readonly PerpState[] = ["shortsq", "longsq"];
 const NONE: readonly PerpState[] = [];
+// Under O6 a threshold is null while its sample has fewer blocks than seven days' worth.
+const REFERENCE_BLOCKS: Record<PerpStatesView["window"], number> = {
+  "4h": 42,
+  "8h": 21,
+};
 
 // One drawn block of the view; `block` is null for the tail short of half a block, which is
 // drawn but never judged. The tail carries no coverage, so its delta and liquidations are left
@@ -60,6 +70,24 @@ const tick = (value: number) => (value === 0 ? "0" : sig(value));
 const btc = (value: number | null) =>
   value == null ? "—" : `${sig(value)} BTC`;
 const money = (value: number | null) => (value == null ? "—" : usdPrice(value));
+
+// Thresholds in the units the rules compare them in: liquidations and OI change in BTC, price
+// change in percent. One whose sample was too short to rank is null and reads "—".
+function thresholdValues(text: TextFn, thresholds: PerpThresholds) {
+  return [
+    { label: text("perp.thresholds.sLiq"), value: btc(thresholds.s_liq) },
+    { label: text("perp.thresholds.lLiq"), value: btc(thresholds.l_liq) },
+    { label: text("perp.thresholds.oi"), value: btc(thresholds.oi) },
+    {
+      label: text("perp.thresholds.px"),
+      value: thresholds.px == null ? "—" : `${thresholds.px.toFixed(2)}%`,
+    },
+  ];
+}
+export const thresholdsText = (text: TextFn, thresholds: PerpThresholds) =>
+  thresholdValues(text, thresholds)
+    .map(({ label, value }) => `${label} ${value}`)
+    .join(" · ");
 
 // The blocks reaching into the view, including one across its left edge, then the tail.
 function itemsOf(view: PerpStatesView, from: number, size: number): Item[] {
@@ -524,6 +552,7 @@ function Panel({
   hidden,
   legend,
   read,
+  past,
 }: {
   chart: ChartKey;
   items: Item[];
@@ -533,6 +562,8 @@ function Panel({
   hidden: readonly PerpState[];
   legend: ReactNode;
   read: (item: Item) => Reading;
+  // O6: each block's thresholds come from the 90 days before it alone.
+  past: boolean;
 }) {
   const { text } = useWheelhouseText();
   const uid = useId().replace(/[^\w-]/g, "");
@@ -651,7 +682,13 @@ function Panel({
         {(["shows", "implies", "how"] as const).map((part) => (
           <div key={part}>
             <h4>{text(`seller.read.${part}`)}</h4>
-            <p>{text(`perp.${chart}.${part}`)}</p>
+            <p>
+              {text(
+                chart === "c1" && part === "how" && past
+                  ? "perp.c1.howPast"
+                  : `perp.${chart}.${part}`,
+              )}
+            </p>
           </div>
         ))}
       </div>
@@ -660,7 +697,8 @@ function Panel({
 }
 
 // Charts 1–4 for the view and Show: the payload's blocks folded to one point each. While
-// collecting nothing is judged, so only Charts 3 and 4 are drawn.
+// collecting with nothing judged, only Charts 3 and 4 are drawn; under O6 earlier blocks can be
+// judged while the view collects, and then Charts 1 and 2 show them.
 export function PerpCharts({
   view,
   show,
@@ -688,14 +726,39 @@ export function PerpCharts({
     SQUEEZES.includes(state) && !verified
       ? text("perp.unverified", { state: text(`perp.state.${state}`) })
       : text(`perp.state.${state}`);
+  const o1 = view.rules.includes("O1");
+  const o6 = view.rules.includes("O6");
   const thresholds = view.thresholds;
+  // Under O6 a squeeze also needs liquidations on its side, so a zero threshold no longer turns
+  // every large move into one.
   const zeroThreshold =
-    thresholds != null && (thresholds.s_liq === 0 || thresholds.l_liq === 0);
-  // Notes on what decided a judged block; an unjudged one was decided by nothing.
-  const notes = (item: Item) => {
+    !o6 &&
+    thresholds != null &&
+    (thresholds.s_liq === 0 || thresholds.l_liq === 0);
+  // Why a covered block was not judged, from its own fields: O1 leaves the forming block out;
+  // O6 leaves out blocks with imputed inputs or a null threshold, too few blocks before them.
+  const unjudged = (block: PerpBlock) => {
+    const why: string[] = [];
+    if (o1 && block.forming) why.push(text("perp.chart.why.forming"));
+    const imputed =
+      block.imputed.dpx || block.imputed.doi || block.imputed.sums;
+    if (o6 && imputed) why.push(text("perp.chart.why.imputed"));
+    const own = block.thresholds;
+    if (own && [own.s_liq, own.l_liq, own.oi, own.px].includes(null))
+      why.push(
+        text("perp.chart.why.reference", {
+          count: REFERENCE_BLOCKS[view.window],
+        }),
+      );
+    return why;
+  };
+  // Notes on what decided a judged block; an unjudged one was decided by nothing. Charts 1 and 2
+  // (`judging`) say in the block's value that O1 left a covered forming block unjudged.
+  const notes = (item: Item, judging = false) => {
     const block = item.block;
     const out: string[] = [];
-    if (block?.forming) out.push(text("perp.chart.forming"));
+    if (block?.forming && !(judging && o1 && block.covered))
+      out.push(text("perp.chart.forming"));
     if (!block?.state) return out;
     const imputed = (["dpx", "doi", "sums"] as const)
       .filter((part) => block.imputed[part])
@@ -714,8 +777,23 @@ export function PerpCharts({
     const block = item.block;
     if (!block) return text("perp.chart.partial");
     if (!block.covered) return uncovered;
-    return block.state ? label(block.state) : text("perp.chart.notJudged");
+    if (block.state) return label(block.state);
+    const why = unjudged(block);
+    return why.length
+      ? text("perp.chart.notJudgedWhy", { list: why.join(", ") })
+      : text("perp.chart.notJudged");
   };
+  // O6: the block's own thresholds, which it was or would have been judged against; one reading
+  // item each, so that they wrap on a narrow screen.
+  const ownThresholds = (item: Item) =>
+    item.block?.thresholds
+      ? thresholdValues(text, item.block.thresholds).map(
+          ({ label, value }) => ({
+            label: text("perp.chart.threshold", { name: label }),
+            value,
+          }),
+        )
+      : [];
   const key = (tone: string, name: string) => (
     <span key={tone}>
       <i
@@ -735,6 +813,9 @@ export function PerpCharts({
   });
   const judged = centred.filter((block) => block.state != null);
   const uncoveredCount = centred.filter((block) => !block.covered).length;
+  const notJudgedCount = centred.filter(
+    (block) => block.covered && block.state == null,
+  ).length;
   const stateLegend = (chart: PriceChart) => (
     <>
       {SHADED[chart].map((state) => {
@@ -770,6 +851,11 @@ export function PerpCharts({
             text("perp.chart.uncoveredCount", { count: uncoveredCount }),
           )
         : null}
+      {notJudgedCount ? (
+        <span key="notjudged">
+          {text("perp.chart.notJudgedCount", { count: notJudgedCount })}
+        </span>
+      ) : null}
       {priceKey}
     </>
   );
@@ -778,12 +864,14 @@ export function PerpCharts({
       item.block && (!item.block.delta_covered || !item.block.liq_covered),
   );
 
+  const anyJudged = view.blocks.some((block) => block.state != null);
+
   const charts: {
     chart: ChartKey;
     legend: ReactNode;
     read: (item: Item) => Reading;
   }[] = [
-    ...(view.collecting
+    ...(view.collecting && !anyJudged
       ? []
       : (["c1", "c2"] as const).map((chart) => ({
           chart,
@@ -792,8 +880,9 @@ export function PerpCharts({
             values: [
               priceValue(item),
               { label: text("perp.chart.block"), value: stateValue(item) },
+              ...ownThresholds(item),
             ],
-            notes: notes(item),
+            notes: notes(item, true),
           }),
         }))),
     {
@@ -864,6 +953,7 @@ export function PerpCharts({
           hidden={chart === "c1" || chart === "c2" ? hidden[chart] : NONE}
           legend={legend}
           read={read}
+          past={o6}
         />
       ))}
     </>

@@ -56,7 +56,9 @@ EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit")
 WINDOWS: tuple[Window, ...] = ("4h", "8h")
 ARCHIVE_SHIFT = 0.5  # archive OI differs from hist OI so that the source of a row shows
 V1: Rules = frozenset()
+O1: Rules = frozenset({"O1"})
 O6: Rules = frozenset({"O6"})
+O1O6: Rules = frozenset({"O1", "O6"})
 
 
 def start_of(horizon_days: int) -> int:
@@ -851,14 +853,14 @@ def test_rules_reach_compute_states_and_the_payloads(
         return compute_states(grid, window, rules=rules)
 
     monkeypatch.setattr("wheelhouse_service.perps.sync.compute_states", spy)
-    # Every rule is on, and O6 is the only one implemented for the perps.
+    # Every rule is on, and O1 and O6 are the ones implemented for the perps.
     worker(store, rest, clock, rules=ALL_RULES).run_once()
 
-    assert seen == [O6] * 6
+    assert seen == [O1O6] * 6
     for exchange in EXCHANGES:
         for window in WINDOWS:
             stored = payload(store, exchange, window)
-            assert stored.rules == ["O6"]
+            assert stored.rules == ["O1", "O6"]
             assert stored.states is not None and stored.states.blocks
             assert all(b.thresholds is not None for b in stored.states.blocks)
 
@@ -870,6 +872,37 @@ def test_rules_reach_compute_states_and_the_payloads(
     assert stored.rules == []
     assert stored.states is not None
     assert all(b.thresholds is None for b in stored.states.blocks)
+
+
+def test_o1_reaches_compute_states_and_leaves_the_forming_block_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    seen: list[Rules] = []
+
+    def spy(grid: Grid, window: Window, *, rules: Rules) -> StatesResult:
+        seen.append(rules)
+        return compute_states(grid, window, rules=rules)
+
+    monkeypatch.setattr("wheelhouse_service.perps.sync.compute_states", spy)
+
+    def derived(rules: Rules) -> StoredStates:
+        # At 14:12:30 the last bucket starts at 14:00: the 4h block from 12:00 is forming.
+        clock = Clock(clock_time(14, 12, 30))
+        store = PerpsStore(tmp_path / f"{''.join(sorted(rules)) or 'v1'}.sqlite")
+        worker(store, FakeRest(clock), clock, rules=rules).run_once()
+        return payload(store, "all", "4h")
+
+    v1, o1 = derived(V1), derived(O1)
+    assert seen == [V1] * 6 + [O1] * 6
+    assert (v1.rules, o1.rules) == ([], ["O1"])
+    assert v1.states is not None and o1.states is not None
+    forming = o1.states.blocks[-1]
+    assert (forming.t0, forming.buckets, forming.forming) == (clock_time(12, 0), 13, True)
+    # The forming block is drawn and counted as before, but leaves the price and OI samples.
+    assert o1.states.blocks == v1.states.blocks
+    assert o1.states.covered_days == v1.states.covered_days
+    t1, t0 = o1.states.thresholds, v1.states.thresholds
+    assert (t1.n_px, t1.n_oi) == (t0.n_px - 1, t0.n_oi - 1)
 
 
 def full_round(directory: Path, horizon_days: int | None = None) -> PerpsStore:

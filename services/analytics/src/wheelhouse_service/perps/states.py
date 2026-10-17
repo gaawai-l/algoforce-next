@@ -1,5 +1,6 @@
 """Perp states on a filled 10-minute grid, following the original perp-squeeze page's v1 rules,
-or with O6 ranking each block against the blocks before it only."""
+or with O6 ranking each block against the blocks before it only, and O1 leaving the forming block
+unjudged and unranked."""
 
 import math
 from bisect import bisect_left
@@ -20,8 +21,8 @@ DAY = 86_400
 # block's own thresholds rank the blocks of the 90 days before it.
 REFERENCE_DAYS = 90
 SHOW_DAYS = (7, 30)
-# Fewer covered blocks than this many days' worth in the reference: collecting, nothing judged.
-# Under O6, a threshold whose sample is shorter than that is null.
+# Fewer covered blocks than this many days' worth in the reference, the closed ones under O1:
+# collecting, nothing judged. Under O6, a threshold whose sample is shorter than that is null.
 COLLECTING_DAYS = 7
 # QC: the longest run of null buckets a series may have, in seconds.
 MAX_GAP = 1800
@@ -101,7 +102,8 @@ class Thresholds(Model):
     oi: float | None
     px: float | None
     n_liq: int  # blocks with liquidations covered: the sample of s_liq and l_liq
-    # The samples of px and oi: every block (v1), those whose dPx or dOI is not imputed (O6).
+    # The samples of px and oi: every block (v1), those whose dPx or dOI is not imputed (O6). O1
+    # leaves the forming block out of every sample.
     n_px: int
     n_oi: int
 
@@ -160,6 +162,7 @@ class Table(Model):
     judged: int
     in_view: int
     rows: list[TableRow]
+    # The last block's state and coverage; under O1 the last closed block's.
     latest: State | None
     latest_uncovered: bool
 
@@ -314,7 +317,13 @@ def _classify(b: Block, t: Thresholds, *, o6: bool = False) -> State | None:
     return "chop"
 
 
-def _table(grid: Grid, blocks: list[Block], spans: list[tuple[int, int]], show_days: int) -> Table:
+def _table(
+    grid: Grid,
+    blocks: list[Block],
+    spans: list[tuple[int, int]],
+    show_days: int,
+    latest: Block | None,
+) -> Table:
     frm = max(grid.start, grid.last - show_days * DAY)
     view = [
         k
@@ -337,7 +346,6 @@ def _table(grid: Grid, blocks: list[Block], spans: list[tuple[int, int]], show_d
             best[state] = (move, b - a + 1)
         a = b + 1
     pct = shares([counts[s] for s in TABLE_STATES])
-    last = blocks[-1] if blocks else None
     return Table(
         show_days=show_days,
         view_from=_at(frm),
@@ -353,8 +361,8 @@ def _table(grid: Grid, blocks: list[Block], spans: list[tuple[int, int]], show_d
             )
             for k, s in enumerate(TABLE_STATES)
         ],
-        latest=last.state if last else None,
-        latest_uncovered=last is not None and not last.covered,
+        latest=latest.state if latest else None,
+        latest_uncovered=latest is not None and not latest.covered,
     )
 
 
@@ -379,12 +387,13 @@ def _past_thresholds(past: Sequence[Block], need: int) -> Thresholds:
     )
 
 
-def _judged_past(b: Block, past: Sequence[Block], need: int) -> Block:
-    """O6: the block with its own thresholds, and its state unless an input is uncovered or
-    imputed, or a threshold is null."""
+def _judged_past(b: Block, past: Sequence[Block], need: int, *, judge: bool) -> Block:
+    """O6: the block with its own thresholds, and its state if `judge` holds unless an input is
+    uncovered or imputed, or a threshold is null."""
     thresholds = _past_thresholds(past, need)
     imputed = b.imputed.dpx or b.imputed.doi or b.imputed.sums
-    state = _classify(b, thresholds, o6=True) if b.covered and not imputed else None
+    judged = judge and b.covered and not imputed
+    state = _classify(b, thresholds, o6=True) if judged else None
     return b.model_copy(update={"thresholds": thresholds, "state": state})
 
 
@@ -416,8 +425,8 @@ def _qc(grid: Grid, ref_start: int) -> tuple[list[str], list[str]]:
 
 def compute_states(grid: Grid, window: Window, *, rules: Rules) -> StatesResult:
     """One view's states by the v1 rules, or under O6 with each block in view ranked against the
-    blocks of the 90 days before it alone."""
-    o6 = "O6" in rules
+    blocks of the 90 days before it alone; under O1 the forming block is drawn only."""
+    o1, o6 = "O1" in rules, "O6" in rules
     w = WINDOW_BUCKETS[window]
     need = COLLECTING_DAYS * BLOCKS_PER_DAY[window]
     ref_start = grid.last // DAY * DAY - REFERENCE_DAYS * DAY
@@ -432,15 +441,20 @@ def compute_states(grid: Grid, window: Window, *, rules: Rules) -> StatesResult:
     frm = max(grid.start, grid.last - max(SHOW_DAYS) * DAY)
     in_view = [grid.start + (i0 + w) * STEP > frm for i0, _ in spans]
     covered = sum(b.covered for b in blocks)
+    # O1: the forming block, only ever the last one, is neither judged nor ranked; the blocks
+    # before `closed` are.
+    closed = len(blocks) - 1 if o1 and blocks and blocks[-1].forming else len(blocks)
 
     if o6:
         # Only the blocks in view are judged, each against the blocks of the 90 days before it.
         for k in range(first, len(every)):
             if in_view[k - first]:
                 past = every[bisect_left(starts, starts[k] - REFERENCE_DAYS * DAY) : k]
-                blocks[k - first] = _judged_past(every[k], past, need)
-        # The view is headed by its reference block R, the last one, judged or not.
-        last = blocks[-1].thresholds if blocks else None
+                judge = k - first < closed
+                blocks[k - first] = _judged_past(every[k], past, need, judge=judge)
+        # The view is headed by its reference block R, the last one (under O1 the last closed
+        # one), judged or not.
+        last = blocks[closed - 1].thresholds if closed else None
         thresholds = (
             last
             if last is not None
@@ -448,24 +462,26 @@ def compute_states(grid: Grid, window: Window, *, rules: Rules) -> StatesResult:
         )
         collecting = thresholds.n_liq < need
     else:
-        liq_sample = [b for b in blocks if b.liq_covered]
+        sample = blocks[:closed]
+        liq_sample = [b for b in sample if b.liq_covered]
         thresholds = Thresholds(
             s_liq=quantile([b.sliq for b in liq_sample], 0.90),
             l_liq=quantile([b.lliq for b in liq_sample], 0.90),
-            oi=quantile([abs(b.doi) for b in blocks], 0.75),
-            px=quantile([abs(b.dpx) for b in blocks], 0.75),
+            oi=quantile([abs(b.doi) for b in sample], 0.75),
+            px=quantile([abs(b.dpx) for b in sample], 0.75),
             n_liq=len(liq_sample),
-            n_px=len(blocks),
-            n_oi=len(blocks),
+            n_px=len(sample),
+            n_oi=len(sample),
         )
-        collecting = covered < need
+        collecting = sum(b.covered for b in sample) < need
         if not collecting:
             blocks = [
                 b.model_copy(update={"state": _classify(b, thresholds)}) if b.covered else b
-                for b in blocks
-            ]
+                for b in sample
+            ] + blocks[closed:]
 
-    tables = [_table(grid, blocks, spans, days) for days in SHOW_DAYS]
+    latest = blocks[closed - 1] if closed else None
+    tables = [_table(grid, blocks, spans, days, latest) for days in SHOW_DAYS]
     shown = [b for b, seen in zip(blocks, in_view, strict=True) if seen]
 
     tail = None

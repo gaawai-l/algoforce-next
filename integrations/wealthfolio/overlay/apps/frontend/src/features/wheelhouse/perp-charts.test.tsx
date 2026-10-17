@@ -61,6 +61,13 @@ const legend = (key: ChartKey) =>
   );
 const reading = (key: ChartKey) =>
   panel(key).querySelector(".wh-perp-reading")?.textContent ?? "";
+// The reading's labelled values, one per item.
+const values = (key: ChartKey) =>
+  [
+    ...panel(key).querySelectorAll(
+      ".wh-perp-reading > span:not(.wh-perp-when):not(.wh-perp-notes)",
+    ),
+  ].map((item) => item.textContent ?? "");
 const svg = (key: ChartKey) => panel(key).querySelector("svg")!;
 
 const SQUEEZE_UNWIND = ["longsq", "shortsq", "longun", "shortun"];
@@ -538,4 +545,114 @@ it("has Chinese copy for every chart key, written apart from the English", () =>
     if (/\.(shows|implies|how|title)$/.test(key))
       expect(zh).not.toBe(messages.en[key as keyof typeof messages.en]);
   }
+});
+
+it("says on hover why a covered block was not judged, and shows its own thresholds", () => {
+  draw(perpStatesSample("ruled"));
+  // The latest block is forming: O1 draws it only. Charts 1 and 2 say so in its value.
+  const latest = reading("c1");
+  expect(latest).toContain("Latest · 2026-10-17 08:00 → 12:00 UTC");
+  expect(latest).toContain("Block not judged: still forming");
+  expect(values("c1")).toEqual([
+    "BTC/USD $60,595.7",
+    "Block not judged: still forming",
+    "Short liq. threshold 38.2 BTC",
+    "Long liq. threshold 36.6 BTC",
+    "OI change threshold 280 BTC",
+    "Price change threshold 0.70%",
+  ]);
+  // Its value says it is forming, so Charts 1 and 2 need no note; Chart 3 keeps it.
+  expect(panel("c1").querySelector(".wh-perp-notes")).toBeNull();
+  expect(panel("c3").querySelector(".wh-perp-notes")?.textContent).toBe(
+    "forming",
+  );
+
+  // The last closed block is judged against its own thresholds, those heading the view.
+  fireEvent.keyDown(svg("c1"), { key: "ArrowLeft" });
+  expect(reading("c1")).toContain("2026-10-17 04:00 → 08:00 UTC");
+  expect(values("c1").slice(1)).toEqual([
+    "Block Chop",
+    "Short liq. threshold 37.8 BTC",
+    "Long liq. threshold 35.8 BTC",
+    "OI change threshold 281 BTC",
+    "Price change threshold 0.70%",
+  ]);
+
+  // The first block has no close before it and nothing before it to rank on.
+  fireEvent.keyDown(svg("c1"), { key: "Home" });
+  expect(reading("c1")).toContain("2026-10-07 00:00 → 04:00 UTC");
+  expect(values("c1").slice(1)).toEqual([
+    "Block not judged: imputed inputs, fewer than 42 reference blocks",
+    "Short liq. threshold —",
+    "Long liq. threshold —",
+    "OI change threshold —",
+    "Price change threshold —",
+  ]);
+  // Block 42 ranks 42 liquidations but only 41 price changes.
+  fireEvent.keyDown(svg("c2"), { key: "Home" });
+  for (let k = 0; k < 42; k += 1)
+    fireEvent.keyDown(svg("c2"), { key: "ArrowRight" });
+  expect(reading("c2")).toContain("2026-10-14 00:00 → 04:00 UTC");
+  expect(values("c2").slice(1)).toEqual([
+    "Block not judged: fewer than 42 reference blocks",
+    "Short liq. threshold 37.7 BTC",
+    "Long liq. threshold 36.8 BTC",
+    "OI change threshold 284 BTC",
+    "Price change threshold —",
+  ]);
+  // Block 55 has no OI close.
+  for (let k = 42; k < 55; k += 1)
+    fireEvent.keyDown(svg("c2"), { key: "ArrowRight" });
+  expect(reading("c2")).toContain("2026-10-16 04:00 → 08:00 UTC");
+  expect(reading("c2")).toContain("Block not judged: imputed inputs");
+  // Charts 3 and 4 read no states and no thresholds.
+  fireEvent.keyDown(svg("c4"), { key: "Home" });
+  expect(reading("c4")).not.toContain("threshold");
+  expect(reading("c4")).not.toContain("not judged");
+});
+
+it("names 21 reference blocks for an 8h view", () => {
+  const view = perpStatesSample("ruled");
+  view.window = "8h";
+  draw(view);
+  fireEvent.keyDown(svg("c1"), { key: "Home" });
+  expect(reading("c1")).toContain("fewer than 21 reference blocks");
+});
+
+it("counts the covered blocks left unjudged apart in the legend", () => {
+  draw(perpStatesSample("ruled"));
+  expect(legend("c1")).toEqual([
+    "Long squeeze 1 / 18",
+    "Short squeeze 1 / 18",
+    "Long unwind 1 / 18",
+    "Short unwind 0 / 18",
+    "(+45 not judged)",
+    "BTC/USD",
+  ]);
+  // Only judged blocks are tinted.
+  expect(bands("c1")).toHaveLength(3);
+  expect(bands("c2")).toHaveLength(2);
+  expect(document.querySelector("[data-uncovered]")).toBeNull();
+});
+
+it("keeps the zero-threshold note and the past-tense caveat to v1", () => {
+  const view = perpStatesSample("ruled");
+  view.thresholds = { ...view.thresholds!, s_liq: 0 };
+  draw(view);
+  fireEvent.keyDown(svg("c1"), { key: "ArrowLeft" });
+  expect(reading("c1")).toContain("Block Chop");
+  expect(reading("c1")).not.toContain("liquidation threshold is 0");
+  const how = (key: ChartKey) =>
+    panel(key).querySelectorAll(".wh-perp-read p")[2].textContent ?? "";
+  expect(how("c1")).toMatch(/use only the 90 days before it/);
+  expect(how("c1")).not.toMatch(/came later/);
+  cleanup();
+  draw();
+  expect(how("c1")).toMatch(/include blocks that came later/);
+});
+
+it("draws Charts 1 and 2 while collecting once some blocks are judged", () => {
+  draw({ ...perpStatesSample("ruled"), collecting: true });
+  expect(chart("c1")).toBeTruthy();
+  expect(chart("c2")).toBeTruthy();
 });

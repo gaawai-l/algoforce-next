@@ -1,10 +1,12 @@
 import { z } from "zod";
 import type { components } from "./api-schema";
 import sample from "./perp-states-sample.json";
+import ruledSample from "./perp-states-sample-ruled.json";
 
 export type PerpStatesView = components["schemas"]["PerpStatesView"];
 export type PerpsStatus = components["schemas"]["PerpsStatus"];
 export type PerpBlock = components["schemas"]["Block"];
+export type PerpThresholds = components["schemas"]["Thresholds"];
 export type PerpTable = components["schemas"]["Table"];
 export type PerpState = components["schemas"]["TableRow"]["state"];
 export type PerpCollector = components["schemas"]["CollectorStatus"];
@@ -160,7 +162,12 @@ export const perpsStatusSchema: z.ZodType<PerpsStatus, z.ZodTypeDef, unknown> =
       .nullable(),
   });
 
-export type PerpStatesVariant = "full" | "collecting" | "uncovered" | "qc";
+export type PerpStatesVariant =
+  | "full"
+  | "collecting"
+  | "uncovered"
+  | "qc"
+  | "ruled";
 
 const BLOCKS_PER_DAY = 6; // 4h blocks
 // 20 whole blocks and the forming one: three days and a half, short of the 7 that end collecting.
@@ -301,12 +308,14 @@ function uncovered(view: PerpStatesView): PerpStatesView {
 }
 
 // Test-only: the service's own all-venues 4h view (written by the Python tests from a synthetic
-// grid), with variants derived from it. Runtime code must not use it: a missing view is shown
-// as missing, never as this data.
+// grid), with variants derived from it. "ruled" is the service's view of ten days of such a grid
+// under O1 and O6, judged in part. Runtime code must not use them: a missing view is shown as
+// missing, never as this data.
 export function perpStatesSample(
   variant: PerpStatesVariant = "full",
 ): PerpStatesView {
   // Parsing builds new objects and arrays all the way down, so no variant touches the import.
+  if (variant === "ruled") return perpStatesViewSchema.parse(ruledSample);
   const view = perpStatesViewSchema.parse(sample);
   switch (variant) {
     case "collecting":

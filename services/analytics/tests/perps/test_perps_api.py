@@ -1,7 +1,7 @@
 """The read-only perps API: freshness, collector status and reason codes worked out per request,
-the startup flags, and the frontend sample generated from a synthetic grid (P4-R11).
+the startup flags, and the frontend samples generated from a synthetic grid (P4-R11).
 
-Write the sample again after a contract change with:
+Write the samples again after a contract change with:
     .venv-foundation/bin/python services/analytics/tests/perps/test_perps_api.py
 """
 
@@ -58,7 +58,9 @@ from wheelhouse_service.settings import Settings
 
 PREFIX = "/api/wheelhouse/v1/perps"
 V1: Rules = frozenset()
+O1: Rules = frozenset({"O1"})
 O6: Rules = frozenset({"O6"})
+O1O6: Rules = frozenset({"O1", "O6"})
 STEP = 600
 DAY = 86_400
 W4 = 24  # buckets in a 4h block
@@ -79,6 +81,12 @@ SAMPLE_NOW = datetime(2026, 10, 17, 11, 7, tzinfo=UTC)
 THROUGH = SAMPLE_LAST + timedelta(minutes=10)
 # Three days and seven hours: 20 covered 4h blocks, short of the 42 that end collecting.
 SHORT_START = datetime(2026, 10, 14, tzinfo=UTC)
+# The O1 and O6 sample: ten days and eleven hours of the same kind of grid, 62 closed 4h blocks
+# and a forming one, so O6 ranks the blocks of the first seven days on too few blocks before
+# them. Block 55 has no OI close. Derived and read at the same times as the v1 sample.
+RULED_SAMPLE = SAMPLE.with_name("perp-states-sample-ruled.json")
+RULED_START = datetime(2026, 10, 7, tzinfo=UTC)
+RULED_IMPUTED = 55
 
 # Every four days of 4h blocks: one block built for each state but chop, the rest chop. Chop
 # blocks near a threshold land in other states too.
@@ -195,22 +203,26 @@ def synthetic_grid(start: datetime, last: datetime, seed: int = 20261017) -> Gri
     )
 
 
-def sample_view() -> PerpStatesView:
-    """The all-venues 4h view as the API would serve it at SAMPLE_NOW, every stream live."""
-    states = compute_states(synthetic_grid(SAMPLE_START, SAMPLE_LAST), "4h", rules=V1)
+def sample_view(*, ruled: bool = False) -> PerpStatesView:
+    """The all-venues 4h view as the API would serve it at SAMPLE_NOW, every stream live: the v1
+    sample, or with `ruled` the O1 and O6 one."""
+    start, rules = (RULED_START, O1O6) if ruled else (SAMPLE_START, V1)
+    grid = synthetic_grid(start, SAMPLE_LAST)
+    if ruled:
+        grid.oi[RULED_IMPUTED * W4 + W4 - 1] = None
+    states = compute_states(grid, "4h", rules=rules)
     stored = StoredStates(
-        exchange="all", window="4h", start=SAMPLE_START, reasons=[], states=states
+        exchange="all", window="4h", start=start, reasons=[], states=states, rules=sorted(rules)
     )
     now = SAMPLE_NOW.timestamp()
-    spans = [(SAMPLE_START.timestamp(), now - 6.0)]
+    spans = [(start.timestamp(), now - 6.0)]
     collectors = [collector_status(stream, spans, SAMPLE_NOW, {}) for stream in STREAMS]
-    return states_view(
-        "all", "4h", (stored, SAMPLE_COMPUTED), collectors, stored_hosts({}), SAMPLE_NOW, rules=V1
-    )
+    derived = (stored, SAMPLE_COMPUTED)
+    return states_view("all", "4h", derived, collectors, stored_hosts({}), SAMPLE_NOW, rules=rules)
 
 
-def render_sample() -> str:
-    return json.dumps(sample_view().model_dump(mode="json"), indent=2) + "\n"
+def render_sample(*, ruled: bool = False) -> str:
+    return json.dumps(sample_view(ruled=ruled).model_dump(mode="json"), indent=2) + "\n"
 
 
 class Clock:
@@ -408,6 +420,33 @@ def test_reason_codes(tmp_path: Path):
         "collecting:3.3",
     ]
     assert all(view["collecting"] is True for view in views.values())
+
+
+def test_collecting_reason_under_o6_counts_the_reference_blocks_liquidations(tmp_path: Path):
+    # 19 closed 4h blocks and a forming one, 9 closed 8h blocks and a forming one, all covered.
+    grid = synthetic_grid(SHORT_START, datetime(2026, 10, 17, 6, 50, tzinfo=UTC))
+
+    def collecting(rules: Rules, window: Window) -> tuple[str, float]:
+        path = tmp_path / f"{''.join(sorted(rules)) or 'v1'}-{window}.sqlite"
+        states = compute_states(grid, window, rules=rules)
+        save(PerpsStore(path), "all", window, states, rules=sorted(rules))
+        with TestClient(router_app(path, Clock(SAMPLE_NOW), rules=rules)) as http:
+            view = get_states(http, "all", window)
+        assert view["collecting"] is True
+        (reason,) = [reason for reason in view["reasons"] if reason.startswith("collecting:")]
+        return reason, view["covered_days"]
+
+    # v1 counts the covered blocks, as covered_days does; so does O1 alone, though its flag
+    # leaves the forming block out.
+    assert collecting(V1, "4h") == ("collecting:3.3", pytest.approx(20 / 6))
+    assert collecting(O1, "4h") == ("collecting:3.3", pytest.approx(20 / 6))
+    assert collecting(V1, "8h") == ("collecting:3.3", pytest.approx(10 / 3))
+    # O6 counts the liquidation sample of R, whose n_liq sets the flag: R is the forming block
+    # under O6 alone and the last closed one with O1. covered_days stays v1's.
+    assert collecting(O6, "4h") == ("collecting:3.2", pytest.approx(20 / 6))  # 19 / 6
+    assert collecting(O1O6, "4h") == ("collecting:3.0", pytest.approx(20 / 6))  # 18 / 6
+    assert collecting(O6, "8h") == ("collecting:3.0", pytest.approx(10 / 3))  # 9 / 3
+    assert collecting(O1O6, "8h") == ("collecting:2.7", pytest.approx(10 / 3))  # 8 / 3
 
 
 def test_unavailable_while_perps_are_off(tmp_path: Path):
@@ -802,10 +841,10 @@ def test_views_carry_the_rules_of_their_payload(tmp_path: Path):
     path = tmp_path / "perps.sqlite"
     store = PerpsStore(path)
     grid = synthetic_grid(SAMPLE_START, SAMPLE_LAST)
-    save(store, "all", "4h", compute_states(grid, "4h", rules=O6), rules=["O6"])
+    save(store, "all", "4h", compute_states(grid, "4h", rules=O1O6), rules=["O1", "O6"])
     save(store, "binance", "4h", compute_states(grid, "4h", rules=V1))
     # A view missing a series keeps the rules of the round that found it so.
-    save(store, "bybit", "4h", None, ["series_missing:bybit:oi"], rules=["O6"])
+    save(store, "bybit", "4h", None, ["series_missing:bybit:oi"], rules=["O1", "O6"])
 
     def labels(configured: Rules) -> dict[Exchange, tuple[list[str], bool]]:
         with TestClient(router_app(path, Clock(SAMPLE_NOW), rules=configured)) as http:
@@ -817,29 +856,32 @@ def test_views_carry_the_rules_of_their_payload(tmp_path: Path):
             exchange: (view["rules"], view["rules_pending"]) for exchange, view in views.items()
         }
 
-    # Only the rules implemented for the perps count: O1-O5 alone do not make them pending.
+    # Only the rules implemented for the perps count: O2-O5 alone do not make them pending.
     assert (
         labels(ALL_RULES)
-        == labels(O6)
+        == labels(O1O6)
         == {
-            "all": (["O6"], False),
+            "all": (["O1", "O6"], False),
             "binance": ([], True),
-            "bybit": (["O6"], False),
+            "bybit": (["O1", "O6"], False),
         }
     )
     assert (
-        labels(frozenset({"O1", "O2", "O3", "O4", "O5"}))
+        labels(frozenset({"O2", "O3", "O4", "O5"}))
         == labels(V1)
         == {
-            "all": (["O6"], True),
+            "all": (["O1", "O6"], True),
             "binance": ([], False),
-            "bybit": (["O6"], True),
+            "bybit": (["O1", "O6"], True),
         }
     )
+    # Either perps rule alone differs from the payloads derived under both.
+    for rules in (O1, O6):
+        assert labels(rules)["all"] == (["O1", "O6"], True)
 
 
 def test_create_app_hands_the_rules_to_perps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    save(PerpsStore(tmp_path / "perps.sqlite"), "all", "4h", None, rules=["O6"])
+    save(PerpsStore(tmp_path / "perps.sqlite"), "all", "4h", None, rules=["O1", "O6"])
     client, connect, seen = blocked()
     workers: list[PerpsSync] = []
 
@@ -863,11 +905,11 @@ def test_create_app_hands_the_rules_to_perps(tmp_path: Path, monkeypatch: pytest
         return view["rules"], view["rules_pending"], worker.rules
 
     monkeypatch.delenv("WHEELHOUSE_RULES", raising=False)
-    assert label() == (["O6"], False, ALL_RULES)
-    assert label(rules=V1) == (["O6"], True, V1)
+    assert label() == (["O1", "O6"], False, ALL_RULES)
+    assert label(rules=V1) == (["O1", "O6"], True, V1)
     monkeypatch.setenv("WHEELHOUSE_RULES", "v1")
-    assert label() == (["O6"], True, V1)
-    assert label(rules=O6) == (["O6"], False, O6)
+    assert label() == (["O1", "O6"], True, V1)
+    assert label(rules=O1O6) == (["O1", "O6"], False, O1O6)
     assert seen == []
 
 
@@ -899,5 +941,32 @@ def test_sample_json_regenerates_identically(tmp_path: Path):
         assert get_states(http, "all") == json.loads(SAMPLE.read_text())
 
 
+def test_ruled_sample_json_regenerates_identically():
+    view = sample_view(ruled=True)
+
+    # The blocks of the first seven days rank too few blocks before them, block 55 lacks its OI
+    # close and the forming block is only drawn; the others are judged.
+    judged = [block.state is not None for block in view.blocks]
+    assert judged == [False] * 43 + [True] * 12 + [False] + [True] * 6 + [False]
+    assert all(block.covered and block.thresholds is not None for block in view.blocks)
+    nulls = [
+        [block.thresholds.s_liq is None, block.thresholds.px is None, block.thresholds.oi is None]
+        for block in view.blocks[41:44]
+        if block.thresholds is not None
+    ]
+    assert nulls == [[True, True, True], [False, True, False], [False, False, False]]
+    first, imputed, forming = view.blocks[0], view.blocks[RULED_IMPUTED], view.blocks[-1]
+    assert (first.imputed.dpx, imputed.imputed.doi, forming.forming) == (True, True, True)
+    # R is the last closed block: the view is headed by its thresholds and is not collecting.
+    assert view.thresholds == view.blocks[-2].thresholds
+    assert view.thresholds is not None
+    assert (view.thresholds.n_liq, view.thresholds.n_px, view.thresholds.n_oi) == (61, 60, 60)
+    assert [(table.in_view, table.judged) for table in view.tables] == [(42, 18), (63, 18)]
+    assert (view.data_state, view.reasons, view.qc, view.collecting) == ("fresh", [], [], False)
+    assert (view.rules, view.rules_pending) == (["O1", "O6"], False)
+    assert RULED_SAMPLE.read_text() == render_sample(ruled=True)
+
+
 if __name__ == "__main__":
     SAMPLE.write_text(render_sample())
+    RULED_SAMPLE.write_text(render_sample(ruled=True))

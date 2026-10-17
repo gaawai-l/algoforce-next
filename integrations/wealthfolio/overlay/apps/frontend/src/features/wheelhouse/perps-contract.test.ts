@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import raw from "./perp-states-sample.json";
+import ruledRaw from "./perp-states-sample-ruled.json";
 import {
   perpStatesSample,
   perpStatesViewSchema,
@@ -82,6 +83,36 @@ describe("perp states contract", () => {
       "bybit_liq",
       "bybit_trades",
     ]);
+  });
+
+  it("accepts the checked-in O1 and O6 sample, judged in part", () => {
+    const parsed = perpStatesViewSchema.parse(ruledRaw);
+    expect([parsed.rules, parsed.rules_pending]).toEqual([["O1", "O6"], false]);
+    expect(parsed.collecting).toBe(false);
+    // The first 43 blocks rank too few blocks before them, block 55 has an imputed OI change
+    // and the forming block is only drawn; every block carries its own thresholds.
+    expect(parsed.blocks.map((block) => block.state !== null)).toEqual([
+      ...Array(43).fill(false),
+      ...Array(12).fill(true),
+      false,
+      ...Array(6).fill(true),
+      false,
+    ]);
+    expect(parsed.blocks.every((block) => block.thresholds !== null)).toBe(
+      true,
+    );
+    expect(parsed.blocks[0].thresholds?.s_liq).toBeNull();
+    expect(parsed.blocks[55].imputed.doi).toBe(true);
+    expect(parsed.blocks.at(-1)?.forming).toBe(true);
+    // The view is headed by the last closed block's thresholds.
+    expect(parsed.thresholds).toEqual(parsed.blocks.at(-2)?.thresholds);
+    expect(parsed.tables.map((table) => [table.in_view, table.judged])).toEqual(
+      [
+        [42, 18],
+        [63, 18],
+      ],
+    );
+    expect(perpStatesSample("ruled")).toEqual(ruledRaw);
   });
 
   it("hands out the sample as the file's data, never as shared state", () => {

@@ -15,7 +15,7 @@ IMPLEMENTED: dict[View, Rules] = {
     "levels": frozenset({"O1", "O5"}),
     "costbasis": frozenset({"O1", "O5"}),
     "pressure": frozenset({"O1", "O2", "O3"}),
-    "perps": frozenset({"O6"}),
+    "perps": frozenset({"O1", "O6"}),
 }
 _BY_CODE: dict[str, Rule] = {rule: rule for rule in ALL_RULES}
 _V1 = "V1"

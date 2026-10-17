@@ -1,5 +1,5 @@
-"""The original perp-squeeze page's v1 state rules, and O6's ranking against the past only,
-checked on synthetic 10-minute grids."""
+"""The original perp-squeeze page's v1 state rules, O6's ranking against the past only and O1's
+closed blocks, checked on synthetic 10-minute grids."""
 
 import random
 from dataclasses import dataclass, replace
@@ -30,7 +30,9 @@ H8 = 48  # buckets in an 8h block
 # 2023-11-14 00:00 UTC: a day boundary, so both 4h and 8h blocks start here.
 DAY0 = 19_675 * DAY
 V1: Rules = frozenset()
+O1: Rules = frozenset({"O1"})
 O6: Rules = frozenset({"O6"})
+O1O6: Rules = frozenset({"O1", "O6"})
 
 Values = list[float | None]
 
@@ -531,7 +533,7 @@ def own(b: Block) -> Thresholds:
     return b.thresholds
 
 
-def test_o6_later_blocks_change_no_earlier_state_or_threshold():
+def test_o6_later_blocks_change_no_earlier_state_or_threshold() -> None:
     rng = random.Random(6)
     past = [features(rng) for _ in range(100)]
     calm = [features(rng) for _ in range(30)]
@@ -559,7 +561,7 @@ def test_o6_later_blocks_change_no_earlier_state_or_threshold():
     assert [x.state for x in a.blocks[:100]] != [x.state for x in b.blocks[:100]]
 
 
-def test_o6_ranks_by_r7_over_the_blocks_before():
+def test_o6_ranks_by_r7_over_the_blocks_before() -> None:
     # 43 blocks before the probe: sLiq 0..42, dOI 1..43, dPx 0.1..4.3 %. The first one has no
     # bucket before it, so its dPx is imputed and left out of the px sample.
     specs = [{"sliq": float(k), "doi": float(k + 1), "dpx": 0.1 * (k + 1)} for k in range(43)]
@@ -576,7 +578,7 @@ def test_o6_ranks_by_r7_over_the_blocks_before():
     assert r.blocks[-1].state == "chop"
 
 
-def test_o6_dpx_runs_from_the_bucket_before_the_block():
+def test_o6_dpx_runs_from_the_bucket_before_the_block() -> None:
     base = run(*[FILL] * 50)
     close = base[-1].price[-1]
     assert close is not None
@@ -606,7 +608,7 @@ def test_o6_dpx_runs_from_the_bucket_before_the_block():
     assert o6.blocks[51].state is not None
 
 
-def test_o6_squeeze_needs_liquidations_on_its_side():
+def test_o6_squeeze_needs_liquidations_on_its_side() -> None:
     # No liquidations at all: both P90s are 0, so v1 calls any large move a squeeze.
     moves = [{"dpx": 1.0 if k % 2 else -1.0, "doi": 100.0} for k in range(50)]
     probes = [
@@ -623,7 +625,7 @@ def test_o6_squeeze_needs_liquidations_on_its_side():
     assert (own(o6.blocks[-4]).s_liq, own(o6.blocks[-4]).l_liq) == (0.0, 0.0)
 
 
-def test_o6_leaves_imputed_blocks_unjudged_and_out_of_their_own_samples():
+def test_o6_leaves_imputed_blocks_unjudged_and_out_of_their_own_samples() -> None:
     parts = run(*[FILL] * 50, {"doi": 50.0}, {"delta": 5.0}, {})
     parts[50].oi[-1] = None  # no OI close: dOI imputed
     parts[51].vd[3] = None  # a missing Binance kline: covered, but a sum is imputed
@@ -638,7 +640,7 @@ def test_o6_leaves_imputed_blocks_unjudged_and_out_of_their_own_samples():
     assert o6.blocks[52].state is not None
 
 
-def test_o6_checks_each_thresholds_sample_on_its_own():
+def test_o6_checks_each_thresholds_sample_on_its_own() -> None:
     # The first 10 blocks have no liquidation coverage.
     parts = run(*[{**FILL, "liq": False}] * 10, *[FILL] * 45)
     r = compute_states(grid(*parts), "4h", rules=O6)
@@ -663,7 +665,7 @@ def test_o6_checks_each_thresholds_sample_on_its_own():
     assert r.blocks[45].state is None
 
 
-def test_o6_judges_later_blocks_once_their_past_is_long_enough():
+def test_o6_judges_later_blocks_once_their_past_is_long_enough() -> None:
     parts = run(*[FILL] * 80)
     r = compute_states(grid(*parts), "4h", rules=O6)
 
@@ -683,7 +685,7 @@ def test_o6_judges_later_blocks_once_their_past_is_long_enough():
     assert [b.state is not None for b in r.blocks] == [False] * 22 + [True] * 8
 
 
-def test_o6_heads_the_view_with_the_reference_blocks_thresholds():
+def test_o6_heads_the_view_with_the_reference_blocks_thresholds() -> None:
     # R, the last block, is not covered and so not judged: its thresholds still head the view.
     r = compute_states(grid(*run(*[FILL] * 60, {**FILL, "liq": False})), "4h", rules=O6)
     assert (r.blocks[-1].covered, r.blocks[-1].state) == (False, None)
@@ -706,7 +708,7 @@ def test_o6_heads_the_view_with_the_reference_blocks_thresholds():
     assert r.collecting
 
 
-def test_backfill_of_121_days_keeps_v1_and_gives_o6_its_full_past():
+def test_backfill_of_121_days_keeps_v1_and_gives_o6_its_full_past() -> None:
     rng = random.Random(121)
     # 121 whole days of 4h blocks and a forming one: `last` falls on day 121, 02:00.
     long = grid(*run(*[features(rng) for _ in range(121 * 6)], {"n": 13}))
@@ -732,3 +734,111 @@ def test_backfill_of_121_days_keeps_v1_and_gives_o6_its_full_past():
         # ... which 91 days of grid would cut short for the earliest ones.
         cut = compute_states(short, window, rules=O6)
         assert own(cut.blocks[0]).n_oi == 61 * per_day  # [day - 91, day - 30)
+
+
+def test_o1_leaves_the_forming_block_unjudged_and_out_of_the_thresholds() -> None:
+    # 42 closed blocks: sLiq 0..41, dOI 1..42, dPx 0.1..4.2 %; the last one is a short squeeze.
+    base = [block(sliq=float(k), doi=float(k + 1), dpx=0.1 * (k + 1)) for k in range(42)]
+    # A forming long squeeze beyond every threshold.
+    forming = block(dpx=-5.0, doi=-1000.0, lliq=4000.0, sliq=1000.0, n=13)
+    g = grid(*base, forming)
+
+    v1, o1 = (compute_states(g, "4h", rules=rules) for rules in (V1, O1))
+    assert v1.blocks[-1].forming and o1.blocks[-1].forming
+    # v1 ranks and judges the forming block with the closed ones.
+    t = v1.thresholds
+    assert (t.n_liq, t.n_px, t.n_oi, t.s_liq, t.oi) == (43, 43, 43, 37.0, 32.0)
+    assert t.px == pytest.approx(3.2)
+    assert v1.blocks[-1].state == "longsq"
+    # O1 ranks the closed blocks alone: sorted[floor(0.9 * 41)] = 36, sorted[floor(0.75 * 41)]
+    # = 31 and 3.1.
+    t = o1.thresholds
+    assert (t.n_liq, t.n_px, t.n_oi, t.s_liq, t.oi) == (42, 42, 42, 36.0, 31.0)
+    assert t.px == pytest.approx(3.1)
+    assert o1.blocks[-1].state is None
+    assert o1.blocks[-2].state == "shortsq"
+    assert all(b.state is not None and b.thresholds is None for b in o1.blocks[:-1])
+    # Table 1 marks the last closed block, v1 the forming one; both draw and count it in view.
+    assert [(t.latest, t.latest_uncovered) for t in v1.tables] == [("longsq", False)] * 2
+    assert [(t.latest, t.latest_uncovered) for t in o1.tables] == [("shortsq", False)] * 2
+    assert [(t.in_view, t.judged) for t in v1.tables] == [(43, 43)] * 2
+    assert [(t.in_view, t.judged) for t in o1.tables] == [(43, 42)] * 2
+    # covered_days still counts the forming block.
+    assert o1.covered_days == v1.covered_days == 43 / 6
+    assert not o1.collecting
+
+    # Without a forming block O1 changes nothing: a tail is neither judged nor ranked anyway.
+    g = grid(*base, block(n=12))
+    assert compute_states(g, "4h", rules=O1) == compute_states(g, "4h", rules=V1)
+
+
+def test_o1_collects_until_enough_closed_blocks_are_covered() -> None:
+    # 41 closed covered blocks and a covered forming one: 42 for v1, 41 for O1.
+    g = grid(*[filler() for _ in range(41)], filler(n=13))
+    v1, o1 = (compute_states(g, "4h", rules=rules) for rules in (V1, O1))
+    assert (v1.collecting, o1.collecting) == (False, True)
+    assert v1.covered_days == o1.covered_days == 7.0
+    assert all(b.state is None for b in o1.blocks)
+    assert [t.judged for t in o1.tables] == [0, 0]
+    assert (o1.thresholds.n_liq, o1.thresholds.n_px, o1.thresholds.n_oi) == (41, 41, 41)
+
+    # 8h: 20 closed blocks and a forming one of 25 buckets.
+    g = grid(*[filler(n=H8) for _ in range(20)], filler(n=25))
+    v1, o1 = (compute_states(g, "8h", rules=rules) for rules in (V1, O1))
+    assert (v1.collecting, o1.collecting) == (False, True)
+    assert v1.covered_days == o1.covered_days == 7.0
+    assert all(b.state is None for b in o1.blocks)
+
+
+def test_o1_takes_latest_uncovered_from_the_last_closed_block() -> None:
+    build = block(doi=100.0, dpx=0.5, delta=5.0)
+    forming_build = block(doi=100.0, dpx=0.5, delta=5.0, n=13)
+    # The last closed block is uncovered, the forming one covered ...
+    g = grid(*[filler() for _ in range(42)], filler(liq=False), forming_build)
+    v1, o1 = (compute_states(g, "4h", rules=rules) for rules in (V1, O1))
+    assert [(t.latest, t.latest_uncovered) for t in v1.tables] == [("longbd", False)] * 2
+    assert [(t.latest, t.latest_uncovered) for t in o1.tables] == [(None, True)] * 2
+    # ... and the other way round.
+    g = grid(*[filler() for _ in range(42)], build, filler(n=13, liq=False))
+    v1, o1 = (compute_states(g, "4h", rules=rules) for rules in (V1, O1))
+    assert [(t.latest, t.latest_uncovered) for t in v1.tables] == [(None, True)] * 2
+    assert [(t.latest, t.latest_uncovered) for t in o1.tables] == [("longbd", False)] * 2
+
+
+def test_o1_with_o6_heads_the_view_with_the_last_closed_block() -> None:
+    # 43 closed blocks and a forming one, which O6 alone takes as R and judges.
+    parts = run(*[FILL] * 43, {**FILL, "n": 13})
+    o6, both = (compute_states(grid(*parts), "4h", rules=rules) for rules in (O6, O1O6))
+    assert o6.blocks[-1].forming and o6.blocks[-1].state == "chop"
+    assert o6.thresholds == own(o6.blocks[-1])
+    assert [t.latest for t in o6.tables] == ["chop", "chop"]
+    # Under O1 the forming block keeps its own thresholds but is not judged ...
+    assert own(both.blocks[-1]) == own(o6.blocks[-1])
+    assert both.blocks[-1].state is None
+    # ... and R is the last closed block, judged or not: block 42 ranks 41 dPx, too few.
+    assert both.thresholds == own(both.blocks[-2])
+    t = both.thresholds
+    assert (t.n_liq, t.n_px, t.n_oi, t.px) == (42, 41, 42, None)
+    assert both.blocks[-2].state is None
+    assert not both.collecting
+    assert [(t.latest, t.latest_uncovered) for t in both.tables] == [(None, False)] * 2
+    # The closed blocks are ranked and judged as under O6 alone.
+    assert [(b.state, b.thresholds) for b in both.blocks[:-1]] == [
+        (b.state, b.thresholds) for b in o6.blocks[:-1]
+    ]
+
+    # One closed block fewer: R's liquidation sample falls short, so the view is collecting,
+    # while O6 alone ranks the forming block on 42.
+    parts = run(*[FILL] * 42, {**FILL, "n": 13})
+    o6, both = (compute_states(grid(*parts), "4h", rules=rules) for rules in (O6, O1O6))
+    assert (o6.thresholds.n_liq, o6.collecting) == (42, False)
+    assert (both.thresholds.n_liq, both.collecting) == (41, True)
+    assert both.covered_days == o6.covered_days == 43 / 6
+
+    # A forming block alone leaves no R: nothing is ranked.
+    r = compute_states(grid(block(n=13)), "4h", rules=O1O6)
+    assert (len(r.blocks), r.blocks[0].forming, r.blocks[0].state) == (1, True, None)
+    assert r.thresholds == Thresholds(
+        s_liq=None, l_liq=None, oi=None, px=None, n_liq=0, n_px=0, n_oi=0
+    )
+    assert r.collecting

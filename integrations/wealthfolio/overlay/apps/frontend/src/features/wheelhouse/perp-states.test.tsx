@@ -803,3 +803,131 @@ it("has Chinese copy for every perp key, written apart from the English", () => 
       messages.en[key as keyof typeof messages.en],
     );
 });
+
+it("names the rules that produced the view, and says when they are being applied again", async () => {
+  show();
+  expect(await screen.findByText("Rules: original v1")).toBeTruthy();
+  cleanup();
+  show({ view: perpStatesSample("ruled") });
+  expect(
+    await screen.findByText(
+      "Rules: O1 closed data only · O6 past-only ranking",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.queryByText("Recomputing with the configured rules"),
+  ).toBeNull();
+  cleanup();
+  show({ view: { ...perpStatesSample("ruled"), rules_pending: true } });
+  expect(
+    await screen.findByText("Recomputing with the configured rules"),
+  ).toBeTruthy();
+});
+
+it("shows Table 1 of a view judged in part, marked at the last closed block", async () => {
+  show({ view: perpStatesSample("ruled") });
+  await screen.findByText(tableTitle);
+  expect(subtitle()).toBe(
+    "18 judged of 63 blocks in view · share of blocks, not a forecast",
+  );
+  const marker = screen.getByRole("img", { name: "Latest closed block" });
+  expect(marker.closest("tr")?.getAttribute("data-state")).toBe("chop");
+  // The forming block is not judged under O1, so no state of it can change.
+  expect(screen.queryByText(/still forming when computed/)).toBeNull();
+  expect(cellsOf(bodyRows()[7]).slice(2)).toEqual(["72%", "+1.11% · 8h"]);
+  const how = table()
+    .closest("section")!
+    .querySelectorAll(".wh-perp-read p")[2];
+  expect(how.textContent).toMatch(/use only the 90 days before it/);
+  expect(how.textContent).not.toMatch(/came later/);
+  fireEvent.click(screen.getByRole("button", { name: "7d" }));
+  expect(subtitle()).toBe(
+    "18 judged of 42 blocks in view · share of blocks, not a forecast",
+  );
+});
+
+it("says the last closed block is uncovered under O1", async () => {
+  const view = perpStatesSample("ruled");
+  view.tables = view.tables.map((item) => ({
+    ...item,
+    latest: null,
+    latest_uncovered: true,
+  }));
+  show({ view });
+  await screen.findByText(tableTitle);
+  expect(subtitle()).toMatch(/ · latest closed block uncovered$/);
+  expect(screen.queryByRole("img", { name: /Latest/ })).toBeNull();
+});
+
+it("lists the thresholds heading the view with their samples under O6 only", async () => {
+  show({ view: perpStatesSample("ruled") });
+  await screen.findByText(tableTitle);
+  const params = screen
+    .getByRole("heading", { name: "Parameters" })
+    .closest("section")!;
+  expect(params.querySelector(".wh-perp-thresholds p")?.textContent).toBe(
+    "Thresholds Short liq. 37.8 BTC · Long liq. 35.8 BTC · OI change 281 BTC · Price change 0.70%",
+  );
+  expect(
+    within(params).getByText(
+      "Of the latest closed block, ranked on the 90 days before it · samples: liquidations 61, price 60, OI 60 blocks",
+    ),
+  ).toBeTruthy();
+  cleanup();
+
+  // A threshold whose sample is short reads —, never 0.
+  const view = perpStatesSample("ruled");
+  view.rules = ["O6"];
+  view.thresholds = { ...view.thresholds!, px: null, s_liq: null, n_px: 40 };
+  show({ view });
+  await screen.findByText(tableTitle);
+  expect(document.querySelector(".wh-perp-thresholds p")?.textContent).toBe(
+    "Thresholds Short liq. — · Long liq. 35.8 BTC · OI change 281 BTC · Price change —",
+  );
+  expect(
+    screen.getByText(
+      "Of the latest block, ranked on the 90 days before it · samples: liquidations 61, price 40, OI 60 blocks",
+    ),
+  ).toBeTruthy();
+  cleanup();
+
+  // v1 ranks one set for the whole window and shows none.
+  show();
+  await screen.findByText(tableTitle);
+  expect(document.querySelector(".wh-perp-thresholds")).toBeNull();
+  expect(screen.queryByText(/^Thresholds/)).toBeNull();
+});
+
+it("keeps what is judged on screen while the view collects, counting R's liquidations", async () => {
+  // Under O6 the block heading the view can rank too few liquidations while earlier ones are
+  // judged: the banner informs, and Table 1 and Charts 1 and 2 stay.
+  const view = perpStatesSample("ruled");
+  view.collecting = true;
+  view.thresholds = {
+    ...view.thresholds!,
+    s_liq: null,
+    l_liq: null,
+    n_liq: 40,
+  };
+  view.reasons = ["collecting:6.7"];
+  show({ view });
+  expect(
+    await screen.findByText(
+      "Collecting liquidations (and Bybit trades) · 6.7 of 7 days (target 90)",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText(tableTitle)).toBeTruthy();
+  expect(screen.getByText(chartTitles[0])).toBeTruthy();
+  expect(screen.getByText(chartTitles[1])).toBeTruthy();
+  expect(screen.queryByText(/collecting:/)).toBeNull();
+  cleanup();
+
+  // With nothing judged there is nothing to show but Charts 3 and 4.
+  const none = perpStatesSample("ruled");
+  none.collecting = true;
+  none.blocks = none.blocks.map((block) => ({ ...block, state: null }));
+  show({ view: none });
+  await screen.findByText(chartTitles[2]);
+  expect(screen.queryByText(tableTitle)).toBeNull();
+  expect(screen.queryByText(chartTitles[0])).toBeNull();
+});

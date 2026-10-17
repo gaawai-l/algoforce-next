@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { getPerpStates, getPerpStatus } from "./client";
 import { useWheelhouseText, type MessageKey, type TextFn } from "./i18n";
-import { PerpCharts } from "./perp-charts";
+import { rulesNote } from "./onchain-text";
+import { PerpCharts, thresholdsText } from "./perp-charts";
 import type {
   PerpCollector,
   PerpState,
@@ -217,13 +218,21 @@ function StatesTable({
 }) {
   const { text } = useWheelhouseText();
   const last = view.blocks.at(-1);
-  // Only a judged block has a state that can still change.
+  // Only a judged block has a state that can still change; O1 judges closed blocks alone, and
+  // Table 1 marks the last of them.
   const forming = last?.forming && last.state ? last : null;
+  const closed = view.rules.includes("O1");
   const label = (state: PerpState) =>
     SQUEEZES.includes(state) && !verified
       ? text("perp.unverified", { state: text(stateKey[state]) })
       : text(stateKey[state]);
-  const marker = text(forming ? "perp.latestForming" : "perp.latest");
+  const marker = text(
+    forming
+      ? "perp.latestForming"
+      : closed
+        ? "perp.latestClosed"
+        : "perp.latest",
+  );
   return (
     <section className="wh-perp-panel" aria-labelledby="wh-perp-table">
       <div className="wh-perp-head">
@@ -234,7 +243,11 @@ function StatesTable({
             total: table.in_view,
           })}
           {table.latest_uncovered
-            ? ` · ${text("perp.table.latestUncovered")}`
+            ? ` · ${text(
+                closed
+                  ? "perp.table.latestClosedUncovered"
+                  : "perp.table.latestUncovered",
+              )}`
             : ""}
         </p>
       </div>
@@ -304,7 +317,13 @@ function StatesTable({
           [
             ["seller.read.shows", "perp.table.shows"],
             ["seller.read.implies", "perp.table.implies"],
-            ["seller.read.how", "perp.table.how"],
+            // O6 ranks each block on the 90 days before it alone.
+            [
+              "seller.read.how",
+              view.rules.includes("O6")
+                ? "perp.table.howPast"
+                : "perp.table.how",
+            ],
           ] as const
         ).map(([heading, body]) => (
           <div key={heading}>
@@ -366,6 +385,8 @@ export function PerpStates() {
   };
   let notices: ReactNode;
   let body: ReactNode = null;
+  // O6: the thresholds heading the view, shown with the parameters.
+  let ranked: ReactNode = null;
   // A failed request wins over older data: the view must not look current when it is not.
   if (states.isError) {
     const failure = String(states.error.message ?? "");
@@ -398,11 +419,22 @@ export function PerpStates() {
         ? utcDate(Math.max(...starts.map((start) => Date.parse(start))))
         : text("missing");
     const late = data.data_state === "delayed" || data.data_state === "stale";
+    const o6 = data.rules.includes("O6");
+    // Under O6 collecting reads the liquidation sample of the block heading the view, as the
+    // service's reason does; v1 counts the covered blocks.
+    const collected = o6
+      ? data.thresholds && data.thresholds.n_liq / (24 / HOURS[data.window])
+      : data.covered_days;
     notices = (
       <>
         <p className="wh-perp-meta">
           {text("perp.meta", { time: through, since })}
         </p>
+        {rulesNote(text, data).map((line) => (
+          <p key={line} className="wh-perp-meta">
+            {line}
+          </p>
+        ))}
         {data.collectors.length ? (
           <p className="wh-muted">
             {text("perp.coverage", {
@@ -450,15 +482,34 @@ export function PerpStates() {
                 : "perp.collectingTrades",
               {
                 days:
-                  data.covered_days == null
-                    ? text("missing")
-                    : data.covered_days.toFixed(1),
+                  collected == null ? text("missing") : collected.toFixed(1),
               },
             )}
           </p>
         ) : null}
       </>
     );
+    if (o6 && data.thresholds)
+      ranked = (
+        <div className="wh-perp-thresholds">
+          <p>
+            <span>{text("perp.thresholds")}</span>{" "}
+            {thresholdsText(text, data.thresholds)}
+          </p>
+          <p className="wh-muted">
+            {text(
+              data.rules.includes("O1")
+                ? "perp.thresholds.ofLatestClosed"
+                : "perp.thresholds.ofLatest",
+              {
+                liq: data.thresholds.n_liq,
+                px: data.thresholds.n_px,
+                oi: data.thresholds.n_oi,
+              },
+            )}
+          </p>
+        </div>
+      );
     const table = data.tables.find((item) => item.show_days === Number(show));
     if (!table)
       body = (
@@ -469,8 +520,10 @@ export function PerpStates() {
     else
       body = (
         <>
-          {/* Nothing is judged while collecting, so there is no Table 1 to show. */}
-          {data.collecting ? null : (
+          {/* While collecting with nothing judged there is no Table 1 to show. Under O6 earlier
+              blocks can be judged while the view collects: those are shown. */}
+          {data.collecting &&
+          !data.blocks.some((block) => block.state != null) ? null : (
             <StatesTable
               view={data}
               table={table}
@@ -514,6 +567,7 @@ export function PerpStates() {
             onPick={(value) => set("ps", value)}
           />
         </div>
+        {ranked}
       </section>
       {body}
     </div>
