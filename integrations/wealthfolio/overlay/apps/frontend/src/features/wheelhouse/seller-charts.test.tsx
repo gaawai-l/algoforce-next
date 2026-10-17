@@ -525,3 +525,29 @@ it("has Chinese copy for every seller key and a different string from English", 
     messages.en["seller.loss.shows" as keyof typeof messages.en],
   );
 });
+
+it("says in the header that the original v1 rules produced the charts", async () => {
+  show(pressureSample());
+  expect(await screen.findByText("Rules: original v1")).toBeTruthy();
+  expect(
+    screen.queryByText("Recomputing with the configured rules"),
+  ).toBeNull();
+});
+
+it("lists the rules that produced the charts in the header", async () => {
+  show({ ...pressureSample(), rules: ["O1", "O2", "O3"] });
+  expect(
+    await screen.findByText(
+      "Rules: O1 closed data only · O2 rolling thresholds · O3 no dropped rows",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText("Rules: original v1")).toBeNull();
+});
+
+it("says in the header that the charts are being recomputed", async () => {
+  show({ ...pressureSample(), rules: ["O1"], rules_pending: true });
+  expect(await screen.findByText("Rules: O1 closed data only")).toBeTruthy();
+  expect(
+    screen.getByText("Recomputing with the configured rules"),
+  ).toBeTruthy();
+});

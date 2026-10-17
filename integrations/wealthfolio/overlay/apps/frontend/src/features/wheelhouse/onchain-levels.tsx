@@ -8,7 +8,7 @@ import {
 } from "./i18n";
 import type { CostBasisView, CycleView, LevelsView } from "./onchain-contract";
 import { CostBasisPanel, type CostBucket } from "./cost-basis-panel";
-import { lineNameKey, reasonText, utcDay } from "./onchain-text";
+import { lineNameKey, reasonText, rulesNote, utcDay } from "./onchain-text";
 
 type LineName = LevelsView["lines"][number]["name"];
 type ComponentName = CycleView["components"][number]["name"];
@@ -207,6 +207,31 @@ export function OnchainLevels({
     (lv?.data_state === "fresh" && lv.forming_at) ||
     (cy?.data_state === "fresh" && cy.forming_at);
 
+  // The views share their rules unless some apply to one view only, and then each is named. A view
+  // with no data was derived under no rules, so it says nothing.
+  const rulesOf: { title: string; lines: string[] }[] = [];
+  const addRules = (
+    title: string,
+    view?: Pick<LevelsView, "data_state" | "rules" | "rules_pending">,
+  ) => {
+    if (view && view.data_state !== "unavailable")
+      rulesOf.push({ title, lines: rulesNote(text, view) });
+  };
+  addRules(
+    text("costBasis.levelsTitle"),
+    costBasisError ? undefined : costBasis,
+  );
+  addRules(text("levels.linesTitle"), lv);
+  addRules(text("cycle.title"), cy);
+  const sameRules = rulesOf.every(
+    ({ lines }) => lines.join("\n") === rulesOf[0].lines.join("\n"),
+  );
+  const rulesLines = sameRules
+    ? (rulesOf[0]?.lines ?? [])
+    : rulesOf.flatMap(({ title, lines }) =>
+        lines.map((line) => text("rules.forView", { view: title, line })),
+      );
+
   return (
     <div className="wh-onchain">
       <CostBasisPanel view={costBasis} error={costBasisError} bucket={bucket} />
@@ -237,6 +262,11 @@ export function OnchainLevels({
           </p>
         ) : null}
         {forming ? <p className="wh-muted">{text("cycle.forming")}</p> : null}
+        {rulesLines.map((line) => (
+          <p key={line} className="wh-muted">
+            {line}
+          </p>
+        ))}
         <p className="wh-muted">{text("levels.sourceNote")}</p>
       </details>
     </div>

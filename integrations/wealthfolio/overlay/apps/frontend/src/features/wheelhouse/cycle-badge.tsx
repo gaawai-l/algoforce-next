@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getOnchainCycle, type Stream } from "./client";
 import { messages, useWheelhouseText, type MessageKey } from "./i18n";
 import { shortDay as formatDay } from "./onchain-levels";
+import { rulesNote } from "./onchain-text";
 
 export function CycleBadge({
   symbol,
@@ -69,7 +70,7 @@ export function CycleBadge({
     <button
       type="button"
       className={stale ? "wh-cycle wh-cycle--muted" : "wh-cycle"}
-      title={text("cycle.open")}
+      title={[text("cycle.open"), ...rulesNote(text, data)].join("\n")}
       onClick={onOpen}
     >
       <span className="wh-cycle-main">

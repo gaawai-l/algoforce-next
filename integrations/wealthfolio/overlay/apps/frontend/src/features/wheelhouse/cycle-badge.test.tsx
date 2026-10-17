@@ -172,3 +172,28 @@ it("names every cycle state in Chinese", () => {
       .join(" "),
   ).toBe("上行 突破 承压 修复 破位 投降");
 });
+
+const badgeTitle = async () =>
+  (await screen.findByText("Cycle · Breakout · day 24")).closest("button")
+    ?.title;
+
+it("names the original v1 rules in the badge tooltip when none applied", async () => {
+  show(cycleSample);
+  expect(await badgeTitle()).toBe(
+    "Show the cycle in Key levels\nRules: original v1",
+  );
+});
+
+it("lists the rules that produced the cycle in the badge tooltip", async () => {
+  show({ ...cycleSample, rules: ["O1", "O4"] });
+  expect(await badgeTitle()).toBe(
+    "Show the cycle in Key levels\nRules: O1 closed data only · O4 calendar days",
+  );
+});
+
+it("says in the badge tooltip that the cycle is being recomputed", async () => {
+  show({ ...cycleSample, rules: ["O1"], rules_pending: true });
+  expect(await badgeTitle()).toBe(
+    "Show the cycle in Key levels\nRules: O1 closed data only\nRecomputing with the configured rules",
+  );
+});

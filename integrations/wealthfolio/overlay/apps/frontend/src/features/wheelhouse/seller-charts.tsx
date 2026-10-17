@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getSellerPressure } from "./client";
 import { useWheelhouseText, type MessageKey } from "./i18n";
 import type { SellerPressureView } from "./onchain-contract";
-import { reasonText } from "./onchain-text";
+import { reasonText, rulesNote } from "./onchain-text";
 
 type Levels = NonNullable<SellerPressureView["loss_levels"]>;
 type ChartKey = "loss" | "share" | "supply";
@@ -789,6 +789,11 @@ export function SellerCharts() {
           <span> · {text(late ? "seller.formingOld" : "seller.forming")}</span>
         ) : null}
       </p>
+      {rulesNote(text, data).map((line) => (
+        <p key={line} className="wh-seller-meta">
+          {line}
+        </p>
+      ))}
       {late ? (
         <p className="wh-onchain-warn">
           {text(

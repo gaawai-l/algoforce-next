@@ -4,7 +4,7 @@ import type { CycleView, LevelsView } from "./onchain-contract";
 import { costBasisSample, cycleSample, levelsSample } from "./onchain-contract";
 import { phrase } from "./i18n";
 import { OnchainLevels, olderUrpdDate, shortDay } from "./onchain-levels";
-import { reasonText } from "./onchain-text";
+import { reasonText, rulesNote } from "./onchain-text";
 
 // The shared test setup mocks matchMedia as a narrow screen; each test sets its own width.
 function viewport(wide: boolean) {
@@ -393,4 +393,120 @@ it("reads the per-snapshot URPD reason codes in both languages", () => {
     "$1000 桶宽下没有高于 $1k 的成本数据",
   );
   expect(reasonText(en, "urpd_unknown:lin500")).toBe("urpd_unknown:lin500");
+});
+
+it("says the views are the original v1 when no rule applied", () => {
+  render(
+    <OnchainLevels
+      levels={levelsSample}
+      cycle={cycleSample}
+      costBasis={costBasisSample}
+    />,
+  );
+  // All three views agree, so one line stands for them.
+  const line = screen.getByText("Rules: original v1");
+  expect(line.closest("details")).toBe(sourceSection());
+  expect(screen.getAllByText(/Rules:/)).toHaveLength(1);
+  expect(
+    screen.queryByText("Recomputing with the configured rules"),
+  ).toBeNull();
+});
+
+it("names the rules of each view in the Source section when they differ", () => {
+  render(
+    <OnchainLevels
+      levels={{ ...levelsSample, rules: ["O1", "O5"] }}
+      cycle={{ ...cycleSample, rules: ["O1", "O4"] }}
+      costBasis={{ ...costBasisSample, rules: ["O1", "O5"] }}
+    />,
+  );
+  const lines = [
+    "Cost-basis levels · Rules: O1 closed data only · O5 stable levels",
+    "Cost model lines · Rules: O1 closed data only · O5 stable levels",
+    "Cycle · Rules: O1 closed data only · O4 calendar days",
+  ];
+  for (const line of lines)
+    expect(screen.getByText(line).closest("details")).toBe(sourceSection());
+  expect(screen.queryByText("Rules: original v1")).toBeNull();
+});
+
+it("says the Source rules are being recomputed only for the views that are", () => {
+  render(
+    <OnchainLevels
+      levels={levelsSample}
+      cycle={{ ...cycleSample, rules_pending: true }}
+      costBasis={costBasisSample}
+    />,
+  );
+  expect(
+    screen.getByText("Cycle · Recomputing with the configured rules"),
+  ).toBeTruthy();
+  expect(screen.getByText("Cycle · Rules: original v1")).toBeTruthy();
+  expect(
+    screen.getByText("Cost model lines · Rules: original v1"),
+  ).toBeTruthy();
+});
+
+it("leaves a failed view out of the Source rules", () => {
+  render(
+    <OnchainLevels
+      levels={levelsSample}
+      cycle={{ ...cycleSample, rules: ["O1"] }}
+      cycleError="service down"
+    />,
+  );
+  expect(screen.getByText("Rules: original v1")).toBeTruthy();
+  expect(screen.queryByText(/O1 closed data only/)).toBeNull();
+});
+
+it("says nothing about the rules of a view that has no data", () => {
+  render(
+    <OnchainLevels
+      levels={{
+        ...levelsSample,
+        data_state: "unavailable",
+        lines: [],
+        reasons: ["brk_unavailable"],
+      }}
+      cycle={{ ...cycleSample, rules: ["O1"] }}
+    />,
+  );
+  expect(screen.getByText("Rules: O1 closed data only")).toBeTruthy();
+  expect(screen.queryByText(/original v1/)).toBeNull();
+});
+
+it("writes the rules line in both languages: none, several, and recomputing", () => {
+  const en = (
+    key: Parameters<typeof phrase>[1],
+    vars?: Record<string, string | number>,
+  ) => phrase("en", key, vars);
+  const zh = (
+    key: Parameters<typeof phrase>[1],
+    vars?: Record<string, string | number>,
+  ) => phrase("zh", key, vars);
+  type Note = Parameters<typeof rulesNote>[1];
+  const none: Note = { rules: [], rules_pending: false };
+  const several: Note = {
+    rules: ["O1", "O2", "O3", "O4", "O5", "O6"],
+    rules_pending: false,
+  };
+  expect(rulesNote(en, none)).toEqual(["Rules: original v1"]);
+  expect(rulesNote(zh, none)).toEqual(["口径：原始 v1"]);
+  expect(rulesNote(en, { rules: ["O1", "O5"], rules_pending: false })).toEqual([
+    "Rules: O1 closed data only · O5 stable levels",
+  ]);
+  expect(rulesNote(en, several)).toEqual([
+    "Rules: O1 closed data only · O2 rolling thresholds · O3 no dropped rows · O4 calendar days · O5 stable levels · O6 past-only ranking",
+  ]);
+  expect(rulesNote(zh, several)).toEqual([
+    "口径：O1 只用已收盘数据 · O2 逐小时滚动阈值 · O3 不丢行 · O4 按日历计天 · O5 价位稳定可复现 · O6 只用过去排名",
+  ]);
+  expect(rulesNote(en, { rules: ["O1"], rules_pending: true })).toEqual([
+    "Rules: O1 closed data only",
+    "Recomputing with the configured rules",
+  ]);
+  expect(rulesNote(zh, { ...none, rules_pending: true })).toEqual([
+    "口径：原始 v1",
+    "正在按已配置的规则重新计算",
+  ]);
 });
