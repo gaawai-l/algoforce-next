@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import AwareDatetime
 
 from ..market import Model
-from ..rules import Rule
+from ..rules import Rule, Rules
 from .brk import Urpd
 from .levels import LineName, ModelLine
 
@@ -28,6 +28,8 @@ MIN_PRICE = 1000.0
 # the first live row to the last, with PAD rows either side.
 LIVE_SUPPLY = 0.5
 PAD = 2
+# O5: the domain is fixed instead, to the rows priced within this share of the close either side.
+DOMAIN_SPAN = 0.5
 # The KDE bandwidth is this share of the domain's price span; terms further than KERNEL_CUT
 # bandwidths away are skipped.
 BANDWIDTH = 0.02
@@ -45,6 +47,8 @@ NEAREST = 4
 PAST_DAYS = (1, 7, 30, 90)
 # The page's order of the model lines; within a band it decides between equal prices.
 LINE_ORDER: tuple[LineName, ...] = ("short_term", "true_mean", "average", "median", "long_term")
+# O5 counts the 1d–1w line too, last.
+O5_LINE_ORDER: tuple[LineName, ...] = (*LINE_ORDER, "one_day_to_week")
 
 
 class Peak(Model):
@@ -299,10 +303,14 @@ def fit_gmm(
 
 
 def select_components(
-    xs: Sequence[float], ws: Sequence[float], peaks: int, rows: int
+    xs: Sequence[float], ws: Sequence[float], peaks: int, rows: int, *, new_bic: bool
 ) -> list[GmmComponent]:
     """The mixture over the rows with weight: one component per KDE peak, up to a cap set by the
-    row count; without peaks, the k with the lowest BIC over `rows` domain rows."""
+    row count; without peaks, the k with the lowest BIC over `rows` domain rows.
+
+    `new_bic` (O5) corrects that BIC: n is the number of rows fitted, and the log likelihood counts
+    each of them as its share of the weight times n, so `rows` is not used.
+    """
     positive = [(x, w) for x, w in zip(xs, ws, strict=True) if w > 0]
     if len(positive) < 3:
         return []
@@ -312,13 +320,16 @@ def select_components(
     if peaks > 0:
         fit = fit_gmm(px, pw, max(1, min(cap, peaks)))
         return fit[0] if fit is not None else []
+    n = len(positive) if new_bic else max(rows, 2)
     best: list[GmmComponent] | None = None
     best_bic = math.inf
     for k in range(1, cap + 1):
         fit = fit_gmm(px, pw, k)
         if fit is None:
             continue
-        bic = -2 * fit[1] + (3 * k - 1) * math.log(max(rows, 2))
+        # The fit's log likelihood is per unit weight; the corrected one is over n rows.
+        log_l = n * fit[1] if new_bic else fit[1]
+        bic = -2 * log_l + (3 * k - 1) * math.log(n)
         if best is None or bic < best_bic:
             best, best_bic = fit[0], bic
     return best or []
@@ -330,6 +341,8 @@ def _clusters(
     column: Sequence[float],
     domain: slice,
     spot: float,
+    *,
+    new_bic: bool,
 ) -> CohortClusters:
     """Totals over every row from MIN_PRICE; peaks and components over the domain rows."""
     total = _total(column)
@@ -342,17 +355,46 @@ def _clusters(
         total=total,
         in_profit=in_profit / total if total > 0 else None,
         peaks=peaks,
-        components=select_components(centers, weights, len(peaks), len(centers)),
+        components=select_components(centers, weights, len(peaks), len(centers), new_bic=new_bic),
     )
 
 
-def cost_basis(
-    today: dict[str, Urpd], past: Sequence[Urpd], bucket: Bucket, lines: Sequence[ModelLine]
-) -> BucketCostBasis | None:
-    """Clusters and the nearest bands for one bucket width; None when no row reaches MIN_PRICE.
+def line_order(rules: Rules) -> tuple[LineName, ...]:
+    """The model lines the cost basis counts under `rules`, in the page's order."""
+    return O5_LINE_ORDER if "O5" in rules else LINE_ORDER
 
-    `today` holds D's all, sth and lth snapshots. `past` only adds its floors to the grid.
+
+def cost_basis(
+    today: dict[str, Urpd],
+    past: Sequence[Urpd],
+    bucket: Bucket,
+    lines: Sequence[ModelLine],
+    *,
+    rules: Rules,
+) -> BucketCostBasis | None:
+    """Clusters and the nearest bands for one bucket width; None when no row reaches MIN_PRICE,
+    or under O5 none is inside the fixed domain.
+
+    `today` holds the all, sth and lth snapshots of one day. `past` only adds its floors to the
+    grid. O5 fixes the domain, corrects the BIC and counts the 1d–1w line.
     """
+    if sorted(line.name for line in lines) != sorted(line_order(rules)):
+        raise ValueError("cost basis needs exactly one of each model line of its rules")
+    o5 = "O5" in rules
+    return _cost_basis(today, past, bucket, lines, fixed_domain=o5, new_bic=o5)
+
+
+def _cost_basis(
+    today: dict[str, Urpd],
+    past: Sequence[Urpd],
+    bucket: Bucket,
+    lines: Sequence[ModelLine],
+    *,
+    fixed_domain: bool,
+    new_bic: bool,
+) -> BucketCostBasis | None:
+    """`cost_basis` with each part of O5 on or off by itself: the fixed domain, the corrected BIC,
+    and the 1d–1w line, which is counted when `lines` has it."""
     missing = [cohort for cohort in COHORTS if cohort not in today]
     if missing:
         raise ValueError(f"missing URPD cohorts: {', '.join(missing)}")
@@ -363,7 +405,9 @@ def cost_basis(
             raise ValueError(f"expected {aggregation} URPD, got {urpd.aggregation}")
     if len({urpd.date for urpd in snapshots}) != 1:
         raise ValueError("today's URPD snapshots are for different dates")
-    if sorted(line.name for line in lines) != sorted(LINE_ORDER):
+    names = sorted(line.name for line in lines)
+    order = next((o for o in (LINE_ORDER, O5_LINE_ORDER) if sorted(o) == names), None)
+    if order is None:
         raise ValueError("cost basis needs exactly one of each model line")
 
     step = float(bucket)
@@ -377,22 +421,33 @@ def cost_basis(
         supply = {b.price_floor: b.supply for b in today[cohort].buckets}
         values[cohort] = [_cents(supply.get(floor, 0.0)) for floor in floors]
 
-    live = values["all"]
-    i, j = 0, len(floors) - 1
-    while i < j and not live[i] > LIVE_SUPPLY:
-        i += 1
-    while j > i and not live[j] > LIVE_SUPPLY:
-        j -= 1
-    domain = slice(max(0, i - PAD), min(len(floors), j + PAD + 1))
+    spot = today["all"].close
+    if fixed_domain:
+        # The rows whose price is within DOMAIN_SPAN of the close, whatever they hold.
+        kept = [
+            k
+            for k, price in enumerate(prices)
+            if (1 - DOMAIN_SPAN) * spot <= price <= (1 + DOMAIN_SPAN) * spot
+        ]
+        if not kept:
+            return None
+        domain = slice(kept[0], kept[-1] + 1)
+    else:
+        live = values["all"]
+        i, j = 0, len(floors) - 1
+        while i < j and not live[i] > LIVE_SUPPLY:
+            i += 1
+        while j > i and not live[j] > LIVE_SUPPLY:
+            j -= 1
+        domain = slice(max(0, i - PAD), min(len(floors), j + PAD + 1))
     low = prices[domain][0] - step / 2
     high = prices[domain][-1] + step / 2
-    spot = today["all"].close
-    sth = _clusters("sth", prices, values["sth"], domain, spot)
-    lth = _clusters("lth", prices, values["lth"], domain, spot)
+    sth = _clusters("sth", prices, values["sth"], domain, spot, new_bic=new_bic)
+    lth = _clusters("lth", prices, values["lth"], domain, spot, new_bic=new_bic)
 
     candidates: list[Candidate] = []
     by_name = {line.name: line.price for line in lines}
-    for name in LINE_ORDER:
+    for name in order:
         price = float(math.floor(by_name[name] + 0.5))
         # Redundant with the slices clipped to the domain; kept for fidelity with the page.
         if low <= price <= high:

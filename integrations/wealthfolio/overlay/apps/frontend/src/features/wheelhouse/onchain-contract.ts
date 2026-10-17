@@ -53,12 +53,14 @@ export const cycleViewSchema: z.ZodType<CycleView, z.ZodTypeDef, unknown> =
     rules_pending: z.boolean(),
   });
 
+// O5 adds the 1d–1w cost line.
 const lineName = z.enum([
   "true_mean",
   "short_term",
   "average",
   "long_term",
   "median",
+  "one_day_to_week",
 ]);
 const pressureDataState = z.enum(["fresh", "delayed", "stale", "unavailable"]);
 const pressureLevels = z.object({

@@ -18,6 +18,9 @@ YESTERDAY = NOON - timedelta(days=1)
 Rows = dict[str, list[tuple[datetime, float | None]]]
 V1: Rules = frozenset()
 O1: Rules = frozenset({"O1"})
+O5: Rules = frozenset({"O5"})
+# The cycle's W, which O5 also draws as the 1d–1w cost line.
+W = "utxos_1d_to_1w_old_realized_price"
 
 
 def urpd(supplies: list[float], aggregation: str = "lin500") -> Urpd:
@@ -142,6 +145,49 @@ def test_last_complete_under_o1_reads_up_to_the_closed_day():
     assert last_complete(rows(today), rules=O1, through=None) == (NOON, {**today})
     # No complete point up to the closed day.
     assert last_complete(rows(today), rules=O1, through=closed - timedelta(days=1)) is None
+
+
+def test_last_complete_under_o5_needs_the_1d_1w_series_too():
+    today: dict[str, float | None] = {name: 20.0 for name in LINE_SERIES.values()}
+    series = {**rows(today), W: [(YESTERDAY, 30.0), (NOON, None)]}
+
+    # v1 does not read W, so today is complete.
+    assert last_complete(series, rules=V1, through=None) == (NOON, {**today})
+    # O5 does: today has no W yet, so the lines are yesterday's, W among them.
+    assert last_complete(series, rules=O5, through=None) == (
+        YESTERDAY,
+        {
+            "true_market_mean": 10.0,
+            "sth_realized_price": 11.0,
+            "realized_price": 12.0,
+            "lth_realized_price": 13.0,
+            W: 30.0,
+        },
+    )
+    # Without W at all there are no lines under O5.
+    assert last_complete(rows(today), rules=O5, through=None) is None
+
+
+def test_model_lines_under_o5_add_the_1d_1w_line_last():
+    last = {
+        "true_market_mean": 4.0,
+        "sth_realized_price": 3.0,
+        "realized_price": 2.0,
+        "lth_realized_price": 1.0,
+        W: 5.0,
+    }
+    assert model_lines(last, urpd([1.0, 2.0, 1.0]), rules=O5) == [
+        ModelLine(name="true_mean", price=4.0),
+        ModelLine(name="short_term", price=3.0),
+        ModelLine(name="average", price=2.0),
+        ModelLine(name="long_term", price=1.0),
+        ModelLine(name="median", price=750.0),
+        ModelLine(name="one_day_to_week", price=5.0),
+    ]
+    # Without a snapshot it is still last; v1 leaves it out even when W is there.
+    four = ["true_mean", "short_term", "average", "long_term"]
+    assert [line.name for line in model_lines(last, None, rules=O5)] == [*four, "one_day_to_week"]
+    assert [line.name for line in model_lines(last, None, rules=V1)] == four
 
 
 def test_model_lines_without_urpd_has_four_lines():

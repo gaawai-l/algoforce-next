@@ -396,6 +396,7 @@ const en = {
   "levels.line.average": "Average",
   "levels.line.long_term": "Long-term",
   "levels.line.median": "Median",
+  "levels.line.one_day_to_week": "1d–1w cost",
   "levels.line.medianUrpd": "Median (URPD {{date}})",
   "levels.overlayStale": "{{name}} (stale)",
   "levels.source": "Source",
@@ -434,6 +435,8 @@ const en = {
   "costBasis.spotClose": "on-chain price · {{date}} close",
   "costBasis.mNote":
     "M is a Gaussian component of that cohort's cost distribution; ±σ is one standard deviation. The % is from the band's midpoint.",
+  "costBasis.domainNote":
+    "Bands fitted within ±50% of the on-chain close; bandwidth ≈ 2% of that range; SHARE counts weight inside it; lines outside it are not candidates.",
   "costBasis.layers": "Key levels layers",
   "costBasis.lines": "Cost lines",
   "costBasis.sth": "STH bands",
@@ -1034,6 +1037,7 @@ const zh: Record<MessageKey, string> = {
   "levels.line.average": "平均成本",
   "levels.line.long_term": "长期成本",
   "levels.line.median": "中位成本",
+  "levels.line.one_day_to_week": "1天–1周成本",
   "levels.line.medianUrpd": "中位成本（URPD {{date}}）",
   "levels.overlayStale": "{{name}}（已过期）",
   "levels.source": "数据来源",
@@ -1072,6 +1076,8 @@ const zh: Record<MessageKey, string> = {
   "costBasis.spotClose": "链上价格 · {{date}} 收盘价",
   "costBasis.mNote":
     "M 是该 cohort 成本分布的高斯成分，±σ 是一个标准差。百分比按价带中点计算。",
+  "costBasis.domainNote":
+    "价带在链上收盘价 ±50% 的范围内拟合；带宽约为该范围的 2%；SHARE 只计该范围内的权重；范围外的成本线不计入候选。",
   "costBasis.layers": "关键位图层",
   "costBasis.lines": "成本线",
   "costBasis.sth": "STH 价带",

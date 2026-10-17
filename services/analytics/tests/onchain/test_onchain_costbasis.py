@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any, get_args
 
 import pytest
+from onchain_fixture import load_series
 
+from wheelhouse_service.onchain import costbasis
 from wheelhouse_service.onchain.brk import Urpd
 from wheelhouse_service.onchain.costbasis import (
     BUCKETS,
@@ -18,14 +20,19 @@ from wheelhouse_service.onchain.costbasis import (
     BucketCostBasis,
     Candidate,
     CohortClusters,
+    _cost_basis,
     cost_basis,
     fit_gmm,
+    line_order,
     select_components,
 )
 from wheelhouse_service.onchain.levels import LINE_SERIES, LineName, ModelLine, median_cost
+from wheelhouse_service.rules import Rules
 
 GOLDEN = Path(__file__).parent / "fixtures" / "brk-2026-10-16T1829Z"
 DAY = date(2026, 10, 16)
+V1: Rules = frozenset()
+O5: Rules = frozenset({"O5"})
 # How the original page names each model line.
 LABELS: dict[LineName, str] = {
     "true_mean": "True mean",
@@ -34,6 +41,8 @@ LABELS: dict[LineName, str] = {
     "median": "Median",
     "long_term": "Long-term",
 }
+# O5's line, named as the service's page does.
+O5_LABELS: dict[LineName, str] = {**LABELS, "one_day_to_week": "1d–1w cost"}
 EDGES = {"low": " −σ", "mid": "", "high": " +σ"}
 # Far above every domain in these tests, so the line is dropped.
 OFF = 1_000_000.0
@@ -99,7 +108,7 @@ def golden_lines() -> list[ModelLine]:
 
 @cache
 def golden_result(bucket: Bucket) -> BucketCostBasis:
-    result = cost_basis(golden_today(bucket), golden_past(bucket), bucket, golden_lines())
+    result = cost_basis(golden_today(bucket), golden_past(bucket), bucket, golden_lines(), rules=V1)
     assert result is not None
     return result
 
@@ -107,7 +116,7 @@ def golden_result(bucket: Bucket) -> BucketCostBasis:
 def label(candidate: Candidate) -> str:
     if candidate.kind == "line":
         assert candidate.line is not None
-        return LABELS[candidate.line]
+        return O5_LABELS[candidate.line]
     assert candidate.cohort is not None and candidate.edge is not None
     return f"{candidate.cohort.upper()} M{candidate.index}{EDGES[candidate.edge]}"
 
@@ -285,14 +294,14 @@ def test_trim_keeps_two_padding_rows() -> None:
         5000.0: 0.0,
         5500.0: 0.0,
     }
-    result = cost_basis(market(supplies), [], 500, lines())
+    result = cost_basis(market(supplies), [], 500, lines(), rules=V1)
     assert result is not None
     assert (result.domain_low, result.domain_high) == (2000.0, 5500.0)
 
 
 def test_trim_without_live_rows_keeps_last_three() -> None:
     supplies = {float(floor): 0.5 for floor in range(1000, 5500, 500)}
-    result = cost_basis(market(supplies), [], 500, lines())
+    result = cost_basis(market(supplies), [], 500, lines(), rules=V1)
     assert result is not None
     assert (result.domain_low, result.domain_high) == (4000.0, 5500.0)
 
@@ -303,6 +312,7 @@ def test_spot_on_slice_boundary() -> None:
         [],
         500,
         lines({"short_term": 79_000.0, "true_mean": 80_500.0, "average": 82_500.0}),
+        rules=V1,
     )
     assert result is not None
     # Spot's own band is [80000, 82000), so True mean at 80500 is in neither list.
@@ -318,6 +328,7 @@ def test_slices_clip_to_domain() -> None:
         [],
         500,
         lines({"short_term": 1500.0, "long_term": 125_000.0}),
+        rules=V1,
     )
     assert result is not None
     assert (result.domain_low, result.domain_high) == (1000.0, 126_000.0)
@@ -332,6 +343,7 @@ def test_line_outside_domain_not_counted() -> None:
         [],
         500,
         lines({"short_term": 2500.0, "true_mean": 9500.0, "average": 5000.0}),
+        rules=V1,
     )
     assert result is not None
     assert (result.domain_low, result.domain_high) == (3000.0, 9000.0)
@@ -345,6 +357,7 @@ def test_line_rounding_half_up() -> None:
         [],
         500,
         lines({"short_term": 74_998.5, "true_mean": 999.5}),
+        rules=V1,
     )
     assert result is not None
     # Half up: 74998.5 -> 74999, where round-half-even would give 74998.
@@ -364,6 +377,7 @@ def test_supply_rounding_matches_tofixed() -> None:
         [],
         500,
         lines(),
+        rules=V1,
     )
     assert result is not None
     assert result.sth.total == 0.13
@@ -378,6 +392,7 @@ def test_in_profit_counts_row_at_spot() -> None:
         [],
         500,
         lines(),
+        rules=V1,
     )
     assert result is not None
     assert result.sth.total == 4.0
@@ -388,13 +403,13 @@ def test_in_profit_counts_row_at_spot() -> None:
 
 def test_past_floor_extends_grid() -> None:
     today = market(live(1000, 5500), sth={2000.0: 1.0})
-    plain = cost_basis(today, [], 500, lines())
+    plain = cost_basis(today, [], 500, lines(), rules=V1)
     # A past snapshot adds its floors to the grid, never its supply.
     past = [
         snapshot("all", {5500.0: 3.0}, day=DAY - timedelta(days=1)),
         snapshot("sth", {2000.0: 50.0}, day=DAY - timedelta(days=1)),
     ]
-    extended = cost_basis(today, past, 500, lines())
+    extended = cost_basis(today, past, 500, lines(), rules=V1)
     assert plain is not None and extended is not None
     assert (plain.domain_low, plain.domain_high) == (1000.0, 5500.0)
     assert (extended.domain_low, extended.domain_high) == (1000.0, 6000.0)
@@ -419,19 +434,22 @@ def test_select_components_uses_bic_without_peaks() -> None:
     assert scores.count(min(scores)) == 1
     best_fit = fit_gmm(xs, ws, best)
     assert best_fit is not None
-    assert select_components(xs, ws, peaks=0, rows=rows) == best_fit[0]
-    assert len(select_components(xs, ws, peaks=3, rows=rows)) == min(4, 3)
+    assert select_components(xs, ws, peaks=0, rows=rows, new_bic=False) == best_fit[0]
+    assert len(select_components(xs, ws, peaks=3, rows=rows, new_bic=False)) == min(4, 3)
     # The penalty uses the domain rows, not the positive ones: over 1000 rows it picks k = 1.
     one = fit_gmm(xs, ws, 1)
     assert one is not None
     assert one[0] != best_fit[0]
-    assert select_components(xs, ws, peaks=0, rows=1000) == one[0]
+    assert select_components(xs, ws, peaks=0, rows=1000, new_bic=False) == one[0]
     # Fewer than 2 rows count as 2, so the penalty never takes log 0.
-    assert select_components(xs, ws, peaks=0, rows=0) == best_fit[0]
+    assert select_components(xs, ws, peaks=0, rows=0, new_bic=False) == best_fit[0]
 
 
 def test_line_order_lists_every_line_once() -> None:
-    assert set(LINE_ORDER) == set(get_args(LineName)) and len(LINE_ORDER) == 5
+    # v1 counts the page's five lines; O5 adds the 1d–1w line, last.
+    assert line_order(V1) == LINE_ORDER and len(set(LINE_ORDER)) == 5
+    assert line_order(O5) == (*LINE_ORDER, "one_day_to_week")
+    assert set(line_order(O5)) == set(get_args(LineName))
 
 
 def test_gmm_zero_density_falls_back() -> None:
@@ -451,46 +469,273 @@ def test_gmm_zero_density_falls_back() -> None:
 def test_four_lines_raise() -> None:
     today = market(live(1000, 5000))
     with pytest.raises(ValueError):
-        cost_basis(today, [], 500, lines()[:4])
+        cost_basis(today, [], 500, lines()[:4], rules=V1)
     with pytest.raises(ValueError):
-        cost_basis(today, [], 500, [*lines()[:4], lines()[0]])
+        cost_basis(today, [], 500, [*lines()[:4], lines()[0]], rules=V1)
 
 
 def test_gmm_needs_three_positive_rows() -> None:
     xs = [1000.0, 2000.0, 3000.0, 4000.0]
-    assert select_components(xs, [1.0, 1.0, 0.0, 0.0], peaks=1, rows=4) == []
-    assert len(select_components(xs, [1.0, 1.0, 1.0, 0.0], peaks=1, rows=4)) == 1
+    assert select_components(xs, [1.0, 1.0, 0.0, 0.0], peaks=1, rows=4, new_bic=False) == []
+    assert len(select_components(xs, [1.0, 1.0, 1.0, 0.0], peaks=1, rows=4, new_bic=False)) == 1
 
 
 def test_component_k_capped_by_rows() -> None:
     xs = [1000.0 * i for i in range(1, 12)]
     nine = [1.0] * 9 + [0.0, 0.0]
     ten = [1.0] * 10 + [0.0]
-    assert len(select_components(xs, nine, peaks=4, rows=11)) == 1
-    assert len(select_components(xs, ten, peaks=4, rows=11)) == 2
+    assert len(select_components(xs, nine, peaks=4, rows=11, new_bic=False)) == 1
+    assert len(select_components(xs, ten, peaks=4, rows=11, new_bic=False)) == 2
 
 
 def test_mismatched_dates_raise() -> None:
     today = market(live(1000, 5000))
     today["sth"] = snapshot("sth", {}, day=DAY - timedelta(days=1))
     with pytest.raises(ValueError):
-        cost_basis(today, [], 500, lines())
+        cost_basis(today, [], 500, lines(), rules=V1)
 
 
 def test_wrong_aggregation_raises() -> None:
     with pytest.raises(ValueError):
-        cost_basis(market(live(1000, 5000)), [], 200, lines())
+        cost_basis(market(live(1000, 5000)), [], 200, lines(), rules=V1)
     past = [snapshot("all", {1000.0: 1.0}, bucket=200, day=DAY - timedelta(days=1))]
     with pytest.raises(ValueError):
-        cost_basis(market(live(1000, 5000)), past, 500, lines())
+        cost_basis(market(live(1000, 5000)), past, 500, lines(), rules=V1)
 
 
 def test_missing_cohort_raises() -> None:
     today = market(live(1000, 5000))
     del today["lth"]
     with pytest.raises(ValueError):
-        cost_basis(today, [], 500, lines())
+        cost_basis(today, [], 500, lines(), rules=V1)
 
 
 def test_no_rows_from_min_price_returns_none() -> None:
-    assert cost_basis(market({0.0: 5.0, 500.0: 5.0}), [], 500, lines()) is None
+    assert cost_basis(market({0.0: 5.0, 500.0: 5.0}), [], 500, lines(), rules=V1) is None
+
+
+# O5. The 1d–1w line of D is the P1 fixture's 10-16 value of the cycle's W series. That fixture was
+# captured at 10:02Z while the day was still forming, so the value is not of the same moment as the
+# golden URPD (18:29Z): BRK's final 10-16 value, fetched 2026-10-17T06:40Z, is 82382.4.
+W = 82651.72
+# Close 81217.6 ± 50% is [40608.8, 121826.4]: the first and last rows whose middle is inside it.
+O5_DOMAIN = {200: (40_600.0, 121_800.0), 500: (40_500.0, 122_000.0), 1000: (41_000.0, 122_000.0)}
+
+
+def o5_lines() -> list[ModelLine]:
+    return [*golden_lines(), ModelLine(name="one_day_to_week", price=W)]
+
+
+def bell(mu: float, sigma: float, xs: list[float]) -> list[float]:
+    return [math.exp(-0.5 * ((x - mu) / sigma) ** 2) for x in xs]
+
+
+def test_w_is_the_p1_fixture_value_of_d():
+    series = load_series("utxos_1d_to_1w_old_realized_price", "day1")
+    # Position 6497 is 2026-10-16.
+    assert (series.end - 1, series.data[-1]) == (6497, W)
+
+
+@pytest.mark.parametrize("bucket", BUCKETS)
+def test_o5_fixes_the_domain_to_half_the_close_either_side(bucket: Bucket) -> None:
+    result = cost_basis(golden_today(bucket), golden_past(bucket), bucket, o5_lines(), rules=O5)
+    assert result is not None
+    assert result.spot == 81217.6
+    assert (result.domain_low, result.domain_high) == O5_DOMAIN[bucket]
+    # The bands are still sliced from the domain, so none reaches outside it.
+    low, high = O5_DOMAIN[bucket]
+    assert all(low <= band.low < band.high <= high for band in [*result.above, *result.below])
+    # The totals still count every row from MIN_PRICE; only the clusters are fitted in the domain.
+    v1 = golden_result(bucket)
+    assert (result.sth.total, result.lth.total) == (v1.sth.total, v1.lth.total)
+    assert (result.sth.in_profit, result.lth.in_profit) == (v1.sth.in_profit, v1.lth.in_profit)
+    for clusters in (result.sth, result.lth):
+        assert all(low <= peak.price <= high for peak in clusters.peaks)
+
+
+def test_o5_domain_ignores_supply_and_leaves_lines_outside_it_out():
+    # Live rows from 1,000 to 126,000, close 60,000: v1's domain is every row, O5's [30000, 90000].
+    today = market(live(1000, 126_000), close=60_000.0)
+    given = lines({"short_term": 25_000.0, "long_term": 89_000.0, "true_mean": 91_000.0})
+    v1 = cost_basis(today, [], 500, given, rules=V1)
+    o5 = cost_basis(
+        today, [], 500, [*given, ModelLine(name="one_day_to_week", price=OFF)], rules=O5
+    )
+    assert v1 is not None and o5 is not None
+    assert (v1.domain_low, v1.domain_high) == (1000.0, 126_000.0)
+    assert (o5.domain_low, o5.domain_high) == (30_000.0, 90_000.0)
+    # Only the line inside the domain is a candidate.
+    assert spans(o5.above) == [(88_000.0, 90_000.0, ["Long-term"])]
+    assert spans(o5.below) == []
+    assert [label(c) for band in v1.below for c in band.candidates] == ["Short-term"]
+
+
+def test_o5_without_rows_in_the_domain_returns_none():
+    # Rows only far below the close: v1 has a domain, O5 none.
+    today = market({1000.0: 5.0, 1500.0: 5.0, 2000.0: 5.0}, close=80_000.0)
+    o5_given = [*lines(), ModelLine(name="one_day_to_week", price=OFF)]
+    assert cost_basis(today, [], 500, lines(), rules=V1) is not None
+    assert cost_basis(today, [], 500, o5_given, rules=O5) is None
+
+
+def test_lines_must_match_the_rules():
+    today = market(live(1000, 5000))
+    o5_given = [*lines(), ModelLine(name="one_day_to_week", price=OFF)]
+    with pytest.raises(ValueError):
+        cost_basis(today, [], 500, o5_given, rules=V1)
+    with pytest.raises(ValueError):
+        cost_basis(today, [], 500, lines(), rules=O5)
+    # The internal function takes either set: the 1d–1w line is counted when it is given.
+    for given in (lines(), o5_given):
+        assert _cost_basis(today, [], 500, given, fixed_domain=False, new_bic=False) is not None
+
+
+def test_new_bic_picks_two_moderately_separated_clusters_where_v1_picks_one():
+    # Two bells 1,500 wide and 8,000 apart on 40 rows of 500: no k reaches the cap of 5.
+    xs = [40_000.0 + 500 * i for i in range(40)]
+    ws = [a + b for a, b in zip(bell(46_000, 1500, xs), bell(54_000, 1500, xs), strict=True)]
+    n = len(xs)
+
+    def bic(k: int, *, new: bool) -> float:
+        fit = fit_gmm(xs, ws, k)
+        assert fit is not None
+        # v1: the per-unit-weight log likelihood against ln(rows). New: the log likelihood over
+        # n rows, each counted as its share of the weight times n, against ln n.
+        log_l = n * fit[1] if new else fit[1]
+        return -2 * log_l + (3 * k - 1) * math.log(n)
+
+    v1_scores = [bic(k, new=False) for k in range(1, 6)]
+    new_scores = [bic(k, new=True) for k in range(1, 6)]
+    assert v1_scores.index(min(v1_scores)) + 1 == 1
+    assert new_scores.index(min(new_scores)) + 1 == 2
+
+    one = fit_gmm(xs, ws, 1)
+    two = fit_gmm(xs, ws, 2)
+    assert one is not None and two is not None
+    assert select_components(xs, ws, peaks=0, rows=n, new_bic=False) == one[0]
+    assert select_components(xs, ws, peaks=0, rows=n, new_bic=True) == two[0]
+    assert [round(c.mu) for c in two[0]] == [46_000, 54_000]
+    # The corrected BIC takes n from the weights: the domain's row count does not matter.
+    for rows in (0, 1000):
+        assert select_components(xs, ws, peaks=0, rows=rows, new_bic=True) == two[0]
+    # With peaks, k is still their number.
+    assert len(select_components(xs, ws, peaks=3, rows=n, new_bic=True)) == 3
+
+
+def test_new_bic_keeps_one_component_for_a_single_bell():
+    xs = [40_000.0 + 500 * i for i in range(40)]
+    ws = bell(50_000, 2500, xs)
+    one = fit_gmm(xs, ws, 1)
+    assert one is not None
+    assert select_components(xs, ws, peaks=0, rows=len(xs), new_bic=True) == one[0]
+
+
+def test_golden_components_by_bic_alone(monkeypatch: pytest.MonkeyPatch):
+    """The k each BIC picks on the golden sample when the KDE peaks are forced to none."""
+    monkeypatch.setattr(costbasis, "find_peaks", lambda centers, weights: [])
+
+    def ks(*, fixed_domain: bool, new_bic: bool) -> dict[int, tuple[int, int]]:
+        found = {}
+        for bucket in BUCKETS:
+            result = _cost_basis(
+                golden_today(bucket),
+                golden_past(bucket),
+                bucket,
+                golden_lines(),
+                fixed_domain=fixed_domain,
+                new_bic=new_bic,
+            )
+            assert result is not None
+            assert result.sth.peaks == result.lth.peaks == []
+            found[bucket] = (len(result.sth.components), len(result.lth.components))
+        return found
+
+    # (STH, LTH). v1's BIC always picks one component; the corrected one picks more, and on O5's
+    # domain never the cap of 5.
+    assert ks(fixed_domain=False, new_bic=False) == {200: (1, 1), 500: (1, 1), 1000: (1, 1)}
+    assert ks(fixed_domain=True, new_bic=False) == {200: (1, 1), 500: (1, 1), 1000: (1, 1)}
+    assert ks(fixed_domain=False, new_bic=True) == {200: (3, 5), 500: (2, 4), 1000: (2, 2)}
+    assert ks(fixed_domain=True, new_bic=True) == {200: (3, 3), 500: (2, 1), 1000: (2, 1)}
+
+
+def test_one_day_to_week_line_is_a_candidate():
+    for bucket in BUCKETS:
+        result = cost_basis(golden_today(bucket), golden_past(bucket), bucket, o5_lines(), rules=O5)
+        assert result is not None
+        # W is in the band from 82,000, the first above spot's own band [80000, 82000).
+        nearest = result.above[0]
+        assert (nearest.low, nearest.high) == (82_000.0, 84_000.0)
+        assert [(c.kind, c.line, c.price) for c in nearest.candidates] == [
+            ("line", "one_day_to_week", 82_652.0)
+        ]
+
+
+# Table 2 of the golden sample with each part of O5 on by itself, then all three, as
+# (resistance, support) by bucket width.
+V1_TABLE_2 = {
+    200: ([86000, 88000, 96000, 104000], [76000, 74000, 70000, 64000]),
+    500: ([86000, 88000, 96000, 104000], [76000, 74000, 70000, 64000]),
+    1000: ([86000, 90000, 96000, 104000], [76000, 74000, 70000, 64000]),
+}
+O5_TABLE_2 = {
+    # The fixed domain narrows the KDE bandwidth: the peaks, the components and the bands move.
+    "domain": {
+        200: ([86000, 90000, 96000, 102000], [76000, 74000, 72000, 66000]),
+        500: ([86000, 90000, 96000, 104000], [76000, 74000, 72000, 64000]),
+        1000: ([86000, 90000, 92000, 96000], [76000, 74000, 72000, 64000]),
+    },
+    # Both cohorts have KDE peaks at every width, so the BIC is never used.
+    "bic": V1_TABLE_2,
+    # The 1d–1w line takes the band from 82,000, the nearest resistance; the rest move up one.
+    "line": {
+        200: ([84000, 86000, 88000, 96000], [76000, 74000, 70000, 64000]),
+        500: ([84000, 86000, 88000, 96000], [76000, 74000, 70000, 64000]),
+        1000: ([84000, 86000, 90000, 96000], [76000, 74000, 70000, 64000]),
+    },
+    "o5": {
+        200: ([84000, 86000, 90000, 96000], [76000, 74000, 72000, 66000]),
+        500: ([84000, 86000, 90000, 96000], [76000, 74000, 72000, 64000]),
+        1000: ([84000, 86000, 90000, 92000], [76000, 74000, 72000, 64000]),
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("part", "fixed_domain", "new_bic", "with_line"),
+    [
+        ("domain", True, False, False),
+        ("bic", False, True, False),
+        ("line", False, False, True),
+        ("o5", True, True, True),
+    ],
+)
+def test_o5_changes_table_2_part_by_part(
+    part: str, fixed_domain: bool, new_bic: bool, with_line: bool
+):
+    for bucket in BUCKETS:
+        result = _cost_basis(
+            golden_today(bucket),
+            golden_past(bucket),
+            bucket,
+            o5_lines() if with_line else golden_lines(),
+            fixed_domain=fixed_domain,
+            new_bic=new_bic,
+        )
+        assert result is not None
+        assert (result.resistance, result.support) == O5_TABLE_2[part][bucket], bucket
+        if part == "bic":
+            # Not a number moves.
+            assert result == golden_result(bucket)
+
+
+@pytest.mark.parametrize("bucket", BUCKETS)
+def test_cost_basis_turns_o5_on_as_one(bucket: Bucket):
+    today, past = golden_today(bucket), golden_past(bucket)
+    assert cost_basis(today, past, bucket, golden_lines(), rules=V1) == _cost_basis(
+        today, past, bucket, golden_lines(), fixed_domain=False, new_bic=False
+    )
+    o5 = cost_basis(today, past, bucket, o5_lines(), rules=O5)
+    assert o5 == _cost_basis(today, past, bucket, o5_lines(), fixed_domain=True, new_bic=True)
+    assert o5 is not None
+    assert (golden_result(bucket).resistance, golden_result(bucket).support) == V1_TABLE_2[bucket]
+    assert (o5.resistance, o5.support) == O5_TABLE_2["o5"][bucket]

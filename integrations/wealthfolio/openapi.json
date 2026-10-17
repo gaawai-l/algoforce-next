@@ -1907,7 +1907,8 @@
                   "short_term",
                   "average",
                   "long_term",
-                  "median"
+                  "median",
+                  "one_day_to_week"
                 ]
               },
               {
@@ -4804,7 +4805,8 @@
               "short_term",
               "average",
               "long_term",
-              "median"
+              "median",
+              "one_day_to_week"
             ],
             "title": "Name"
           },

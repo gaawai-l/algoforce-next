@@ -274,6 +274,22 @@ def test_missing_line_series_only_concerns_the_levels(tmp_path: Path):
     assert cycle["state"] == "breakout"
 
 
+def test_o5_missing_1d_1w_series_concerns_the_levels_and_the_cost_basis(tmp_path: Path):
+    missing = "utxos_1d_to_1w_old_realized_price"
+    o5: Rules = frozenset({"O5"})
+    path = synced(tmp_path, rules=o5, missing={missing}, urpd_dir=GOLDEN)
+    with TestClient(router_app(path, NOW, rules=o5)) as http:
+        levels = http.get(f"{PREFIX}/levels").json()
+        cost = http.get(f"{PREFIX}/cost-basis").json()
+
+    # Under O5 the series is that of the 1d–1w line, so without it there are no lines; under v1
+    # only the cycle needs it (above).
+    assert (levels["data_state"], levels["lines"]) == ("unavailable", [])
+    assert levels["reasons"] == [f"series_missing:{missing}"]
+    assert (cost["data_state"], cost["buckets"]) == ("unavailable", [])
+    assert cost["reasons"] == [f"series_missing:{missing}"]
+
+
 def test_failed_first_sync_is_unavailable_with_reason(tmp_path: Path):
     path = synced(tmp_path, fail_paths={"/version"})
     with TestClient(router_app(path, NOW)) as http:

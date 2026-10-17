@@ -8,7 +8,7 @@ from ..market import Model
 from ..rules import Rules
 from .brk import Urpd
 
-LineName = Literal["true_mean", "short_term", "average", "long_term", "median"]
+LineName = Literal["true_mean", "short_term", "average", "long_term", "median", "one_day_to_week"]
 
 # The four lines that come from day1 series; `median` comes from the URPD snapshot.
 LINE_SERIES: dict[LineName, str] = {
@@ -17,6 +17,17 @@ LINE_SERIES: dict[LineName, str] = {
     "average": "realized_price",
     "long_term": "lth_realized_price",
 }
+# O5 adds the cost of the coins last moved 1 day to 1 week ago, the cycle's W, as a fifth series.
+O5_LINE_SERIES: dict[LineName, str] = {
+    **LINE_SERIES,
+    "one_day_to_week": "utxos_1d_to_1w_old_realized_price",
+}
+
+
+def line_series(rules: Rules) -> dict[LineName, str]:
+    """The lines that come from day1 series under `rules`, with their series names."""
+    return O5_LINE_SERIES if "O5" in rules else LINE_SERIES
+
 
 _LINEAR = re.compile(r"lin(\d+)")
 
@@ -35,17 +46,19 @@ def last_complete(
     """The latest time at which every line series has a value above 0, keyed by series name.
 
     A partial point, such as today's when one series has not been published yet, is skipped.
-    O1: so is every point dated after `through`, so the lines are of a closed day.
+    O1: so is every point dated after `through`, so the lines are of a closed day. O5: the 1d–1w
+    series is one of the line series.
     """
     limit = through if "O1" in rules else None
+    series = line_series(rules)
     by_time: dict[datetime, dict[str, float]] = {}
-    for name in LINE_SERIES.values():
+    for name in series.values():
         for time, value in rows.get(name, []):
             if limit is not None and time.date() > limit:
                 continue
             if value is not None and value > 0:
                 by_time.setdefault(time, {})[name] = value
-    complete = [time for time, values in by_time.items() if len(values) == len(LINE_SERIES)]
+    complete = [time for time, values in by_time.items() if len(values) == len(series)]
     if not complete:
         return None
     latest = max(complete)
@@ -74,11 +87,14 @@ def median_cost(urpd: Urpd) -> float | None:
 def model_lines(last: dict[str, float], urpd: Urpd | None, *, rules: Rules) -> list[ModelLine]:
     """The four series lines, plus the URPD median when a snapshot with supply is given.
 
-    No rule changes them yet: `rules` is for O5.
+    O5 adds the 1d–1w line last, from `last` like the four.
     """
     lines = [ModelLine(name=name, price=last[series]) for name, series in LINE_SERIES.items()]
     if urpd is not None:
         median = median_cost(urpd)
         if median is not None:
             lines.append(ModelLine(name="median", price=median))
+    if "O5" in rules:
+        name: LineName = "one_day_to_week"
+        lines.append(ModelLine(name=name, price=last[O5_LINE_SERIES[name]]))
     return lines

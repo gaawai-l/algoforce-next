@@ -14,6 +14,7 @@ from onchain_fixture import (
     GOLDEN_DAYS,
     brk_transport,
     golden_urpd,
+    load_series,
     load_urpd,
     seed_golden,
 )
@@ -1842,3 +1843,75 @@ def test_o1_closes_the_pressure_as_of_the_hour1_stage(tmp_path: Path):
     assert pressure_of(store) == pressure
     derived = store.derived("pressure")
     assert derived is not None and derived[1] == hour1_done
+
+
+# O5 on the levels and the cost basis. W, the 1d–1w line, is the P1 fixture's value of D: captured
+# at 10:02Z while the day was forming, so not of the same moment as the golden URPD (18:29Z).
+O5: Rules = frozenset({"O5"})
+W_SERIES = "utxos_1d_to_1w_old_realized_price"
+W = 82651.72
+# Close 81217.6 ± 50%, by bucket width: (low, high) of the domain.
+O5_DOMAINS = [(200, 40_600.0, 121_800.0), (500, 40_500.0, 122_000.0), (1000, 41_000.0, 122_000.0)]
+
+
+def test_o5_reaches_the_derived_levels_and_cost_basis(tmp_path: Path):
+    def derived(rules: Rules) -> tuple[dict[str, Any], StoredCostBasis]:
+        store = OnchainStore(tmp_path / f"{'-'.join(sorted(rules)) or 'v1'}.sqlite")
+        transport, _ = brk_transport(urpd_dir=GOLDEN)
+        assert run(store, transport, NOW, rules)
+        assert strings(store.state()["reasons"]) == []
+        return levels_of(store), costbasis_of(store)
+
+    (v1, v1_cost), (o5, o5_cost) = derived(frozenset()), derived(O5)
+
+    # The levels gain the 1d–1w line, last; the others stay as they are.
+    assert (v1["rules"], o5["rules"]) == ([], ["O5"])
+    assert [line["name"] for line in o5["lines"]] == [
+        *(line["name"] for line in v1["lines"]),
+        "one_day_to_week",
+    ]
+    assert line_prices(o5) == {**line_prices(v1), "one_day_to_week": W}
+    assert o5["as_of"] == v1["as_of"] == "2026-10-16T00:00:00+00:00"
+
+    # The cost basis is fitted in the fixed domain and counts the line, so its numbers change.
+    assert (v1_cost.rules, o5_cost.rules, o5_cost.reasons) == ([], ["O5"], [])
+    assert [(b.bucket, b.domain_low, b.domain_high) for b in v1_cost.buckets] == [
+        (200, 1000.0, 125_800.0),
+        (500, 1000.0, 126_000.0),
+        (1000, 1000.0, 126_000.0),
+    ]
+    assert [(b.bucket, b.domain_low, b.domain_high) for b in o5_cost.buckets] == O5_DOMAINS
+    for bucket in o5_cost.buckets:
+        nearest = bucket.above[0]
+        assert (nearest.low, nearest.high) == (82_000.0, 84_000.0)
+        assert [c.line for c in nearest.candidates] == ["one_day_to_week"]
+        assert bucket.resistance[0] == 84_000.0
+    for before, after in zip(v1_cost.buckets, o5_cost.buckets, strict=True):
+        assert (before.resistance, before.support) != (after.resistance, after.support)
+
+
+def test_o5_without_the_median_clears_the_cost_basis(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    seed_golden(store, GOLDEN_DAYS, NOW)
+    store.replace_series({W_SERIES: load_series(W_SERIES, "day1")}, "day1", NOW)
+    # D's all lin500 snapshot holds no supply, so there is no median line.
+    empty = golden_urpd("all", "lin500", D)
+    empty = empty.model_copy(
+        update={"buckets": [b.model_copy(update={"supply": 0.0}) for b in empty.buckets]}
+    )
+    store.save_urpd(empty, NOW)
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        for rules, names in (
+            (frozenset(), LINES - {"median"}),
+            (O5, LINES - {"median"} | {"one_day_to_week"}),
+        ):
+            assert derive(store, rules) is False
+            levels = levels_of(store)
+            assert set(line_prices(levels)) == names
+            # Five lines under O5 are not all six it counts, so there is no cost basis.
+            assert store.derived("costbasis") is None
+    # It was never computed, so it never failed.
+    assert "onchain_derive_failed" not in caplog.text

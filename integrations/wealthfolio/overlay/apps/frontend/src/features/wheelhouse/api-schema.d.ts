@@ -756,7 +756,7 @@ export interface components {
             /** Price */
             price: number;
             /** Line */
-            line: ("true_mean" | "short_term" | "average" | "long_term" | "median") | null;
+            line: ("true_mean" | "short_term" | "average" | "long_term" | "median" | "one_day_to_week") | null;
             /** Cohort */
             cohort: ("sth" | "lth") | null;
             /** Index */
@@ -1702,7 +1702,7 @@ export interface components {
              * Name
              * @enum {string}
              */
-            name: "true_mean" | "short_term" | "average" | "long_term" | "median";
+            name: "true_mean" | "short_term" | "average" | "long_term" | "median" | "one_day_to_week";
             /** Price */
             price: number;
         };

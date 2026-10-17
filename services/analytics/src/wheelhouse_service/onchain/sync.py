@@ -25,11 +25,11 @@ from .brk import (
 from .costbasis import (
     BUCKETS,
     COHORTS,
-    LINE_ORDER,
     PAST_DAYS,
     BucketCostBasis,
     StoredCostBasis,
     cost_basis,
+    line_order,
 )
 from .cycle import classify
 from .levels import ModelLine, last_complete, model_lines
@@ -423,8 +423,9 @@ class OnchainSync:
                 "latest_urpd_day": urpd.date.isoformat() if urpd else None,
             }
             self.store.save_derived("levels", json.dumps(levels, allow_nan=False), at)
-            if snapshot is None or len(lines) < len(LINE_ORDER):
-                # Without all five lines the bands would quietly change, so there is none.
+            costbasis_rules = frozenset(rules_for_view("costbasis", self.rules))
+            if snapshot is None or len(lines) < len(line_order(costbasis_rules)):
+                # Without every line the bands would quietly change, so there is none.
                 self.store.clear_derived("costbasis")
             else:
                 try:
@@ -480,6 +481,7 @@ class OnchainSync:
 
         Only the store is read, so what was fetched in this run does not matter.
         """
+        rules = rules_for_view("costbasis", self.rules)
         buckets: list[BucketCostBasis] = []
         reasons: list[str] = []
         used: list[tuple[str, str]] = []
@@ -503,7 +505,7 @@ class OnchainSync:
             if len(found) < len(past):
                 # The grid is built from the days there are.
                 reasons.append(f"urpd_grid_partial:{agg}")
-            result = cost_basis(today, found, bucket, lines)
+            result = cost_basis(today, found, bucket, lines, rules=frozenset(rules))
             if result is None:
                 reasons.append(f"urpd_empty:{agg}")
             else:
@@ -520,7 +522,7 @@ class OnchainSync:
             snapshot_at=min(stamp for stamp in stamps if stamp is not None),
             buckets=buckets,
             reasons=reasons,
-            rules=rules_for_view("costbasis", self.rules),
+            rules=rules,
             latest_day=latest_day,
         )
 

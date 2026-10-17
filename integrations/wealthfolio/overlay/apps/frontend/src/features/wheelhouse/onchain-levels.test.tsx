@@ -52,6 +52,37 @@ it("lists the five model lines and the three cycle components", () => {
   );
 });
 
+it("lists O5's 1d–1w cost line after the median", () => {
+  render(
+    <OnchainLevels
+      levels={{
+        ...levelsSample,
+        rules: ["O5"],
+        lines: [
+          ...levelsSample.lines,
+          { name: "one_day_to_week", price: 82651.72 },
+        ],
+      }}
+      cycle={cycleSample}
+    />,
+  );
+  const names = [...document.querySelectorAll(".wh-facts dt")]
+    .map((dt) => dt.textContent)
+    .slice(0, 6);
+  expect(names).toEqual([
+    "True mean",
+    "Short-term",
+    "Average",
+    "Long-term",
+    "Median",
+    "1d–1w cost",
+  ]);
+  expect(screen.getByText("1d–1w cost").nextSibling?.textContent).toBe(
+    "$82,652",
+  );
+  expect(phrase("zh", "levels.line.one_day_to_week")).toBe("1天–1周成本");
+});
+
 it("says when a component does not support the current state", () => {
   render(
     <OnchainLevels

@@ -83,13 +83,14 @@ describe("on-chain levels contract", () => {
     expect(parsed.onchain_close).toBe(112_345.67);
   });
 
-  it("accepts exactly the five model line names", () => {
+  it("accepts exactly the model line names, O5's 1d–1w line among them", () => {
     for (const name of [
       "true_mean",
       "short_term",
       "average",
       "long_term",
       "median",
+      "one_day_to_week",
     ]) {
       const next = { ...levelsSample, lines: [{ name, price: 100 }] };
       expect(levelsViewSchema.safeParse(next).success).toBe(true);

@@ -11,6 +11,7 @@ export const lineNameKey: Record<LineName, MessageKey> = {
   average: "levels.line.average",
   long_term: "levels.line.long_term",
   median: "levels.line.median",
+  one_day_to_week: "levels.line.one_day_to_week",
 };
 
 // "lin200" names the $200 bucket.

@@ -140,6 +140,53 @@ it("keeps the spot note without O1", () => {
   expect(row(spot).labels).toBe("on-chain price");
 });
 
+it("explains O5's fixed price domain and names its 1d–1w line", () => {
+  const o5 = withBucket(500, (b) => ({
+    ...b,
+    above: [
+      {
+        low: 82000,
+        high: 84000,
+        candidates: [
+          {
+            kind: "line",
+            price: 82652,
+            line: "one_day_to_week",
+            cohort: null,
+            index: null,
+            edge: null,
+          },
+        ],
+      },
+      ...b.above.slice(0, 3),
+    ],
+  }));
+  render(<CostBasisPanel view={{ ...o5, rules: ["O5"] }} bucket={500} />);
+  expect(row(bandRows()[3])).toMatchObject({
+    range: "$82,000 – $84,000",
+    n: "1",
+    labels: "1d–1w cost",
+  });
+  expect(
+    screen.getByText(
+      "Bands fitted within ±50% of the on-chain close; bandwidth ≈ 2% of that range; SHARE counts weight inside it; lines outside it are not candidates.",
+    ),
+  ).toBeTruthy();
+  expect(phrase("zh", "costBasis.domainNote")).toBe(
+    "价带在链上收盘价 ±50% 的范围内拟合；带宽约为该范围的 2%；SHARE 只计该范围内的权重；范围外的成本线不计入候选。",
+  );
+});
+
+it("has no price-domain note without O5", () => {
+  render(
+    <CostBasisPanel
+      view={{ ...costBasisSample, rules: ["O1"] }}
+      bucket={500}
+    />,
+  );
+  expect(screen.queryByText(/Bands fitted within/)).toBeNull();
+});
+
 it("reads the selected bucket", () => {
   render(<CostBasisPanel view={costBasisSample} bucket={1000} />);
   expect(levelCells("Resistance")[1]).toBe("$90.0k");

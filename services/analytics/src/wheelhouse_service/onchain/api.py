@@ -15,7 +15,7 @@ from ..rules import Rule, Rules, View, rules_for_view
 from .brk import DAY1_SERIES, HOUR1_SERIES, BrkClient
 from .costbasis import StoredCostBasis
 from .cycle import Cycle
-from .levels import LINE_SERIES, ModelLine
+from .levels import ModelLine, line_series
 from .models import (
     CostBasisView,
     CycleView,
@@ -36,19 +36,29 @@ DAY1_REASONS = (*(f"series_missing:{name}" for name in DAY1_SERIES), "brk_unavai
 URPD_REASONS = ("urpd_missing", "urpd_not_final", "brk_unavailable")
 PRESSURE_REASONS = (*(f"series_missing:hour1:{name}" for name in HOUR1_SERIES), "brk_unavailable")
 CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unavailable")
-LEVELS_REASONS = (
-    *(f"series_missing:{name}" for name in LINE_SERIES.values()),
-    "urpd_missing",
-    "urpd_not_final",
-    "brk_unavailable",
-)
-# The snapshot-level codes are stored with the result, not shared: see `StoredCostBasis.reasons`.
-COST_BASIS_SHARED = (
-    "urpd_missing",
-    "urpd_not_final",
-    *(f"series_missing:{name}" for name in LINE_SERIES.values()),
-    "brk_unavailable",
-)
+
+
+def levels_reasons(rules: Rules) -> tuple[str, ...]:
+    """The shared reasons that concern the levels derived under `rules`: O5 adds a line series."""
+    return (
+        *(f"series_missing:{name}" for name in line_series(rules).values()),
+        "urpd_missing",
+        "urpd_not_final",
+        "brk_unavailable",
+    )
+
+
+def cost_basis_shared(rules: Rules) -> tuple[str, ...]:
+    """The shared reasons that concern the cost basis derived under `rules`.
+
+    The snapshot-level codes are stored with the result, not shared: see `StoredCostBasis.reasons`.
+    """
+    return (
+        "urpd_missing",
+        "urpd_not_final",
+        *(f"series_missing:{name}" for name in line_series(rules).values()),
+        "brk_unavailable",
+    )
 
 
 class StoredLevels(Model):
@@ -121,6 +131,10 @@ def create_router(
     def db() -> OnchainStore:
         assert store is not None, "On-chain lifespan has not started"
         return store
+
+    # The views' reasons follow the configured rules, which the worker derives under.
+    levels_shared = levels_reasons(frozenset(rules_for_view("levels", rules)))
+    cost_shared = cost_basis_shared(frozenset(rules_for_view("costbasis", rules)))
 
     def pending(view: View, stored: list[Rule]) -> bool:
         """Whether a payload was derived under other rules than the configured ones."""
@@ -254,7 +268,7 @@ def create_router(
     def levels() -> LevelsView:
         now = clock()
         state = db().state()
-        reasons = only(stored_reasons(state), LEVELS_REASONS)
+        reasons = only(stored_reasons(state), levels_shared)
         refreshing = state["refreshing"] == "true"
         result = stored_levels()
         if result is None:
@@ -286,7 +300,7 @@ def create_router(
     def cost_basis() -> CostBasisView:
         now = clock()
         state = db().state()
-        reasons = only(stored_reasons(state), COST_BASIS_SHARED)
+        reasons = only(stored_reasons(state), cost_shared)
         refreshing = state["refreshing"] == "true"
         stored = stored_cost_basis()
         if stored is None:

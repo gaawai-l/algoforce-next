@@ -230,6 +230,10 @@ export function CostBasisPanel({
               </tbody>
             </table>
             <p className="wh-muted">{text("costBasis.mNote")}</p>
+            {view.rules.includes("O5") ? (
+              // O5 fits the bands in a fixed price domain around the snapshot's close.
+              <p className="wh-muted">{text("costBasis.domainNote")}</p>
+            ) : null}
           </>
         ) : (
           <p className="wh-onchain-warn">{text("costBasis.bucketMissing")}</p>
