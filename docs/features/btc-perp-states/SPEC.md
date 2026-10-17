@@ -229,7 +229,7 @@
 
 ### 3.7 新鲜度与状态
 
-新鲜度、采集器状态和 collecting 状态都在**处理请求时**按当前时刻计算；载荷里只存 `last`、`computed_at` 和各采集流的覆盖信息。
+新鲜度和采集器状态在**处理请求时**按当前时刻计算。collecting 状态（Collecting 横幅、原因码 `collecting:<days>`）和视图的 `covered_days` 则来自载荷：它们在派生时按当时的覆盖算出，随每轮派生更新，不在请求时重算。覆盖说明里各采集流的天数（`collectors[].covered_days`）按请求时刻从覆盖记录计算。
 
 - **数据新鲜度**：按每个交易所视图的最后收盘桶终点 `last + 10m` 计算：
   - 距现在 ≤ 30 分钟为 fresh；
@@ -241,7 +241,8 @@
   - `series_missing:<venue>:<series>`：参考窗口内该序列一个值都没有；
   - `rest_error:<host>:<code>`；
   - `collector_down:<stream>`；
-  - `collecting:<days>`。
+  - `collecting:<days>`；
+  - 没有载荷时：`not_derived`，或本进程不运行 perps 时的 `perps_disabled`（§4）。
 - **失败**：保留旧数据，状态随时间自然降级；日志只记来源、错误码和耗时。
 
 ### 3.8 REST 礼仪（评审 I9）
@@ -293,7 +294,7 @@
 
 - **页头行**：`Resolution 10m · Data through <last + 10m> UTC · Price Bybit spot · OI/flows Binance USDⓈ-M + Bybit linear (public) · liquidations collected since <日期>`。
 - **覆盖说明**：一行写明清算和 Bybit 成交已覆盖多少天。
-- **Collecting 横幅**：未达起步门槛时显示 `Collecting liquidations (and Bybit trades) · n of 7 days (target 90)`。此时隐藏表 1、图 1 和图 2，只画图 3 和图 4。
+- **Collecting 横幅**：未达起步门槛时显示 `Collecting liquidations (and Bybit trades) · n of 7 days (target 90)`。此时隐藏表 1、图 1 和图 2，只画图 3 和图 4。横幅和其中的天数取自载荷（派生时算出，§3.7）。
 - **Binance 清算标注**：`Binance liquidations are a one-per-second snapshot (lower bound)`。
 - **Parameters**：
   - Exchange：All venues / Binance / Bybit；
@@ -392,6 +393,17 @@
 | I10：验收缺项 | §6 |
 | I11：回归 fixture 会过期 | 已保存到 `.local`，入库为 fixture |
 | M1–M11 | 采纳；Hyperliquid 的依据补上了引用 |
+
+**v3.2（2026-10-17）**：按 P4 整支终审修订（代码与本文同步，记录见 [P4-VERIFICATION](P4-VERIFICATION.md) §8）。
+
+| 终审意见 | 处理 |
+|---|---|
+| 每次派生都把 91 天的原始清算逐条解析五遍 | §3.1：清算的方向、数量和价格在入库时映射并存列（迁移 002 回填旧行），派生在 SQL 中按桶汇总；改映射需要迁移重写这三列 |
+| test 环境只输出 WARNING 以上的日志，覆盖空洞无从解释 | 连接异常结束记 WARNING；`/perps/status` 的 `collectors[].problems` 给出本进程以来的计数（发布流程写明部署后检查） |
+| 未覆盖块的 delta / lLiq / sLiq 是补出来的值 | §4 写明，使用方取 `*_sum` |
+| 视图只看合并的方向核对 | §5：各交易所视图看自己的核对，`inverted` 时显示提示 |
+| perps 关闭时视图仍写 `not_derived` | §4、§3.7：改为 `perps_disabled` |
+| collecting 状态的来源写错 | §3.7、§5：来自载荷，派生时算出 |
 
 **v3.1（2026-10-17）**：计划评审（opus）在真实 fixture 上发现，"≥3 个相同值"漏掉了 10:50、10:55 这一对，改为 ≥2，并修正了回归断言的口径。
 

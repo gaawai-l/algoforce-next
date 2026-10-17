@@ -27,6 +27,20 @@ python deploy/test/verify.py 'https://<test-domain>' --session-file '/absolute/p
 
 脚本默认检查登录页、匿名 API 401（无 Basic challenge）、跨源请求和 broker sync 被阻止。提供合法钱包会话时进一步检查认证访问，并创建一个 fixture 分析任务验证 DeMark 返回值。此任务会写入 test 模拟数据；浏览器功能验收仍需按本次改动补充。
 
+## Perps 采集（永续状态）
+
+analytics 服务内常驻 perps 的 REST worker 和 WebSocket 采集器，由 `WHEELHOUSE_PERPS` 控制，默认开启（`0`/`false`/`off` 关闭）。
+
+- **出站网络**：需要放行到 `fstream.binance.com` 和 `stream.bybit.com` 的 WSS，以及到 `fapi.binance.com`、`data.binance.vision`、`api.bybit.com` 的 HTTPS。
+- **停机**：Compose 给 analytics 设了 `stop_grace_period: 30s`。收到 SIGTERM 后，worker 在下一个请求前放弃本轮（在途请求最长 20 秒），采集器同时关闭连接并结束覆盖区间（最长 8 秒）。
+- **部署后检查**：用合法钱包会话（与 `verify.py --session-file` 相同）请求 `/api/wheelhouse/v1/perps/status`：
+  - `collectors` 中 3 个流都是 `live: true`；
+  - 各流的 `problems` 是本进程启动以来的计数（`rotated`、`stopped` 属正常生命周期，其余如 `stalled`、`half_open`、`connect_failed`、`coverage_split` 是故障或空洞），用来解释覆盖空洞；
+  - 运行一天后，`direction_check.bybit_qty.events` 应在增长；
+  - `hosts` 中没有持续的 `error`。
+  `deploy/test/verify.py` 不检查这些项目，需要手动核对并写进发布记录。
+- **覆盖空洞**：每次重新部署 analytics 都会让两条连接同时断开，至少留下一个未覆盖的块。在采集满 7 天之前（spec 的起步门槛），尽量把 analytics 的部署攒在一起做，减少空洞。
+
 ## 失败与回滚
 
 保留失败日志与实际运行版本，先判断旧版本是否仍可用。需要回滚时选择已验收的历史部署镜像或提交，通过 Coolify 支持的回滚/指定提交重新部署，并重复外网验收。若平台不支持指定提交，则在发布分支创建经过检查的正常回退提交再部署，保留分支历史，不 force push。
