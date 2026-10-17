@@ -83,7 +83,7 @@
 | `derived` | key（exchange, window）, payload, computed_at |
 | `sync_state` | 各 host 最近一次成功时间、错误码、退避截止时间；清算方向核对结果 |
 
-数据保留 120 天（包括 coverage），更早的删除；`trade_ids` 只留 1 小时。
+数据保留 125 天（包括 coverage），更早的删除；`trade_ids` 只留 1 小时。REST 回填 121 天（`start` 为 121 天前），不随规则开关变化（P5-R9）。
 
 **启停**
 - `create_app` 新增参数：

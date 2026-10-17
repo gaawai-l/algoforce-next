@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import random
+import shutil
 import threading
 import time
 import zipfile
@@ -16,7 +17,9 @@ from pathlib import Path
 import httpx
 import pytest
 
+from wheelhouse_service import derive
 from wheelhouse_service.market import timestamp
+from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.perps.rows import Exchange, Kline, OiPoint, RawLiquidation, Trade
 from wheelhouse_service.perps.sources import (
     ARCHIVE_HOST,
@@ -25,9 +28,10 @@ from wheelhouse_service.perps.sources import (
     PerpsRest,
     RestError,
 )
-from wheelhouse_service.perps.states import Window
+from wheelhouse_service.perps.states import Grid, StatesResult, Window, compute_states
 from wheelhouse_service.perps.store import PerpsStore, Venue
 from wheelhouse_service.perps.sync import (
+    RETENTION_DAYS,
     Directions,
     HostState,
     PerpsSync,
@@ -38,6 +42,7 @@ from wheelhouse_service.perps.sync import (
     next_slot,
     qty_units,
 )
+from wheelhouse_service.rules import ALL_RULES, Rules
 
 BAR = 300
 STEP = 600
@@ -50,6 +55,8 @@ LAST_BAR = NOW_TS // BAR * BAR - BAR  # the last closed 5m bar opens at 11:55
 EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit")
 WINDOWS: tuple[Window, ...] = ("4h", "8h")
 ARCHIVE_SHIFT = 0.5  # archive OI differs from hist OI so that the source of a row shows
+V1: Rules = frozenset()
+O6: Rules = frozenset({"O6"})
 
 
 def start_of(horizon_days: int) -> int:
@@ -192,8 +199,14 @@ def rest(clock: Clock) -> FakeRest:
     return FakeRest(clock)
 
 
-def worker(store: PerpsStore, rest: PerpsRest, clock: Clock, horizon_days: int = 2) -> PerpsSync:
-    return PerpsSync(store, rest, clock=clock, horizon_days=horizon_days)
+def worker(
+    store: PerpsStore,
+    rest: PerpsRest,
+    clock: Clock,
+    horizon_days: int = 2,
+    rules: Rules = V1,
+) -> PerpsSync:
+    return PerpsSync(store, rest, clock=clock, rules=rules, horizon_days=horizon_days)
 
 
 def hosts_of(store: PerpsStore) -> dict[str, HostState]:
@@ -464,7 +477,7 @@ def test_unexpected_failure_while_fetching_is_sync_failed(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ):
-    old = (NOW_TS - 121 * DAY) // BAR * BAR
+    old = (NOW_TS - 126 * DAY) // BAR * BAR
     store.upsert_klines(
         "binance", [Kline(t=old, close=1.0, volume=1.0, taker_buy=0.5, source="binance_perp")]
     )
@@ -671,9 +684,10 @@ def test_direction_check_pending_ok_inverted_and_v_units(
     assert units.min_qty_matches
 
 
-def test_prune_keeps_120d_and_1h_trade_ids(store: PerpsStore, rest: FakeRest, clock: Clock):
-    old = (NOW_TS - 121 * DAY) // BAR * BAR
-    kept = (NOW_TS - 119 * DAY) // BAR * BAR
+def test_prune_keeps_125d_and_1h_trade_ids(store: PerpsStore, rest: FakeRest, clock: Clock):
+    assert RETENTION_DAYS == 125
+    old = (NOW_TS - 126 * DAY) // BAR * BAR
+    kept = (NOW_TS - 124 * DAY) // BAR * BAR
     store.upsert_klines(
         "binance",
         [
@@ -770,7 +784,7 @@ def test_qty_units_from_sql_equals_the_python_check(store: PerpsStore):
 def test_prune_runs_after_a_failed_round(
     store: PerpsStore, rest: FakeRest, clock: Clock, monkeypatch: pytest.MonkeyPatch
 ):
-    old = (NOW_TS - 121 * DAY) // BAR * BAR
+    old = (NOW_TS - 126 * DAY) // BAR * BAR
     store.upsert_klines(
         "binance", [Kline(t=old, close=1.0, volume=1.0, taker_buy=0.5, source="binance_perp")]
     )
@@ -788,7 +802,7 @@ def test_prune_runs_after_a_failed_round(
 def test_a_stop_abandons_a_round_stuck_in_a_request(
     store: PerpsStore, rest: FakeRest, clock: Clock, monkeypatch: pytest.MonkeyPatch
 ):
-    old = (NOW_TS - 121 * DAY) // BAR * BAR
+    old = (NOW_TS - 126 * DAY) // BAR * BAR
     store.upsert_klines(
         "binance", [Kline(t=old, close=1.0, volume=1.0, taker_buy=0.5, source="binance_perp")]
     )
@@ -825,3 +839,149 @@ def test_a_stop_abandons_a_round_stuck_in_a_request(
     hosts = hosts_of(store)
     assert hosts[BYBIT_HOST] == HostState(last_success=NOW, error=None, until=None)
     assert hosts[ARCHIVE_HOST] == HostState.model_validate(archive)
+
+
+def test_rules_reach_compute_states_and_the_payloads(
+    store: PerpsStore, rest: FakeRest, clock: Clock, monkeypatch: pytest.MonkeyPatch
+):
+    seen: list[Rules] = []
+
+    def spy(grid: Grid, window: Window, *, rules: Rules) -> StatesResult:
+        seen.append(rules)
+        return compute_states(grid, window, rules=rules)
+
+    monkeypatch.setattr("wheelhouse_service.perps.sync.compute_states", spy)
+    # Every rule is on, and O6 is the only one implemented for the perps.
+    worker(store, rest, clock, rules=ALL_RULES).run_once()
+
+    assert seen == [O6] * 6
+    for exchange in EXCHANGES:
+        for window in WINDOWS:
+            stored = payload(store, exchange, window)
+            assert stored.rules == ["O6"]
+            assert stored.states is not None and stored.states.blocks
+            assert all(b.thresholds is not None for b in stored.states.blocks)
+
+    seen.clear()
+    clock.advance(minutes=10)
+    worker(store, rest, clock, rules=V1).run_once()
+    assert seen == [V1] * 6
+    stored = payload(store, "all", "4h")
+    assert stored.rules == []
+    assert stored.states is not None
+    assert all(b.thresholds is None for b in stored.states.blocks)
+
+
+def full_round(directory: Path, horizon_days: int | None = None) -> PerpsStore:
+    """One v1 round at NOW, with both liquidation streams covered from 121 days back and 25
+    falling buckets with liquidations 110 days back, before the 90-day reference."""
+    directory.mkdir(parents=True, exist_ok=True)
+    store = PerpsStore(directory / "perps.sqlite")
+    start = start_of(120)
+    for stream in ("binance_liq", "bybit_liq"):
+        store.extend_coverage(store.open_coverage(stream, 0, start), NOW_TS)
+    old = TODAY - 110 * DAY
+    for t in (old + (2 * k + 1) * STEP for k in range(25)):  # odd buckets fall 0.5%
+        store.insert_liquidations(
+            "binance",
+            0,
+            [
+                liquidation("binance", t + 60, "SELL", "1.000"),
+                liquidation("binance", t + 120, "BUY", "0.100"),
+            ],
+        )
+        store.insert_liquidations("bybit", 0, [liquidation("bybit", t + 60, "Sell", "1.000")])
+    clock = Clock()
+    if horizon_days is None:
+        sync = PerpsSync(store, FakeRest(clock), clock=clock, rules=V1)
+    else:
+        sync = worker(store, FakeRest(clock), clock, horizon_days=horizon_days)
+    assert sync.run_once()
+    return store
+
+
+@pytest.fixture(scope="module")
+def synced_120(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The store of a round with the default horizon; tests copy it before changing it."""
+    return full_round(tmp_path_factory.mktemp("synced-120")).path
+
+
+def test_round_backfills_121_days_and_checks_directions_over_the_whole_grid(
+    synced_120: Path, tmp_path: Path
+):
+    store = PerpsStore(synced_120)
+    assert PerpsSync(store, FakeRest(Clock()), clock=Clock(), rules=V1).horizon_days == 120
+    for exchange in EXCHANGES:
+        for window in WINDOWS:
+            assert payload(store, exchange, window).start == moment(start_of(120))
+    assert min(store.klines("bybit", 0)) == start_of(120)
+
+    # The liquidations 110 days back lie in the grid, though not in the 90-day reference: the
+    # direction check and Bybit's size units now read the whole grid, 121 days.
+    check = Directions.model_validate_json(store.state()["direction_check"] or "")
+    assert (check.binance.verdict, check.binance.down) == ("ok", 25)
+    assert (check.bybit.verdict, check.bybit.down) == ("inverted", 25)
+    assert check.bybit_qty.events == 25
+    # A 90-day backfill reads 91 days: it saw none of them ...
+    store_90 = full_round(tmp_path / "horizon-90", horizon_days=90)
+    check_90 = Directions.model_validate_json(store_90.state()["direction_check"] or "")
+    assert (check_90.binance.samples, check_90.bybit.samples, check_90.bybit_qty.events) == (
+        0,
+        0,
+        0,
+    )
+    # ... and its v1 states, thresholds and tables are the same as those of the 121 days.
+    for exchange in EXCHANGES:
+        for window in WINDOWS:
+            states = payload(store, exchange, window).states
+            assert states is not None
+            assert states == payload(store_90, exchange, window).states
+    judged = payload(store, "binance", "4h").states
+    assert judged is not None and not judged.collecting
+
+
+def test_derive_command_rederives_the_perps_of_a_copy(
+    synced_120: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    shutil.copy(synced_120, copy / "perps.sqlite")
+    OnchainStore(copy / "onchain.sqlite")  # nothing on-chain was stored
+    original = {
+        (e, w): PerpsStore(synced_120).derived(derived_key(e, w))
+        for e in EXCHANGES
+        for w in WINDOWS
+    }
+    monkeypatch.delenv("WHEELHOUSE_RULES", raising=False)
+
+    # Under v1, from the stored time: the round's own payloads come out again.
+    derive.main(["--data-dir", str(copy), "--rules", "v1"])
+    assert capsys.readouterr().out == "derived perps=v1\n"
+    store = PerpsStore(copy / "perps.sqlite")
+    assert {
+        (e, w): store.derived(derived_key(e, w)) for e in EXCHANGES for w in WINDOWS
+    } == original
+
+    derive.main(["--data-dir", str(copy), "--rules", "O6"])
+    assert capsys.readouterr().out == "derived perps=O6\n"
+    for exchange in EXCHANGES:
+        for window in WINDOWS:
+            found = store.derived(derived_key(exchange, window))
+            assert found is not None and found[1] == NOW
+            stored = StoredStates.model_validate_json(found[0])
+            assert (stored.rules, stored.start) == (["O6"], moment(start_of(120)))
+            assert stored.states is not None
+            assert all(b.thresholds is not None for b in stored.states.blocks)
+    # The direction check is the round's, not the command's.
+    assert store.state()["direction_check"] == PerpsStore(synced_120).state()["direction_check"]
+
+    # A copy without perps derives the on-chain views alone, as before.
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    OnchainStore(bare / "onchain.sqlite")
+    derive.main(["--data-dir", str(bare), "--rules", "O6"])
+    assert capsys.readouterr().out == "derived none\n"
+    assert not (bare / "perps.sqlite").exists()

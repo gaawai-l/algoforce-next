@@ -15,6 +15,7 @@ from typing import Literal, NamedTuple
 from pydantic import AwareDatetime
 
 from ..market import Model, timestamp
+from ..rules import Rule, Rules, rules_for_view
 from .grid import BAR, build_grid, read_liquidations
 from .rows import Exchange, Kline, OiPoint
 from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, PerpsRest, RestError
@@ -30,7 +31,11 @@ WINDOWS: tuple[Window, ...] = ("4h", "8h")
 HIST_DAYS = 29
 # Each round fetches the last few stored records of every series again, as onchain's OVERLAP.
 OVERLAP = 3
-RETENTION_DAYS = 120
+# A round fetches from HORIZON_DAYS + 1 UTC days back, enough for O6 to rank the earliest block
+# in the 30-day view against the 90 days before it; the same whatever the rules, so switching
+# them needs no backfill (P5-R9).
+HORIZON_DAYS = 120
+RETENTION_DAYS = 125
 TRADE_IDS_SECONDS = 3600
 # Rounds run at HH:05, HH:15, ...: Binance publishes its history rows 2-4 minutes late.
 SLOT_OFFSET = 300
@@ -59,6 +64,12 @@ def derived_key(exchange: Exchange, window: Window) -> str:
     return f"states:{exchange}:{window}"
 
 
+def grid_start(at: datetime, horizon_days: int = HORIZON_DAYS) -> int:
+    """The first bucket a round at `at` fetches and derives from: `horizon_days` + 1 UTC days
+    before its date."""
+    return (int(at.timestamp()) // DAY - (horizon_days + 1)) * DAY
+
+
 class StoredStates(Model):
     """One exchange view and window as the worker derives it.
 
@@ -71,6 +82,8 @@ class StoredStates(Model):
     start: AwareDatetime  # the grid's first bucket
     reasons: list[str]  # series_missing:<venue>:<series>
     states: StatesResult | None
+    # The rules it was derived under; payloads stored before rules existed read as none.
+    rules: list[Rule] = []
 
 
 class HostState(Model):
@@ -220,11 +233,13 @@ class PerpsSync:
         rest: PerpsRest,
         *,
         clock: Callable[[], datetime],
-        horizon_days: int = 90,
+        rules: Rules,
+        horizon_days: int = HORIZON_DAYS,
     ) -> None:
         self.store = store
         self.rest = rest
         self.clock = clock
+        self.rules = rules
         self.horizon_days = horizon_days
         self.stopping = Event()
         self.thread: Thread | None = None
@@ -290,7 +305,7 @@ class PerpsSync:
 
     def _round(self, at: datetime, clock: Callable[[], datetime]) -> None:
         now = int(at.timestamp())
-        start = (now // DAY - (self.horizon_days + 1)) * DAY
+        start = grid_start(at, self.horizon_days)
         hosts = stored_hosts(self.store.state())
         # The stored deadline outlives a restart, which the client's own one does not.
         run = _Round(
@@ -473,29 +488,7 @@ class PerpsSync:
         )
 
     def _derive(self, start: int, at: datetime) -> dict[Exchange, Grid | list[str]]:
-        """Store the six payloads; return each view's grid, or the series it lacks."""
-        grids: dict[Exchange, Grid | list[str]] = {}
-        # Each venue's liquidations are read once: the All view reuses them.
-        venues: tuple[Venue, ...] = ("binance", "bybit")
-        liquidations = {venue: read_liquidations(self.store, venue, start) for venue in venues}
-        for exchange in EXCHANGES:
-            grid = build_grid(self.store, exchange, start, liquidations)
-            grids[exchange] = grid
-            for window in WINDOWS:
-                states: StatesResult | None = None
-                missing = grid if isinstance(grid, list) else []
-                if isinstance(grid, Grid):
-                    states = compute_states(grid, window)
-                    missing = states.series_missing
-                stored = StoredStates(
-                    exchange=exchange,
-                    window=window,
-                    start=datetime.fromtimestamp(start, UTC),
-                    reasons=[f"series_missing:{key}" for key in missing],
-                    states=states,
-                )
-                self.store.save_derived(derived_key(exchange, window), stored.model_dump_json(), at)
-        return grids
+        return derive_states(self.store, start=start, at=at, rules=self.rules)
 
     def _check_directions(self, grids: Mapping[Exchange, Grid | list[str]], start: int) -> None:
         checks: dict[Venue, DirectionCheck] = {}
@@ -512,3 +505,35 @@ class PerpsSync:
             bybit_qty=qty_units(self.store.liquidation_sizes(start)),
         )
         self.store.set_state(direction_check=result.model_dump_json())
+
+
+def derive_states(
+    store: PerpsStore, *, start: int, at: datetime, rules: Rules
+) -> dict[Exchange, Grid | list[str]]:
+    """Store the six payloads, derived from bucket `start` under `rules` and computed at `at`;
+    return each view's grid, or the series it lacks."""
+    # Only the rules the payload records are applied.
+    applied = rules_for_view("perps", rules)
+    grids: dict[Exchange, Grid | list[str]] = {}
+    # Each venue's liquidations are read once: the All view reuses them.
+    venues: tuple[Venue, ...] = ("binance", "bybit")
+    liquidations = {venue: read_liquidations(store, venue, start) for venue in venues}
+    for exchange in EXCHANGES:
+        grid = build_grid(store, exchange, start, liquidations)
+        grids[exchange] = grid
+        for window in WINDOWS:
+            states: StatesResult | None = None
+            missing = grid if isinstance(grid, list) else []
+            if isinstance(grid, Grid):
+                states = compute_states(grid, window, rules=frozenset(applied))
+                missing = states.series_missing
+            stored = StoredStates(
+                exchange=exchange,
+                window=window,
+                start=datetime.fromtimestamp(start, UTC),
+                reasons=[f"series_missing:{key}" for key in missing],
+                states=states,
+                rules=applied,
+            )
+            store.save_derived(derived_key(exchange, window), stored.model_dump_json(), at)
+    return grids

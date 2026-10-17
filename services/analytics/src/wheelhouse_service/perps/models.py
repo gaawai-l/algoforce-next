@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import AwareDatetime
 
 from ..market import Model
+from ..rules import Rule
 from .rows import Exchange, Stream
 from .states import STEP, Block, Table, Tail, Thresholds, Window
 from .sync import Directions, Verdict
@@ -64,6 +65,10 @@ class PerpStatesView(Model):
     series_missing: list[str]
     # Only the streams this view reads: liquidations, and Bybit's trades for its delta.
     collectors: list[CollectorStatus]
+    # The rules the payload was derived under, and whether they differ from the configured ones
+    # until a round derives it again. Empty and false when there is no payload.
+    rules: list[Rule]
+    rules_pending: bool
 
 
 class HostStatus(Model):

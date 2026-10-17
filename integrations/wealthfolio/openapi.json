@@ -1783,6 +1783,16 @@
               }
             ],
             "title": "Sliq Sum"
+          },
+          "thresholds": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Thresholds"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -1806,7 +1816,8 @@
           "oi_close",
           "delta_sum",
           "lliq_sum",
-          "sliq_sum"
+          "sliq_sum",
+          "thresholds"
         ],
         "title": "Block"
       },
@@ -5214,6 +5225,25 @@
             },
             "type": "array",
             "title": "Collectors"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
           }
         },
         "additionalProperties": false,
@@ -5233,7 +5263,9 @@
           "collecting",
           "qc",
           "series_missing",
-          "collectors"
+          "collectors",
+          "rules",
+          "rules_pending"
         ],
         "title": "PerpStatesView",
         "description": "One exchange view and window. While unavailable, everything from `last` on is null or\nempty and `reasons` say why."
@@ -7652,28 +7684,60 @@
       "Thresholds": {
         "properties": {
           "s_liq": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "S Liq"
           },
           "l_liq": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "L Liq"
           },
           "oi": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Oi"
           },
           "px": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Px"
           },
           "n_liq": {
             "type": "integer",
             "title": "N Liq"
           },
-          "n_all": {
+          "n_px": {
             "type": "integer",
-            "title": "N All"
+            "title": "N Px"
+          },
+          "n_oi": {
+            "type": "integer",
+            "title": "N Oi"
           }
         },
         "additionalProperties": false,
@@ -7684,7 +7748,8 @@
           "oi",
           "px",
           "n_liq",
-          "n_all"
+          "n_px",
+          "n_oi"
         ],
         "title": "Thresholds"
       },

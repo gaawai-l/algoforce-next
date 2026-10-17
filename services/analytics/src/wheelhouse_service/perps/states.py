@@ -1,6 +1,8 @@
-"""Perp states on a filled 10-minute grid, following the original perp-squeeze page's v1 rules."""
+"""Perp states on a filled 10-minute grid, following the original perp-squeeze page's v1 rules,
+or with O6 ranking each block against the blocks before it only."""
 
 import math
+from bisect import bisect_left
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -9,13 +11,17 @@ from typing import Literal
 from pydantic import AwareDatetime
 
 from ..market import Model
+from ..rules import Rules
+from ..stats import quantile_r7
 
 STEP = 600  # seconds per grid bucket
 DAY = 86_400
-# Thresholds rank the blocks from the 90 UTC days before last's date, plus that date.
+# Thresholds rank the blocks from the 90 UTC days before last's date, plus that date. Under O6 a
+# block's own thresholds rank the blocks of the 90 days before it.
 REFERENCE_DAYS = 90
 SHOW_DAYS = (7, 30)
 # Fewer covered blocks than this many days' worth in the reference: collecting, nothing judged.
+# Under O6, a threshold whose sample is shorter than that is null.
 COLLECTING_DAYS = 7
 # QC: the longest run of null buckets a series may have, in seconds.
 MAX_GAP = 1800
@@ -88,6 +94,18 @@ class Imputed(Model):
     sums: bool
 
 
+class Thresholds(Model):
+    # Null under O6 while the sample has fewer blocks than COLLECTING_DAYS' worth.
+    s_liq: float | None
+    l_liq: float | None
+    oi: float | None
+    px: float | None
+    n_liq: int  # blocks with liquidations covered: the sample of s_liq and l_liq
+    # The samples of px and oi: every block (v1), those whose dPx or dOI is not imputed (O6).
+    n_px: int
+    n_oi: int
+
+
 class Block(Model):
     t0: AwareDatetime
     t1: AwareDatetime  # the start of the block's last bucket
@@ -112,6 +130,8 @@ class Block(Model):
     delta_sum: float | None
     lliq_sum: float | None
     sliq_sum: float | None
+    # O6 only: the block's own, ranked over the 90 days before it, also where it is not judged.
+    thresholds: Thresholds | None = None
 
 
 class Tail(Model):
@@ -124,15 +144,6 @@ class Tail(Model):
     delta_sum: float | None
     lliq_sum: float | None
     sliq_sum: float | None
-
-
-class Thresholds(Model):
-    s_liq: float
-    l_liq: float
-    oi: float
-    px: float
-    n_liq: int  # reference blocks with liquidations covered: the sample of s_liq and l_liq
-    n_all: int  # all reference blocks: the sample of oi and px
 
 
 class TableRow(Model):
@@ -245,11 +256,13 @@ def _spans(grid: Grid, w: int) -> tuple[list[tuple[int, int]], tuple[int, int] |
     return spans, None
 
 
-def _block(grid: Grid, i0: int, i1: int, w: int) -> Block:
+def _block(grid: Grid, i0: int, i1: int, w: int, *, o6: bool = False) -> Block:
     price, oi = grid.price[i0 : i1 + 1], grid.oi[i0 : i1 + 1]
     vd = grid.vd[i0 : i1 + 1]
     longs, shorts = grid.long_liq[i0 : i1 + 1], grid.short_liq[i0 : i1 + 1]
-    dpx, o0, o1 = _move(price[0], price[-1]), oi[0], oi[-1]
+    # O6 moves from the close before the block, the bucket t0 - 10m; v1 from its first bucket.
+    base = (grid.price[i0 - 1] if i0 > 0 else None) if o6 else price[0]
+    dpx, o0, o1 = _move(base, price[-1]), oi[0], oi[-1]
     liq_covered = all(grid.liq_covered[i0 : i1 + 1])
     delta_covered = all(grid.vd_covered[i0 : i1 + 1])
     return Block(
@@ -279,11 +292,16 @@ def _block(grid: Grid, i0: int, i1: int, w: int) -> Block:
     )
 
 
-def _classify(b: Block, t: Thresholds) -> State:
-    """The first state whose rule holds, in the original's order."""
-    if b.sliq >= t.s_liq and b.dpx >= t.px and b.sliq >= 3 * b.lliq:
+def _classify(b: Block, t: Thresholds, *, o6: bool = False) -> State | None:
+    """The first state whose rule holds, in the original's order; None while a threshold is null.
+
+    O6 also asks a squeeze for liquidations on its side.
+    """
+    if t.s_liq is None or t.l_liq is None or t.oi is None or t.px is None:
+        return None
+    if b.sliq >= t.s_liq and b.dpx >= t.px and b.sliq >= 3 * b.lliq and (not o6 or b.sliq > 0):
         return "shortsq"
-    if b.lliq >= t.l_liq and b.dpx <= -t.px and b.lliq >= 3 * b.sliq:
+    if b.lliq >= t.l_liq and b.dpx <= -t.px and b.lliq >= 3 * b.sliq and (not o6 or b.lliq > 0):
         return "longsq"
     if b.doi <= -t.oi:
         return "longun" if b.delta < 0 else "shortun"
@@ -340,6 +358,36 @@ def _table(grid: Grid, blocks: list[Block], spans: list[tuple[int, int]], show_d
     )
 
 
+def _past_thresholds(past: Sequence[Block], need: int) -> Thresholds:
+    """O6: R-7 thresholds over `past`, each one null while its sample has fewer than `need`
+    blocks. A feature that was imputed stays out of its own sample."""
+    liq = [b for b in past if b.liq_covered]
+    px = sorted(abs(b.dpx) for b in past if not b.imputed.dpx)
+    oi = sorted(abs(b.doi) for b in past if not b.imputed.doi)
+
+    def rank(values: Sequence[float], q: float) -> float | None:
+        return quantile_r7(values, q) if len(values) >= need else None
+
+    return Thresholds(
+        s_liq=rank(sorted(b.sliq for b in liq), 0.90),
+        l_liq=rank(sorted(b.lliq for b in liq), 0.90),
+        oi=rank(oi, 0.75),
+        px=rank(px, 0.75),
+        n_liq=len(liq),
+        n_px=len(px),
+        n_oi=len(oi),
+    )
+
+
+def _judged_past(b: Block, past: Sequence[Block], need: int) -> Block:
+    """O6: the block with its own thresholds, and its state unless an input is uncovered or
+    imputed, or a threshold is null."""
+    thresholds = _past_thresholds(past, need)
+    imputed = b.imputed.dpx or b.imputed.doi or b.imputed.sums
+    state = _classify(b, thresholds, o6=True) if b.covered and not imputed else None
+    return b.model_copy(update={"thresholds": thresholds, "state": state})
+
+
 def _qc(grid: Grid, ref_start: int) -> tuple[list[str], list[str]]:
     """QC codes over the reference window's buckets, and the REST series with no value there."""
     first = max(0, (ref_start - grid.start) // STEP)
@@ -366,36 +414,59 @@ def _qc(grid: Grid, ref_start: int) -> tuple[list[str], list[str]]:
     return codes, missing
 
 
-def compute_states(grid: Grid, window: Window) -> StatesResult:
+def compute_states(grid: Grid, window: Window, *, rules: Rules) -> StatesResult:
+    """One view's states by the v1 rules, or under O6 with each block in view ranked against the
+    blocks of the 90 days before it alone."""
+    o6 = "O6" in rules
     w = WINDOW_BUCKETS[window]
+    need = COLLECTING_DAYS * BLOCKS_PER_DAY[window]
     ref_start = grid.last // DAY * DAY - REFERENCE_DAYS * DAY
     all_spans, tail_span = _spans(grid, w)
-    # Only reference blocks are ranked, judged and shown: the views lie inside the reference.
-    spans = [(i0, i1) for i0, i1 in all_spans if grid.start + i0 * STEP >= ref_start]
-    blocks = [_block(grid, i0, i1, w) for i0, i1 in spans]
-
-    liq_sample = [b for b in blocks if b.liq_covered]
-    thresholds = Thresholds(
-        s_liq=quantile([b.sliq for b in liq_sample], 0.90),
-        l_liq=quantile([b.lliq for b in liq_sample], 0.90),
-        oi=quantile([abs(b.doi) for b in blocks], 0.75),
-        px=quantile([abs(b.dpx) for b in blocks], 0.75),
-        n_liq=len(liq_sample),
-        n_all=len(blocks),
-    )
+    starts = [grid.start + i0 * STEP for i0, _ in all_spans]
+    first = bisect_left(starts, ref_start)
+    # Only reference blocks are counted, judged and shown: the views lie inside the reference.
+    spans = all_spans[first:]
+    # O6 also ranks the blocks before the reference, so it builds every block.
+    every = [_block(grid, i0, i1, w, o6=o6) for i0, i1 in (all_spans if o6 else spans)]
+    blocks = every[first:] if o6 else every
+    frm = max(grid.start, grid.last - max(SHOW_DAYS) * DAY)
+    in_view = [grid.start + (i0 + w) * STEP > frm for i0, _ in spans]
     covered = sum(b.covered for b in blocks)
-    collecting = covered < COLLECTING_DAYS * BLOCKS_PER_DAY[window]
-    if not collecting:
-        blocks = [
-            b.model_copy(update={"state": _classify(b, thresholds)}) if b.covered else b
-            for b in blocks
-        ]
+
+    if o6:
+        # Only the blocks in view are judged, each against the blocks of the 90 days before it.
+        for k in range(first, len(every)):
+            if in_view[k - first]:
+                past = every[bisect_left(starts, starts[k] - REFERENCE_DAYS * DAY) : k]
+                blocks[k - first] = _judged_past(every[k], past, need)
+        # The view is headed by its reference block R, the last one, judged or not.
+        last = blocks[-1].thresholds if blocks else None
+        thresholds = (
+            last
+            if last is not None
+            else Thresholds(s_liq=None, l_liq=None, oi=None, px=None, n_liq=0, n_px=0, n_oi=0)
+        )
+        collecting = thresholds.n_liq < need
+    else:
+        liq_sample = [b for b in blocks if b.liq_covered]
+        thresholds = Thresholds(
+            s_liq=quantile([b.sliq for b in liq_sample], 0.90),
+            l_liq=quantile([b.lliq for b in liq_sample], 0.90),
+            oi=quantile([abs(b.doi) for b in blocks], 0.75),
+            px=quantile([abs(b.dpx) for b in blocks], 0.75),
+            n_liq=len(liq_sample),
+            n_px=len(blocks),
+            n_oi=len(blocks),
+        )
+        collecting = covered < need
+        if not collecting:
+            blocks = [
+                b.model_copy(update={"state": _classify(b, thresholds)}) if b.covered else b
+                for b in blocks
+            ]
 
     tables = [_table(grid, blocks, spans, days) for days in SHOW_DAYS]
-    frm = max(grid.start, grid.last - max(SHOW_DAYS) * DAY)
-    shown = [
-        b for (i0, _), b in zip(spans, blocks, strict=True) if grid.start + (i0 + w) * STEP > frm
-    ]
+    shown = [b for b, seen in zip(blocks, in_view, strict=True) if seen]
 
     tail = None
     if tail_span is not None:

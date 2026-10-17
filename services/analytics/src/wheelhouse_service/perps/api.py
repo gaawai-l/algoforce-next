@@ -11,6 +11,7 @@ import httpx
 from fastapi import APIRouter, FastAPI
 from websockets.sync.client import connect as websocket_connect
 
+from ..rules import Rules, rules_for_view
 from .collector import LIVE_WITHIN, STREAMS, Collectors, Connection
 from .models import CollectorStatus, HostStatus, PerpsStatus, PerpStatesView, freshness
 from .rows import Exchange, Stream
@@ -95,10 +96,12 @@ def states_view(
     hosts: Mapping[str, HostState],
     now: datetime,
     *,
+    rules: Rules,
     enabled: bool = True,
 ) -> PerpStatesView:
-    """The stored payload of one view, with its freshness and reason codes at `now`; `enabled`
-    says whether this process runs the worker and the collectors.
+    """The stored payload of one view, with its freshness and reason codes at `now`; `rules` are
+    the configured ones, and `enabled` says whether this process runs the worker and the
+    collectors.
 
     Reasons in order: series_missing, rest_error, collector_down, collecting (spec §3.7).
     """
@@ -128,6 +131,9 @@ def states_view(
         if states.collecting:
             reasons.append(f"collecting:{states.covered_days:.1f}")
         fields = {name: value for name, value in states if name != "window"}
+    # Derived under other rules than the configured ones until the worker's first round, which
+    # is not delayed, derives it again.
+    pending = stored is not None and set(stored.rules) != set(rules_for_view("perps", rules))
     return PerpStatesView(
         exchange=exchange,
         window=window,
@@ -135,6 +141,8 @@ def states_view(
         reasons=reasons,
         computed_at=computed_at,
         collectors=list(collectors),
+        rules=stored.rules if stored is not None else [],
+        rules_pending=pending,
         **fields,
     )
 
@@ -153,12 +161,14 @@ def create_router(
     path: Path,
     http: httpx.Client | None = None,
     *,
+    rules: Rules,
     start_worker: bool = True,
     connect: Callable[..., Connection] | None = None,
     clock: Callable[[], datetime] = utc_now,
 ) -> APIRouter:
-    """`start_worker` runs the REST worker and the collectors; `http` and `connect` replace the
-    REST client and the WebSocket connection factory."""
+    """`rules` are those the worker derives under; `start_worker` runs the REST worker and the
+    collectors; `http` and `connect` replace the REST client and the WebSocket connection
+    factory."""
     store: PerpsStore | None = None
     collectors: Collectors | None = None
 
@@ -169,7 +179,7 @@ def create_router(
         worker = None
         if start_worker:
             collectors = Collectors(store, connect=connect or websocket_connect)
-            worker = PerpsSync(store, PerpsRest(http), clock=utc_now)
+            worker = PerpsSync(store, PerpsRest(http), clock=utc_now, rules=rules)
             collectors.start()
             worker.start()
         yield
@@ -210,6 +220,7 @@ def create_router(
             statuses(VIEW_STREAMS[exchange], now),
             stored_hosts(db().state()),
             now,
+            rules=rules,
             enabled=start_worker,
         )
 

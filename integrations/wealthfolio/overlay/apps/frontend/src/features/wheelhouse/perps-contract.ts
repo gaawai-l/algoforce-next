@@ -23,7 +23,19 @@ const perpState = z.enum([
   "chop",
 ]);
 const verdict = z.enum(["ok", "inverted", "pending"]);
+// The rules a view's payload was derived under; empty means the original v1 rules.
+const rules = z.array(z.enum(["O1", "O2", "O3", "O4", "O5", "O6"]));
 
+// Under O6 a threshold is null while its sample is too short to rank.
+const thresholdsSchema = z.object({
+  s_liq: z.number().nullable(),
+  l_liq: z.number().nullable(),
+  oi: z.number().nullable(),
+  px: z.number().nullable(),
+  n_liq: int,
+  n_px: int,
+  n_oi: int,
+});
 const blockSchema = z.object({
   t0: time,
   t1: time,
@@ -48,6 +60,8 @@ const blockSchema = z.object({
   delta_sum: z.number().nullable(),
   lliq_sum: z.number().nullable(),
   sliq_sum: z.number().nullable(),
+  // O6 only: the block's own thresholds, ranked over the 90 days before it.
+  thresholds: thresholdsSchema.nullable(),
 });
 const tailSchema = z.object({
   t0: time,
@@ -57,14 +71,6 @@ const tailSchema = z.object({
   delta_sum: z.number().nullable(),
   lliq_sum: z.number().nullable(),
   sliq_sum: z.number().nullable(),
-});
-const thresholdsSchema = z.object({
-  s_liq: z.number(),
-  l_liq: z.number(),
-  oi: z.number(),
-  px: z.number(),
-  n_liq: int,
-  n_all: int,
 });
 const tableSchema = z.object({
   show_days: int,
@@ -120,6 +126,8 @@ export const perpStatesViewSchema: z.ZodType<
   qc: z.array(z.string()),
   series_missing: z.array(z.string()),
   collectors: z.array(collectorSchema),
+  rules,
+  rules_pending: z.boolean(),
 });
 
 export const perpsStatusSchema: z.ZodType<PerpsStatus, z.ZodTypeDef, unknown> =
@@ -196,7 +204,8 @@ function collecting(view: PerpStatesView): PerpStatesView {
     thresholds: view.thresholds && {
       ...view.thresholds,
       n_liq: blocks.length,
-      n_all: blocks.length,
+      n_px: blocks.length,
+      n_oi: blocks.length,
     },
     blocks,
     // The history starts at the first block, so both table views reach back only that far.

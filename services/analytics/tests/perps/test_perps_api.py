@@ -53,9 +53,12 @@ from wheelhouse_service.perps.sync import (
     derived_key,
     stored_hosts,
 )
+from wheelhouse_service.rules import ALL_RULES, Rule, Rules
 from wheelhouse_service.settings import Settings
 
 PREFIX = "/api/wheelhouse/v1/perps"
+V1: Rules = frozenset()
+O6: Rules = frozenset({"O6"})
 STEP = 600
 DAY = 86_400
 W4 = 24  # buckets in a 4h block
@@ -194,7 +197,7 @@ def synthetic_grid(start: datetime, last: datetime, seed: int = 20261017) -> Gri
 
 def sample_view() -> PerpStatesView:
     """The all-venues 4h view as the API would serve it at SAMPLE_NOW, every stream live."""
-    states = compute_states(synthetic_grid(SAMPLE_START, SAMPLE_LAST), "4h")
+    states = compute_states(synthetic_grid(SAMPLE_START, SAMPLE_LAST), "4h", rules=V1)
     stored = StoredStates(
         exchange="all", window="4h", start=SAMPLE_START, reasons=[], states=states
     )
@@ -202,7 +205,7 @@ def sample_view() -> PerpStatesView:
     spans = [(SAMPLE_START.timestamp(), now - 6.0)]
     collectors = [collector_status(stream, spans, SAMPLE_NOW, {}) for stream in STREAMS]
     return states_view(
-        "all", "4h", (stored, SAMPLE_COMPUTED), collectors, stored_hosts({}), SAMPLE_NOW
+        "all", "4h", (stored, SAMPLE_COMPUTED), collectors, stored_hosts({}), SAMPLE_NOW, rules=V1
     )
 
 
@@ -240,10 +243,13 @@ def router_app(
     start_worker: bool = False,
     http: httpx.Client | None = None,
     connect: Callable[..., Any] | None = None,
+    rules: Rules = V1,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(
-        create_router(path, http, start_worker=start_worker, connect=connect, clock=clock)
+        create_router(
+            path, http, rules=rules, start_worker=start_worker, connect=connect, clock=clock
+        )
     )
     return app
 
@@ -255,6 +261,7 @@ def save(
     states: StatesResult | None,
     reasons: list[str] | None = None,
     computed_at: datetime = SAMPLE_COMPUTED,
+    rules: list[Rule] | None = None,
 ) -> None:
     stored = StoredStates(
         exchange=exchange,
@@ -262,6 +269,7 @@ def save(
         start=SAMPLE_START,
         reasons=reasons or [],
         states=states,
+        rules=rules or [],
     )
     store.save_derived(derived_key(exchange, window), stored.model_dump_json(), computed_at)
 
@@ -315,7 +323,7 @@ def test_freshness_at_request_time(tmp_path: Path):
         PerpsStore(path),
         "all",
         "4h",
-        compute_states(synthetic_grid(SHORT_START, SAMPLE_LAST), "4h"),
+        compute_states(synthetic_grid(SHORT_START, SAMPLE_LAST), "4h", rules=V1),
     )
     clock = Clock(THROUGH + timedelta(minutes=20))
 
@@ -352,7 +360,7 @@ def test_reason_codes(tmp_path: Path):
     t = now.timestamp()
     # 20 covered 4h blocks: 3.33 days, short of 7.
     short = compute_states(
-        synthetic_grid(SHORT_START, datetime(2026, 10, 17, 6, 50, tzinfo=UTC)), "4h"
+        synthetic_grid(SHORT_START, datetime(2026, 10, 17, 6, 50, tzinfo=UTC)), "4h", rules=V1
     )
     assert short.collecting and short.covered_days == pytest.approx(20 / 6)
     save(store, "all", "4h", short, ["series_missing:bybit:oi"])
@@ -440,6 +448,8 @@ def test_unavailable_while_perps_are_off(tmp_path: Path):
             "qc": [],
             "series_missing": [],
             "collectors": [{"stream": stream, **never} for stream in streams],
+            "rules": [],
+            "rules_pending": False,
         }
     assert status == {
         "last_run_at": None,
@@ -488,7 +498,7 @@ def test_reads_with_perps_off_open_no_connection(tmp_path: Path, monkeypatch: py
                 store,
                 exchange,
                 window,
-                compute_states(synthetic_grid(SHORT_START, SAMPLE_LAST), window),
+                compute_states(synthetic_grid(SHORT_START, SAMPLE_LAST), window, rules=V1),
             )
     t = SAMPLE_NOW.timestamp()
     for stream in STREAMS:
@@ -788,6 +798,79 @@ def test_capability_and_get_only_routes(tmp_path: Path):
     assert (defaults["exchange"], defaults["window"]) == ("all", "4h")
 
 
+def test_views_carry_the_rules_of_their_payload(tmp_path: Path):
+    path = tmp_path / "perps.sqlite"
+    store = PerpsStore(path)
+    grid = synthetic_grid(SAMPLE_START, SAMPLE_LAST)
+    save(store, "all", "4h", compute_states(grid, "4h", rules=O6), rules=["O6"])
+    save(store, "binance", "4h", compute_states(grid, "4h", rules=V1))
+    # A view missing a series keeps the rules of the round that found it so.
+    save(store, "bybit", "4h", None, ["series_missing:bybit:oi"], rules=["O6"])
+
+    def labels(configured: Rules) -> dict[Exchange, tuple[list[str], bool]]:
+        with TestClient(router_app(path, Clock(SAMPLE_NOW), rules=configured)) as http:
+            views = {exchange: get_states(http, exchange) for exchange in EXCHANGES}
+            empty = get_states(http, "all", "8h")
+        # Nothing stored: no rules, and nothing to derive again.
+        assert (empty["rules"], empty["rules_pending"]) == ([], False)
+        return {
+            exchange: (view["rules"], view["rules_pending"]) for exchange, view in views.items()
+        }
+
+    # Only the rules implemented for the perps count: O1-O5 alone do not make them pending.
+    assert (
+        labels(ALL_RULES)
+        == labels(O6)
+        == {
+            "all": (["O6"], False),
+            "binance": ([], True),
+            "bybit": (["O6"], False),
+        }
+    )
+    assert (
+        labels(frozenset({"O1", "O2", "O3", "O4", "O5"}))
+        == labels(V1)
+        == {
+            "all": (["O6"], True),
+            "binance": ([], False),
+            "bybit": (["O6"], True),
+        }
+    )
+
+
+def test_create_app_hands_the_rules_to_perps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    save(PerpsStore(tmp_path / "perps.sqlite"), "all", "4h", None, rules=["O6"])
+    client, connect, seen = blocked()
+    workers: list[PerpsSync] = []
+
+    def label(**options: Any) -> tuple[list[str], bool, Rules]:
+        workers.clear()
+        with (
+            other_workers_held(),
+            patch.object(PerpsSync, "start", autospec=True, side_effect=workers.append),
+            patch.object(Collectors, "start", autospec=True),
+        ):
+            app = create_app(
+                tmp_path / "m.sqlite",
+                start_perps=True,
+                perps_http=client,
+                perps_connect=connect,
+                **options,
+            )
+            with TestClient(app) as http:
+                view = get_states(http, "all")
+        (worker,) = workers
+        return view["rules"], view["rules_pending"], worker.rules
+
+    monkeypatch.delenv("WHEELHOUSE_RULES", raising=False)
+    assert label() == (["O6"], False, ALL_RULES)
+    assert label(rules=V1) == (["O6"], True, V1)
+    monkeypatch.setenv("WHEELHOUSE_RULES", "v1")
+    assert label() == (["O6"], True, V1)
+    assert label(rules=O6) == (["O6"], False, O6)
+    assert seen == []
+
+
 def test_sample_json_regenerates_identically(tmp_path: Path):
     view = sample_view()
 
@@ -796,6 +879,7 @@ def test_sample_json_regenerates_identically(tmp_path: Path):
         assert all(row.count > 0 for row in table.rows), table.show_days
         assert [row.state for row in table.rows] == list(TABLE_STATES)
     assert (view.data_state, view.reasons, view.qc, view.collecting) == ("fresh", [], [], False)
+    assert (view.rules, view.rules_pending) == ([], False)
     assert view.blocks[-1].forming and view.tail is None
     assert all(status.live for status in view.collectors)
     assert SAMPLE.read_text() == render_sample()
@@ -803,7 +887,12 @@ def test_sample_json_regenerates_identically(tmp_path: Path):
     # The route serves the same body from the same stored payload and coverage.
     path = tmp_path / "perps.sqlite"
     store = PerpsStore(path)
-    save(store, "all", "4h", compute_states(synthetic_grid(SAMPLE_START, SAMPLE_LAST), "4h"))
+    save(
+        store,
+        "all",
+        "4h",
+        compute_states(synthetic_grid(SAMPLE_START, SAMPLE_LAST), "4h", rules=V1),
+    )
     for stream in STREAMS:
         cover(store, stream, SAMPLE_START.timestamp(), SAMPLE_NOW.timestamp() - 6.0)
     with TestClient(router_app(path, Clock(SAMPLE_NOW))) as http:

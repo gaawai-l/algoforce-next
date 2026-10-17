@@ -717,6 +717,7 @@ export interface components {
             lliq_sum: number | null;
             /** Sliq Sum */
             sliq_sum: number | null;
+            thresholds: components["schemas"]["Thresholds"] | null;
         };
         /** BucketCostBasis */
         BucketCostBasis: {
@@ -1838,6 +1839,10 @@ export interface components {
             series_missing: string[];
             /** Collectors */
             collectors: components["schemas"]["CollectorStatus"][];
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
         };
         /** PerpsStatus */
         PerpsStatus: {
@@ -2691,17 +2696,19 @@ export interface components {
         /** Thresholds */
         Thresholds: {
             /** S Liq */
-            s_liq: number;
+            s_liq: number | null;
             /** L Liq */
-            l_liq: number;
+            l_liq: number | null;
             /** Oi */
-            oi: number;
+            oi: number | null;
             /** Px */
-            px: number;
+            px: number | null;
             /** N Liq */
             n_liq: number;
-            /** N All */
-            n_all: number;
+            /** N Px */
+            n_px: number;
+            /** N Oi */
+            n_oi: number;
         };
         /** TimeframeContext */
         TimeframeContext: {

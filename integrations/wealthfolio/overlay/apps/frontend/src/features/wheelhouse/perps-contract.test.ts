@@ -67,7 +67,13 @@ describe("perp states contract", () => {
     expect(parsed.window).toBe("4h");
     expect(parsed.data_state).toBe("fresh");
     expect(parsed.collecting).toBe(false);
-    expect(parsed.thresholds?.n_all).toBe(189);
+    expect(parsed.thresholds?.n_px).toBe(189);
+    expect(parsed.thresholds?.n_oi).toBe(189);
+    // The sample is derived under v1: no rules, and no block has thresholds of its own.
+    expect([parsed.rules, parsed.rules_pending]).toEqual([[], false]);
+    expect(parsed.blocks.every((block) => block.thresholds === null)).toBe(
+      true,
+    );
     expect(parsed.blocks).toHaveLength(181);
     expect(parsed.blocks.at(-1)?.forming).toBe(true);
     expect(parsed.tables.map((table) => table.show_days)).toEqual([7, 30]);
@@ -124,6 +130,26 @@ describe("perp states contract", () => {
     expect(parsed.blocks).toEqual([]);
   });
 
+  it("accepts O6 thresholds of a block and null ones whose sample is short", () => {
+    const sample = fullSample();
+    const own = {
+      s_liq: null,
+      l_liq: null,
+      oi: 280.1,
+      px: 0.68,
+      n_liq: 40,
+      n_px: 49,
+      n_oi: 50,
+    };
+    sample.rules = ["O6"];
+    sample.thresholds = own;
+    sample.blocks[0] = { ...sample.blocks[0], state: null, thresholds: own };
+    const parsed = perpStatesViewSchema.parse(sample);
+    expect(parsed.rules).toEqual(["O6"]);
+    expect(parsed.thresholds?.s_liq).toBeNull();
+    expect(parsed.blocks[0].thresholds).toEqual(own);
+  });
+
   it("accepts a tail, which is drawn but never judged", () => {
     const sample = fullSample();
     sample.tail = {
@@ -148,6 +174,11 @@ describe("perp states contract", () => {
     expect(bad({ last: "2026-10-17T10:50:00" })).toBe(false);
     expect(bad({ computed_at: undefined })).toBe(false);
     expect(bad({ collectors: undefined })).toBe(false);
+    expect(bad({ rules: ["O7"] })).toBe(false);
+    expect(bad({ rules_pending: undefined })).toBe(false);
+    expect(
+      bad({ blocks: [{ ...sample.blocks[0], thresholds: undefined }] }),
+    ).toBe(false);
     expect(bad({ blocks: [{ ...sample.blocks[0], state: "bull" }] })).toBe(
       false,
     );
@@ -192,7 +223,8 @@ describe("perp states variants", () => {
       expect(table.rows.every((row) => row.max_move === null)).toBe(true);
       expect(table.rows.every((row) => row.run_blocks === null)).toBe(true);
     }
-    expect(view.thresholds?.n_all).toBe(view.blocks.length);
+    expect(view.thresholds?.n_px).toBe(view.blocks.length);
+    expect(view.thresholds?.n_oi).toBe(view.blocks.length);
     // The streams started with the first block, so they cover what the view covers.
     for (const collector of view.collectors) {
       expect(collector.live).toBe(true);

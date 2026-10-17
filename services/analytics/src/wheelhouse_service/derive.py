@@ -1,6 +1,8 @@
-"""Derive the stored on-chain views again under given rules, from a copy of the store alone.
+"""Derive the stored on-chain views, and the perp views where they are stored, again under given
+rules, from a copy of the stores alone.
 
-Run as `python -m wheelhouse_service.derive --data-dir DIR [--rules SPEC]`. BRK is never asked.
+Run as `python -m wheelhouse_service.derive --data-dir DIR [--rules SPEC]`. Neither BRK nor an
+exchange is ever asked.
 """
 
 import argparse
@@ -12,17 +14,37 @@ from pathlib import Path
 from .onchain.brk import BrkClient
 from .onchain.store import OnchainStore
 from .onchain.sync import VIEWS, OnchainSync
-from .rules import parse_rules
+from .perps.store import PerpsStore
+from .perps.sync import EXCHANGES, WINDOWS, derive_states, derived_key, grid_start
+from .rules import Rules, parse_rules
+
+
+def derive_perps(path: Path, rules: Rules) -> list[str] | None:
+    """Derive the stored perp views again under `rules`, keeping the time they were computed and
+    taking the grid start a round at that time uses; return the rules the payloads recorded, or
+    None when none were stored."""
+    store = PerpsStore(path)
+    keys = [derived_key(exchange, window) for exchange in EXCHANGES for window in WINDOWS]
+    stamps = [derived[1] for key in keys if (derived := store.derived(key)) is not None]
+    if not stamps:
+        return None
+    # One round stores all six with one time; the latest, should a round have been cut short.
+    at = max(stamps)
+    derive_states(store, start=grid_start(at), at=at, rules=rules)
+    derived = store.derived(keys[0])
+    assert derived is not None
+    recorded: list[str] = json.loads(derived[0])["rules"]
+    return recorded
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m wheelhouse_service.derive",
         description=(
-            "Derive the on-chain views in DIR/onchain.sqlite again under the given rules, from "
-            "the stored series and snapshots only; each view keeps the time it was computed. "
-            "Only for a copy of the store: never point it at the data directory of a running "
-            "service."
+            "Derive the on-chain views in DIR/onchain.sqlite, and the perp views in "
+            "DIR/perps.sqlite when it exists, again under the given rules, from the stored data "
+            "only; each view keeps the time it was computed. Only for a copy of the stores: "
+            "never point it at the data directory of a running service."
         ),
     )
     parser.add_argument(
@@ -30,7 +52,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         type=Path,
         required=True,
         metavar="DIR",
-        help="directory holding a copy of onchain.sqlite",
+        help="directory holding a copy of onchain.sqlite, and of perps.sqlite if any",
     )
     parser.add_argument(
         "--rules",
@@ -55,6 +77,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         for view in VIEWS
         if (derived := store.derived(view)) is not None
     ]
+    perps = args.data_dir / "perps.sqlite"
+    if perps.is_file() and (applied := derive_perps(perps, rules)) is not None:
+        recorded.append(f"perps={','.join(applied) or 'v1'}")
     print(f"derived {' '.join(recorded) or 'none'}")
 
 

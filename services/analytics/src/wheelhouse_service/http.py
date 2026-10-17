@@ -322,11 +322,12 @@ def create_app(
             start_worker=start_worker if start_broker_worker is None else start_broker_worker,
         )
     )
+    configured = Settings.from_env().rules if rules is None else rules
     app.include_router(
         onchain_router(
             data_dir / "onchain.sqlite",
             brk_client,
-            rules=Settings.from_env().rules if rules is None else rules,
+            rules=configured,
             start_worker=start_worker,
         )
     )
@@ -335,7 +336,11 @@ def create_app(
     )
     app.include_router(
         perps_router(
-            data_dir / "perps.sqlite", perps_http, start_worker=run_perps, connect=perps_connect
+            data_dir / "perps.sqlite",
+            perps_http,
+            rules=configured,
+            start_worker=run_perps,
+            connect=perps_connect,
         )
     )
     return app
