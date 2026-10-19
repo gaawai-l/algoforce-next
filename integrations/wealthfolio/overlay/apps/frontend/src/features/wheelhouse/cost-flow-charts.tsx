@@ -18,8 +18,17 @@ import {
   type SideSetting,
 } from "./cost-flow-engine";
 import {
+  ALL_ON,
   WINDOWS,
+  YOUNG,
   ZOOMS3,
+  ZOOMS4,
+  afterZoom,
+  ageLegend,
+  ageRows,
+  ageSegments,
+  ageTip,
+  ageWeights,
   agingNote,
   chip,
   clusterCells,
@@ -39,7 +48,9 @@ import {
   plotFrame,
   segments,
   sideWeights,
+  toggle,
   udiff,
+  type AgeRow,
   type Cluster,
   type FlowRow,
   type Found,
@@ -47,6 +58,7 @@ import {
   type Seg,
   type Side,
   type TableCells,
+  type Toggles,
   type Window,
   type Zoom,
 } from "./cost-flow";
@@ -57,9 +69,10 @@ import { useChartWidth } from "./seller-charts";
 import { si, ticks } from "./sell-side";
 import { Segments } from "./sell-side-charts";
 
-// The Cost basis flow: Chart 3, Buy & Sell Side By Cost Basis, as on the original state-report
-// page (A = raw/script_2_app.js, H = raw/state-report.html). The service sends the snapshots; the
-// rows, the bars and the engines' curves are worked out here, each from its own inputs only.
+// The Cost basis flow: Chart 3, Buy & Sell Side By Cost Basis, and under it Chart 4, its Age
+// Breakdown, as on the original state-report page (A = raw/script_2_app.js, H =
+// raw/state-report.html). The service sends the snapshots; the rows, the bars and the engines'
+// curves are worked out here, each from its own inputs only.
 
 const round = (value: number) => Math.round(value * 100) / 100;
 const MONTHS = [
@@ -496,6 +509,30 @@ function stackBars(rows: readonly FlowRow[], h: Holders, aging: boolean) {
   return { bars, mag: mag || 1 };
 }
 
+// Chart 4's bars (A:3528-3536, A:3573-3612), stacked as Chart 3's: each shown bought group in its
+// group's colour, then the sold bar in the colour of its row's band, drawn faint. Each bar keeps
+// its legend key, so a hovered legend row can isolate it.
+function stackAge(rows: readonly AgeRow[], t: Toggles) {
+  const bars: FlowBar[] = [];
+  let mag = 0;
+  rows.forEach((r, row) => {
+    let up = 0;
+    let dn = 0;
+    for (const sg of ageSegments(r, t)) {
+      const className = `wh-cf-bar wh-cf-bar--${sg.sold ? "sold" : "bought"} wh-cf-age-${sg.band}`;
+      if (sg.v > 0) {
+        bars.push({ row, x0: up, x1: up + sg.v, className, key: sg.key });
+        up += sg.v;
+      } else if (sg.v < 0) {
+        bars.push({ row, x0: dn + sg.v, x1: dn, className, key: sg.key });
+        dn += sg.v;
+      }
+    }
+    mag = Math.max(mag, up, -dn);
+  });
+  return { bars, mag: mag || 1 };
+}
+
 const SMOOTHINGS: readonly SideSetting["smoothing"][] = ["none", "auto", "kde"];
 const SMOOTHING_NAMES = {
   none: "costflow.off",
@@ -824,6 +861,9 @@ const SHARED: Shared = { window: "30d", zoom: 0 };
 const HOLDERS: readonly Holders[] = ["all", "sth", "lth"];
 const AGING = ["show", "hide"] as const;
 const NO_ROWS: FlowRow[] = [];
+const NO_AGE: AgeRow[] = [];
+// Chart 4 reads the $500 grid only.
+const AGE_STEP = 500;
 
 // The bucket a chart reads, by its index in the rows it was read on. Rows from a refresh, or from
 // any other change, can hold another bucket at that index, so the reading holds only while its
@@ -831,6 +871,27 @@ const NO_ROWS: FlowRow[] = [];
 interface Reading {
   rows: readonly unknown[];
   row: number;
+}
+
+// The window's span: from the then day's close to D, at the snapshot's time while D is forming.
+function WindowSpan({ view, w, then }: { view: CostFlowView; w: Window; then: string }) {
+  const { text } = useWheelhouseText();
+  return (
+    <p className="wh-cf-span">
+      {view.forming_at
+        ? text("costflow.spanForming", {
+            window: w,
+            then: dayLabel(then, false) ?? "",
+            day: dayLabel(view.now_day, false) ?? text("missing"),
+            time: timeLabel(view.snapshot_at) ?? text("missing"),
+          })
+        : text("costflow.spanClosed", {
+            window: w,
+            then: dayLabel(then, false) ?? "",
+            day: dayLabel(view.now_day, false) ?? text("missing"),
+          })}
+    </p>
+  );
 }
 
 function Chart3({
@@ -939,20 +1000,7 @@ function Chart3({
       </div>
       {picked.ok && plot && drawn ? (
         <>
-          <p className="wh-cf-span">
-            {view.forming_at
-              ? text("costflow.spanForming", {
-                  window: shared.window,
-                  then: dayLabel(picked.value.then, false) ?? "",
-                  day: dayLabel(view.now_day, false) ?? text("missing"),
-                  time: timeLabel(view.snapshot_at) ?? text("missing"),
-                })
-              : text("costflow.spanClosed", {
-                  window: shared.window,
-                  then: dayLabel(picked.value.then, false) ?? "",
-                  day: dayLabel(view.now_day, false) ?? text("missing"),
-                })}
-          </p>
+          <WindowSpan view={view} w={shared.window} then={picked.value.then} />
           <FlowPlot
             prices={plot.prices}
             step={step}
@@ -1039,22 +1087,251 @@ function Chart3({
   );
 }
 
+// Chart 4, the Age Breakdown (A:3460-3845): Chart 3's window and zoom on the $500 grid, the bought
+// side split exactly by age group and the sold side coloured by the band of when price last traded
+// at the level. The legend's rows hide their bars and isolate them on hover or focus; hiding one
+// refits this chart's two sides only, and isolating one reads only what is already drawn.
+function Chart4({
+  view,
+  shared,
+  onShared,
+  toggles,
+  onToggles,
+  dim,
+  onDim,
+  active,
+  onActive,
+}: {
+  view: CostFlowView;
+  shared: Shared;
+  onShared: (next: Partial<Shared>) => void;
+  toggles: Toggles;
+  onToggles: (next: Toggles) => void;
+  dim: string | null;
+  onDim: (key: string | null) => void;
+  active: Reading | null;
+  onActive: (next: Reading | null) => void;
+}) {
+  const { text } = useWheelhouseText();
+  const [sides, setSides] = useState<Record<Side, SideSetting>>({
+    pos: DEFAULT_SIDE,
+    neg: DEFAULT_SIDE,
+  });
+  // The rows of the shared window and zoom, with the then day and spot they were taken against.
+  const picked = useMemo((): Found<{ rows: AgeRow[]; then: string; spot: number }> => {
+    const found = ageRows(view, shared.window, shared.zoom);
+    if (!found.ok) return found;
+    const grid = gridFor(view, "all")!;
+    const then = grid.windows.find((item) => item.window === shared.window)!.then_day;
+    return { ok: true, value: { rows: found.value, then, spot: view.spot! } };
+  }, [view, shared.window, shared.zoom]);
+  const rows = picked.ok ? picked.value.rows : NO_AGE;
+  const posW = useMemo(() => ageWeights(rows, toggles, "pos"), [rows, toggles]);
+  const negW = useMemo(() => ageWeights(rows, toggles, "neg"), [rows, toggles]);
+  const pos = useSideCurves(rows, posW, sides.pos);
+  const neg = useSideCurves(rows, negW, sides.neg);
+  const cs = useMemo(() => clusters(pos, neg), [pos, neg]);
+  // A:3581-3584: the price axis spans the rows exactly, at any zoom.
+  const plot = useMemo(() => {
+    if (!rows.length) return null;
+    const prices = rows.map((row) => row.price);
+    const yDomain: [number, number] = [
+      rows[0].price - AGE_STEP / 2,
+      rows[rows.length - 1].price + AGE_STEP / 2,
+    ];
+    return { prices, yDomain, ...stackAge(rows, toggles) };
+  }, [rows, toggles]);
+  const drawn = useMemo(
+    () =>
+      plot
+        ? drawCurves(
+            plot.prices,
+            AGE_STEP,
+            [
+              { side: "pos", weights: posW, curves: pos },
+              { side: "neg", weights: negW, curves: neg },
+            ],
+            cs,
+          )
+        : null,
+    [plot, posW, negW, pos, neg, cs],
+  );
+  const legend = ageLegend(text, rows, YOUNG[shared.window], toggles, shared.zoom);
+  const title = text("costflow.c4.title");
+  const reading = active !== null && active.rows === rows ? active.row : null;
+  const read = (row: number | null) => onActive(row === null ? null : { rows, row });
+  // A:3743-3751: a click flips the row, unless it is the last one shown, and ends the isolation.
+  const flip = (key: string) => {
+    onDim(null);
+    onToggles(toggle(toggles, key, legend));
+  };
+  // Only a shown row isolates (A:3741).
+  const isolate = (key: string, on: boolean) => {
+    if (on) onDim(key);
+  };
+  // What is missing, said once. Rows found but none in them is an empty $500 snapshot (A:3569).
+  const missing = () => {
+    if (picked.ok || picked.missing === "grid") return text("costflow.c4.noGrid");
+    if (picked.missing === "age")
+      return text("costflow.c4.noAge", { day: dayLabel(view.now_day) ?? text("missing") });
+    return text("costflow.noWindow", { window: shared.window });
+  };
+
+  return (
+    <section
+      className="wh-seller-panel"
+      data-chart="costflow-4"
+      aria-labelledby="wh-costflow-4"
+    >
+      <div className="wh-seller-head">
+        <h3 id="wh-costflow-4">{title}</h3>
+      </div>
+      <div className="wh-ss-controls">
+        <Segments
+          label={text("costflow.window")}
+          options={WINDOWS}
+          value={shared.window}
+          name={(w) => w}
+          onPick={(w) => onShared({ window: w })}
+        />
+        {/* H:973: All, ±50% and ±25%; Chart 3's ±10% presses none of them. */}
+        <Segments
+          label={text("costflow.zoom")}
+          options={ZOOMS4}
+          value={shared.zoom}
+          name={(z) => (z === 0 ? text("costflow.all") : `±${z}%`)}
+          onPick={(z) => onShared({ zoom: z })}
+        />
+      </div>
+      {picked.ok && plot && drawn ? (
+        <>
+          <WindowSpan view={view} w={shared.window} then={picked.value.then} />
+          <FlowPlot
+            prices={plot.prices}
+            step={AGE_STEP}
+            yDomain={plot.yDomain}
+            mag={plot.mag}
+            bars={plot.bars}
+            curves={drawn.curves}
+            marks={drawn.marks}
+            spot={picked.value.spot}
+            captions={[text("costflow.c4.axis.sell"), text("costflow.c4.axis.buy")]}
+            label={title}
+            dim={dim}
+            active={reading}
+            onActive={read}
+          />
+          <div className="wh-seller-legend wh-cf-legend">
+            {legend.map((row) =>
+              row.kind === "net" ? (
+                <span key={row.key} className="wh-seller-key">
+                  <i className="wh-seller-swatch wh-cf-swatch--net" aria-hidden="true" />
+                  <span>{row.label}</span> <b>{row.value}</b>
+                </span>
+              ) : (
+                <button
+                  key={row.key}
+                  type="button"
+                  className="wh-ss-leg wh-seller-key"
+                  aria-pressed={row.on}
+                  onClick={() => flip(row.key)}
+                  onMouseEnter={() => isolate(row.key, row.on)}
+                  onMouseLeave={() => onDim(null)}
+                  onFocus={() => isolate(row.key, row.on)}
+                  onBlur={() => onDim(null)}
+                >
+                  <i
+                    className={`wh-seller-swatch wh-cf-swatch--${row.kind} wh-cf-age-${row.band}`}
+                    aria-hidden="true"
+                  />
+                  <span>{row.label}</span> <b>{row.value}</b>
+                </button>
+              ),
+            )}
+          </div>
+          <div className="wh-cf-aging">
+            <span className="wh-cf-note">{text("costflow.c4.note")}</span>
+          </div>
+          <div className="wh-cf-sides">
+            {(["neg", "pos"] as const).map((which) => (
+              <SideControls
+                key={which}
+                side={which}
+                setting={sides[which]}
+                curves={which === "pos" ? pos : neg}
+                onSetting={(next) => setSides((current) => ({ ...current, [which]: next }))}
+              />
+            ))}
+          </div>
+          <div className="wh-cf-readout" aria-live="polite">
+            {reading !== null
+              ? ageTip(text, rows[reading], AGE_STEP, shared.window).map((line, i) => (
+                  <p key={i}>{line}</p>
+                ))
+              : null}
+          </div>
+          <div className="wh-cf-tables">
+            <ClustersTable
+              rows={cs}
+              spot={picked.value.spot}
+              empty={text("costflow.c4.noClusters")}
+            />
+          </div>
+        </>
+      ) : (
+        <p className="wh-onchain-warn">{missing()}</p>
+      )}
+      <ReadColumns shows="costflow.c4.shows" implies="costflow.c4.implies" how="costflow.c4.how" />
+    </section>
+  );
+}
+
 function Charts({ view }: { view: CostFlowView }) {
+  const { text } = useWheelhouseText();
   const [shared, setShared] = useState<Shared>(SHARED);
-  // The bucket Chart 3 reads; a new window or zoom replaces the rows, so it clears.
+  // The bucket each chart reads; a new window or zoom replaces the rows, so both clear.
   const [active3, setActive3] = useState<Reading | null>(null);
+  const [active4, setActive4] = useState<Reading | null>(null);
+  // Chart 4's legend: which groups are drawn, and the one isolated by hover or focus.
+  const [toggles, setToggles] = useState<Toggles>(ALL_ON);
+  const [dim, setDim] = useState<string | null>(null);
+  // N1: a window button in either chart turns every group on again (A:3820-3823). A zoom keeps
+  // the toggles unless the new zoom's legend, drawn with them, would show no row (afterZoom).
   const onShared = (next: Partial<Shared>) => {
     setActive3(null);
+    setActive4(null);
+    setDim(null);
+    if (next.window !== undefined) setToggles(ALL_ON);
+    if (next.zoom !== undefined) {
+      const found = ageRows(view, shared.window, next.zoom);
+      if (found.ok) {
+        const legend = ageLegend(text, found.value, YOUNG[shared.window], toggles, next.zoom);
+        setToggles(afterZoom(toggles, legend));
+      }
+    }
     setShared((current) => ({ ...current, ...next }));
   };
   return (
-    <Chart3
-      view={view}
-      shared={shared}
-      onShared={onShared}
-      active={active3}
-      onActive={setActive3}
-    />
+    <>
+      <Chart3
+        view={view}
+        shared={shared}
+        onShared={onShared}
+        active={active3}
+        onActive={setActive3}
+      />
+      <Chart4
+        view={view}
+        shared={shared}
+        onShared={onShared}
+        toggles={toggles}
+        onToggles={setToggles}
+        dim={dim}
+        onDim={setDim}
+        active={active4}
+        onActive={setActive4}
+      />
+    </>
   );
 }
 

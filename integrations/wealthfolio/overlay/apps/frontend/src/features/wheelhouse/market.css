@@ -2180,7 +2180,8 @@
 
 /* Cost basis: Chart 3 (and Chart 4) drawn sideways, price up and BTC across, buys right and sells
    left. Moss and rust as in perp states; the deep tones (KDE lines and K dots) are new, the bell
-   tones are the original's dark --mix-pos/--mix-neg (H:65). */
+   tones are the original's dark --mix-pos/--mix-neg (H:65), and Chart 4's twelve age tones are
+   its dark --age0…11, youngest first (H:68-69). */
 .wh-costflow {
   --wh-moss: #7fc98a;
   --wh-rust: #e0805c;
@@ -2188,6 +2189,18 @@
   --wh-rust-deep: #c8623f;
   --wh-mix-pos: #adcf88;
   --wh-mix-neg: #f08c63;
+  --wh-age-0: #f7bf6b;
+  --wh-age-1: #f0a04a;
+  --wh-age-2: #e58244;
+  --wh-age-3: #d96a48;
+  --wh-age-4: #c66a56;
+  --wh-age-5: #a97466;
+  --wh-age-6: #8a8270;
+  --wh-age-7: #6f9179;
+  --wh-age-8: #5f9f95;
+  --wh-age-9: #57a0b5;
+  --wh-age-10: #5497c9;
+  --wh-age-11: #5a83c4;
 }
 .wh-costflow .wh-cf-span {
   margin: 8px 0 0;
@@ -2541,6 +2554,69 @@
 .wh-cf-tag--resistance {
   background: rgba(224, 128, 92, 0.14);
   color: var(--wh-rust);
+}
+/* Chart 4: a bought bar takes its age group's tone; a sold bar the tone of its level's band (when
+   price last traded there), drawn faint and dashed because it is an inference (H:294). */
+.wh-cf-age-0 {
+  --wh-cf-tone: var(--wh-age-0);
+}
+.wh-cf-age-1 {
+  --wh-cf-tone: var(--wh-age-1);
+}
+.wh-cf-age-2 {
+  --wh-cf-tone: var(--wh-age-2);
+}
+.wh-cf-age-3 {
+  --wh-cf-tone: var(--wh-age-3);
+}
+.wh-cf-age-4 {
+  --wh-cf-tone: var(--wh-age-4);
+}
+.wh-cf-age-5 {
+  --wh-cf-tone: var(--wh-age-5);
+}
+.wh-cf-age-6 {
+  --wh-cf-tone: var(--wh-age-6);
+}
+.wh-cf-age-7 {
+  --wh-cf-tone: var(--wh-age-7);
+}
+.wh-cf-age-8 {
+  --wh-cf-tone: var(--wh-age-8);
+}
+.wh-cf-age-9 {
+  --wh-cf-tone: var(--wh-age-9);
+}
+.wh-cf-age-10 {
+  --wh-cf-tone: var(--wh-age-10);
+}
+.wh-cf-age-11 {
+  --wh-cf-tone: var(--wh-age-11);
+}
+.wh-cf-bar--bought,
+.wh-cf-bar--sold {
+  fill: var(--wh-cf-tone);
+}
+.wh-cf-bar--sold {
+  fill-opacity: 0.45;
+  stroke: var(--wh-cf-tone);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  stroke-opacity: 0.8;
+}
+/* Every bar but the hovered or focused legend row's (A:3607). */
+.wh-cf-dim {
+  fill-opacity: 0.12;
+}
+.wh-cf-swatch--bought,
+.wh-cf-swatch--sold {
+  background: var(--wh-cf-tone);
+}
+.wh-cf-swatch--sold {
+  opacity: 0.5;
+}
+.wh-cf-swatch--net {
+  background: #e5edf6;
 }
 @media (max-width: 640px) {
   .wh-cf-sides {

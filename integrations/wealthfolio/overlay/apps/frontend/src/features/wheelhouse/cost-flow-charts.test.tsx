@@ -1,9 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClustersTable, CostFlowCharts } from "./cost-flow-charts";
 import { DEFAULT_SIDE, fitSide } from "./cost-flow-engine";
 import {
+  ALL_ON,
+  ageRows,
+  ageWeights,
   clusters,
   gridFor,
   labelX,
@@ -12,6 +15,8 @@ import {
   udiff,
   type Side,
 } from "./cost-flow";
+import expected from "./cost-flow-expected.json";
+import s1raw from "./cost-flow-sample-0512.json";
 import s2raw from "./cost-flow-sample.json";
 import { costFlowSchema, type CostFlowView } from "./onchain-contract";
 
@@ -55,7 +60,16 @@ afterEach(() => {
 
 // S2: the 06:04 snapshot of 19 Oct 2026, the page's own snapshot; it has no $200 grid.
 const s2 = costFlowSchema.parse(s2raw);
+// S1: the 05:12 snapshot of the same day, taken before the age-cohort snapshots were in (age null).
+const s1 = costFlowSchema.parse(s1raw);
 const TITLE3 = "Chart 3 — Buy & Sell Side By Cost Basis";
+const TITLE4 = "Chart 4 — Buy & Sell Side By Cost Basis · Age Breakdown";
+// page-recorded (06:04): Chart 4's legend rows as "<label> / <value>", the Clusters meta and rows.
+const PAGE4: Record<string, { legend: string[]; meta: string; clusters: string[] }> =
+  expected.chart4_page;
+// The plan's net label (N1, rule 4): the page wrote "net (issuance)" in every state.
+const shownNet = (lines: readonly string[]) =>
+  lines.map((line) => line.replace(/^net \(issuance\) \/ /, "net of what is shown / "));
 
 function show(view: CostFlowView = s2) {
   mocks.costFlow.mockResolvedValue(view);
@@ -105,14 +119,20 @@ const buttons = (scope: HTMLElement, group: string) =>
     .map((button) => button.textContent);
 const legend = () =>
   [...chart3().querySelectorAll(".wh-cf-legend .wh-seller-key")].map((key) => key.textContent);
-const readout = () =>
-  [...chart3().querySelectorAll(".wh-cf-readout p")].map((line) => line.textContent);
-const table = (name: "clusters" | "components") =>
-  chart3().querySelector<HTMLElement>(`[data-table="${name}"]`)!;
-const tableRows = (name: "clusters" | "components") =>
-  [...table(name).querySelectorAll("tbody tr")].map((row) =>
+const readout = (scope = chart3()) =>
+  [...scope.querySelectorAll(".wh-cf-readout p")].map((line) => line.textContent);
+const table = (name: "clusters" | "components", scope = chart3()) =>
+  scope.querySelector<HTMLElement>(`[data-table="${name}"]`)!;
+const tableRows = (name: "clusters" | "components", scope = chart3()) =>
+  [...table(name, scope).querySelectorAll("tbody tr")].map((row) =>
     [...(row as HTMLTableRowElement).cells].map((cell) => cell.textContent),
   );
+// The names of a control group's pressed buttons.
+const pressed = (scope: HTMLElement, group: string) =>
+  within(within(scope).getByRole("group", { name: group }))
+    .getAllByRole("button")
+    .filter((button) => button.getAttribute("aria-pressed") === "true")
+    .map((button) => button.textContent);
 const line = (cells: (string | null)[]) => cells.join(" | ");
 const labels = (kind: "k" | "m", which: Side) =>
   [...svg3()!.querySelectorAll(`text.wh-cf-label--${kind}-${which}`)].map(
@@ -137,6 +157,30 @@ const edges = (rect: Element) => {
   };
 };
 const zeroX = () => Number(svg3()!.querySelector(".wh-cf-zero")!.getAttribute("x1"));
+
+const chart4 = () => document.querySelector<HTMLElement>('[data-chart="costflow-4"]')!;
+const svg4 = () => chart4().querySelector<SVGSVGElement>("svg.wh-cf-svg");
+// Chart 4's legend in the page record's format, "<label> / <value>", and one of its rows by label.
+const legend4 = () =>
+  [...chart4().querySelectorAll(".wh-cf-legend .wh-seller-key")].map(
+    (key) => `${key.querySelector("span")!.textContent} / ${key.querySelector("b")!.textContent}`,
+  );
+const legendRow = (label: string) =>
+  [...chart4().querySelectorAll<HTMLElement>(".wh-cf-legend .wh-seller-key")].find(
+    (key) => key.querySelector("span")!.textContent === label,
+  )!;
+const meta4 = () => table("clusters", chart4()).querySelector(".wh-cf-fit-meta")!.textContent;
+// The bars of one legend row: a bought group's ("a<g>") or a sold band's ("s<band>").
+const barsOf = (key: string) =>
+  svg4()!.querySelectorAll(
+    `.wh-cf-bar--${key[0] === "a" ? "bought" : "sold"}.wh-cf-age-${key.slice(1)}`,
+  );
+// The rows Chart 4 draws for a window and zoom of S2.
+const rows4 = (w: "1d" | "7d" | "30d" | "90d", z: 0 | 50 | 25 | 10) => {
+  const found = ageRows(s2, w, z);
+  if (!found.ok) throw new Error(`no rows: ${found.missing}`);
+  return found.value;
+};
 // How far a side reaches from zero: its widest bar, or its curves' farthest point.
 const barReach = (which: Side) =>
   Math.max(
@@ -253,9 +297,9 @@ it("never calls the engine for hover or the keyboard readout", async () => {
   const resize = stubWidth();
   show();
   await screen.findByText(TITLE3);
-  // One fit per side on the first render.
+  // One fit per side of each chart on the first render.
   const count = fits.mock.calls.length;
-  expect(count).toBe(2);
+  expect(count).toBe(4);
   const svg = svg3()!;
   // 720 wide by default and 440 high.
   svg.getBoundingClientRect = () =>
@@ -561,13 +605,29 @@ it("says a window is missing instead of drawing zeros", async () => {
   // Nothing that would read as a number: no legend, span, readout or tables.
   for (const part of [".wh-cf-legend", ".wh-cf-span", ".wh-cf-readout", "[data-table]"])
     expect(chart3().querySelector(part)).toBeNull();
+  // Chart 4 shares the window and says the same.
+  expect(
+    within(chart4()).getByText("No 1d comparison: a snapshot it needs is missing."),
+  ).toBeTruthy();
+  expect(svg4()).toBeNull();
+  for (const part of [".wh-cf-legend", ".wh-cf-span", ".wh-cf-readout", "[data-table]"])
+    expect(chart4().querySelector(part)).toBeNull();
   // The controls stay, so another window can be chosen.
   pick(chart3(), "Window", "7d");
   expect(svg3()).not.toBeNull();
   expect(chart3().querySelector(".wh-cf-span")!.textContent).toBe(
     "7d · 12 Oct close → 19 Oct 06:04 UTC",
   );
+  expect(svg4()).not.toBeNull();
+  expect(chart4().querySelector(".wh-cf-span")!.textContent).toBe(
+    "7d · 12 Oct close → 19 Oct 06:04 UTC",
+  );
   expect(screen.queryByText(/No 1d comparison/)).toBeNull();
+  // Chart 4's own window buttons reach the missing window too.
+  pick(chart4(), "Window", "1d");
+  expect(pressed(chart3(), "Window")).toEqual(["1d"]);
+  expect(svg3()).toBeNull();
+  expect(svg4()).toBeNull();
 });
 
 it("says the $200 grid is missing", async () => {
@@ -749,6 +809,7 @@ it("says the flows are unavailable without inventing numbers", async () => {
   expect(await screen.findByText("Cost-basis flows unavailable")).toBeTruthy();
   expect(screen.getByText("on-chain data source unavailable")).toBeTruthy();
   expect(document.querySelector('[data-chart="costflow-3"]')).toBeNull();
+  expect(document.querySelector('[data-chart="costflow-4"]')).toBeNull();
   cleanup();
   mocks.costFlow.mockReturnValue(new Promise(() => {}));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -779,7 +840,7 @@ it("does not refit when an option already on is picked again", async () => {
 
 it("drops a reading when a refresh changes the rows", async () => {
   const { client } = show();
-  await screen.findByText(TITLE3);
+  await screen.findByText(TITLE4);
   // A poll's result, as the 5-minute refetch delivers it (observers hear of it on the next tick).
   const poll = (view: CostFlowView) =>
     act(async () => {
@@ -787,12 +848,15 @@ it("drops a reading when a refresh changes the rows", async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   fireEvent.keyDown(svg3()!, { key: "ArrowUp" });
+  fireEvent.keyDown(svg4()!, { key: "ArrowUp" });
   expect(readout()).toHaveLength(5);
-  // The same payload again keeps the view, its rows and so the reading.
+  expect(readout(chart4())).toHaveLength(7);
+  // The same payload again keeps the view, its rows and so both readings.
   await poll(structuredClone(s2));
   expect(client.getQueryData(["wh", "onchain", "cost-flow"])).toBe(s2);
   expect(readout()).toHaveLength(5);
-  // The next snapshot: the rows are new, and the reading, which names a row by its index, goes.
+  expect(readout(chart4())).toHaveLength(7);
+  // The next snapshot: the rows are new, and the readings, which name a row by its index, go.
   const next = structuredClone(s2);
   next.snapshot_at = "2026-10-19T07:04:42Z";
   await poll(next);
@@ -800,8 +864,396 @@ it("drops a reading when a refresh changes the rows", async () => {
     screen.getByText("URPD snapshot 19 Oct 2026 · 07:04 UTC · Source Bitcoin Research Kit"),
   ).toBeTruthy();
   expect(readout()).toEqual([]);
+  expect(readout(chart4())).toEqual([]);
   expect(svg3()!.querySelector(".wh-cf-cursor")).toBeNull();
+  expect(svg4()!.querySelector(".wh-cf-cursor")).toBeNull();
   // The next key starts again from the row that holds spot.
   fireEvent.keyDown(svg3()!, { key: "ArrowUp" });
   expect(readout()[0]).toBe("$82,000 – $82,500");
+});
+
+// Chart 4, the Age Breakdown, under Chart 3 on the same S2 snapshot.
+describe("Chart 4", () => {
+  it("says what is missing in Chart 4", async () => {
+    // Review Focus 2: S1 has no age-cohort snapshots; Chart 4 says so and draws nothing.
+    show(s1);
+    await screen.findByText(TITLE4);
+    expect(
+      within(chart4()).getByText(
+        "Chart 4 needs the age-cohort snapshots and the daily high and low for 19 Oct 2026, which are missing or from another block.",
+      ),
+    ).toBeTruthy();
+    expect(svg4()).toBeNull();
+    for (const part of [".wh-cf-legend", ".wh-cf-span", ".wh-cf-readout", ".wh-cf-sides", "[data-table]"])
+      expect(chart4().querySelector(part)).toBeNull();
+    // Its controls stay; Chart 3 draws.
+    expect(pressed(chart4(), "Window")).toEqual(["30d"]);
+    expect(pressed(chart4(), "Zoom")).toEqual(["All"]);
+    expect(svg3()!.getAttribute("data-rows")).toBe("252");
+    // Without the $500 grid.
+    cleanup();
+    show({ ...s1, grids: s1.grids.filter((grid) => grid.step !== 500) });
+    await screen.findByText(TITLE4);
+    expect(
+      within(chart4()).getByText("Chart 4 needs the $500 snapshots, which are missing."),
+    ).toBeTruthy();
+    expect(svg4()).toBeNull();
+    expect(chart4().querySelector(".wh-cf-legend")).toBeNull();
+    // A $500 grid without a row is an empty snapshot: no chart, legend or table (A:3569).
+    cleanup();
+    const empty = structuredClone(s2);
+    const grid = empty.grids[0];
+    const none = { all: [], sth: [], lth: [] };
+    grid.floors = [];
+    grid.now = none;
+    for (const found of grid.windows) found.then = none;
+    empty.age = { groups: [[], [], [], []], band: [] };
+    expect(ageRows(empty, "30d", 0)).toEqual({ ok: true, value: [] });
+    show(empty);
+    await screen.findByText(TITLE4);
+    expect(
+      within(chart4()).getByText("Chart 4 needs the $500 snapshots, which are missing."),
+    ).toBeTruthy();
+    expect(svg4()).toBeNull();
+    for (const part of [".wh-cf-legend", ".wh-cf-readout", "[data-table]"])
+      expect(chart4().querySelector(part)).toBeNull();
+  });
+
+  it("draws Chart 4 with the original's 30d readings", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    const page = PAGE4["30d z0"];
+    // page-recorded (06:04, expected.chart4_page["30d z0"]): 16 legend rows, the meta, every K row.
+    expect(legend4()).toHaveLength(16);
+    expect(legend4()).toEqual(page.legend);
+    expect(legend4().at(-1)).toBe("net (issuance) / +13,597");
+    expect(meta4()).toBe("5 clusters · 1 in · 4 out");
+    expect(tableRows("clusters", chart4()).map(line)).toEqual(page.clusters);
+    expect(svg4()!.getAttribute("data-rows")).toBe("252");
+    expect(svg4()!.querySelectorAll(".wh-cf-bar--sold")).toHaveLength(252);
+    // Each bought bar in its group's colour and each sold bar in its band's; a bar of 0 not drawn.
+    const rows = rows4("30d", 0);
+    for (let g = 0; g < 3; g += 1)
+      expect(barsOf(`a${g}`), `a${g}`).toHaveLength(rows.filter((r) => r.buy[g] !== 0).length);
+    expect(barsOf("a3")).toHaveLength(0);
+    for (let band = 0; band < 12; band += 1)
+      expect(barsOf(`s${band}`), `s${band}`).toHaveLength(
+        rows.filter((r) => r.band === band && r.sold !== 0).length,
+      );
+    // The legend's toggle rows are switches in their colours, sold ones marked faint; the net row
+    // is not a switch and takes the net colour.
+    const keys = [...chart4().querySelectorAll(".wh-cf-legend .wh-seller-key")];
+    expect(keys.slice(0, 15).every((key) => key.tagName === "BUTTON")).toBe(true);
+    expect(keys.slice(0, 15).every((key) => key.getAttribute("aria-pressed") === "true")).toBe(true);
+    expect(keys[15].tagName).toBe("SPAN");
+    expect(keys[0].querySelector("i")!.className).toBe(
+      "wh-seller-swatch wh-cf-swatch--bought wh-cf-age-0",
+    );
+    expect(legendRow("sold · last traded 1m–3m ago").querySelector("i")!.className).toBe(
+      "wh-seller-swatch wh-cf-swatch--sold wh-cf-age-3",
+    );
+    expect(keys[15].querySelector("i")!.className).toBe("wh-seller-swatch wh-cf-swatch--net");
+    // The axis captions and the note under the legend.
+    expect(chart4().querySelector(".wh-cf-captions")!.textContent).toBe(
+      "BTC ← Net distributionNet accumulation → BTC",
+    );
+    expect(chart4().querySelector(".wh-cf-note")!.textContent).toBe(
+      "Bought is exact. Sold is grouped by when price was last at that level, which bounds how young those coins can be; drawn faint because it is an inference, not a measurement. Click a legend row to hide it, hover to isolate.",
+    );
+    // Bells are drawn on the chart only: there is no components table.
+    expect(chart4().querySelector('[data-table="components"]')).toBeNull();
+    expect(chart4().querySelector(".wh-cf-span")!.textContent).toBe(
+      "30d · 19 Sep close → 19 Oct 06:04 UTC",
+    );
+    // Window and Zoom, Chart 4's three zooms (H:973); both sides at the page's defaults.
+    expect(buttons(chart4(), "Window")).toEqual(["1d", "7d", "30d", "90d"]);
+    expect(buttons(chart4(), "Zoom")).toEqual(["All", "±50%", "±25%"]);
+    expect(pressed(chart4(), "Zoom")).toEqual(["All"]);
+    for (const which of ["pos", "neg"] as const) {
+      const box = chart4().querySelector<HTMLElement>(`[data-side="${which}"]`)!;
+      expect(pressed(box, "Smoothing")).toEqual(["Auto"]);
+      expect(pressed(box, "Bell curves")).toEqual(["Off"]);
+    }
+    // A:3581-3584: unlike Chart 3, the price axis is not padded; the rows run edge to edge.
+    const f = plotFrame(720);
+    const plotH = 440 - f.top - f.bottom;
+    const bars = [...svg4()!.querySelectorAll(".wh-cf-bar")].map((bar) => {
+      const y = Number(bar.getAttribute("y"));
+      return { top: y, bottom: y + Number(bar.getAttribute("height")) };
+    });
+    expect(Math.min(...bars.map((bar) => bar.top))).toBeCloseTo(f.top, 0);
+    expect(Math.max(...bars.map((bar) => bar.bottom))).toBeCloseTo(f.top + plotH, 0);
+    // The K marks are numbered as the table numbers them.
+    expect(
+      [...svg4()!.querySelectorAll("text.wh-cf-label--k-pos, text.wh-cf-label--k-neg")]
+        .map((label) => label.textContent)
+        .sort(),
+    ).toEqual(["K1", "K2", "K3", "K4", "K5"]);
+    expect([...svg4()!.querySelectorAll("text.wh-cf-label--k-pos")].map((l) => l.textContent)).toEqual(
+      ["K4"],
+    );
+    // Each side has its own setting: the sell side unsmoothed keeps only the buy peak.
+    const side4 = (which: Side) => chart4().querySelector<HTMLElement>(`[data-side="${which}"]`)!;
+    pick(side4("neg"), "Smoothing", "Off");
+    expect(meta4()).toBe("1 cluster · 1 in · 0 out");
+    expect(tableRows("clusters", chart4()).map((row) => row[1])).toEqual([
+      "Net Buy (Accumulation)",
+    ]);
+    // A:3770: with both sides unsmoothed there is no peak, and Chart 4 says so in its own words.
+    pick(side4("pos"), "Smoothing", "Off");
+    expect(tableRows("clusters", chart4())).toEqual([["No clusters at this smoothing setting."]]);
+    expect(meta4()).toBe("");
+    // Chart 3 keeps its own sides.
+    expect(tableRows("clusters")).toHaveLength(5);
+  });
+
+  it("shares the window with Chart 3 and draws every 90d group", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    pick(chart4(), "Window", "90d");
+    expect(pressed(chart3(), "Window")).toEqual(["90d"]);
+    expect(pressed(chart4(), "Window")).toEqual(["90d"]);
+    // page-recorded (SR-4.md, every group drawn).
+    expect(legendRow("bought 1m–3m ago").querySelector("b")!.textContent).toBe("+1,402,425");
+    expect(legend4().at(-1)).toBe("net (issuance) / +40,725");
+    expect(meta4()).toBe("7 clusters · 2 in · 5 out");
+    expect(barsOf("a3").length).toBeGreaterThan(0);
+    // Chart 3's buttons move Chart 4 too: 7d, then ±50% (page-recorded).
+    pick(chart3(), "Window", "7d");
+    expect(pressed(chart4(), "Window")).toEqual(["7d"]);
+    expect(legend4()).toEqual(PAGE4["7d z0"].legend);
+    pick(chart4(), "Zoom", "±50%");
+    expect(pressed(chart3(), "Zoom")).toEqual(["±50%"]);
+    expect(legend4()).toEqual(shownNet(PAGE4["7d z50"].legend));
+    expect(meta4()).toBe(PAGE4["7d z50"].meta);
+  });
+
+  it("hides a group and recomputes only Chart 4", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    pick(chart4(), "Window", "90d");
+    const chart3Meta = table("clusters").querySelector(".wh-cf-fit-meta")!.textContent;
+    const before = fits.mock.calls.length;
+    fireEvent.click(legendRow("bought 1m–3m ago"));
+    // page-recorded (the page's 90d state, its fourth group hidden): legend values, meta, clusters.
+    expect(legendRow("bought 1m–3m ago").querySelector("b")!.textContent).toBe("off");
+    expect(legendRow("bought 1m–3m ago").getAttribute("aria-pressed")).toBe("false");
+    expect(legend4().at(-1)).toBe("net of what is shown / −1,361,700");
+    expect(legend4()).toEqual(shownNet(PAGE4["90d z0"].legend));
+    expect(meta4()).toBe("3 clusters · 1 in · 2 out");
+    expect(tableRows("clusters", chart4()).map(line)).toEqual(PAGE4["90d z0"].clusters);
+    expect(barsOf("a3")).toHaveLength(0);
+    // Exactly Chart 4's two sides were fitted again, on the shown groups; Chart 3 was not.
+    const rows = rows4("90d", 0);
+    const hidden = { bought: [true, true, true, false], sold: ALL_ON.sold };
+    expect(fits.mock.calls.length).toBe(before + 2);
+    expect(fits.mock.calls.slice(before).map(([centers, weights]) => [centers, weights])).toEqual([
+      [rows.map((r) => r.price), ageWeights(rows, hidden, "pos")],
+      [rows.map((r) => r.price), ageWeights(rows, hidden, "neg")],
+    ]);
+    expect(table("clusters").querySelector(".wh-cf-fit-meta")!.textContent).toBe(chart3Meta);
+    // Showing it again restores every group.
+    fireEvent.click(legendRow("bought 1m–3m ago"));
+    expect(legendRow("bought 1m–3m ago").querySelector("b")!.textContent).toBe("+1,402,425");
+    expect(legend4().at(-1)).toBe("net (issuance) / +40,725");
+    expect(meta4()).toBe("7 clusters · 2 in · 5 out");
+  });
+
+  it("never hides the last visible row", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    // page-recorded: 1d ±25% has six toggle rows.
+    pick(chart4(), "Window", "1d");
+    pick(chart4(), "Zoom", "±25%");
+    expect(legend4()).toEqual(shownNet(PAGE4["1d z25"].legend));
+    const labels = [
+      "bought <1d ago",
+      "sold · last traded <1d ago",
+      "sold · last traded 1d–1w ago",
+      "sold · last traded 1w–1m ago",
+      "sold · last traded 1m–3m ago",
+    ];
+    for (const label of labels) {
+      fireEvent.click(legendRow(label));
+      expect(legendRow(label).getAttribute("aria-pressed"), label).toBe("false");
+      expect(legendRow(label).querySelector("b")!.textContent, label).toBe("off");
+    }
+    // Only the 6m–1y sold bars are left; hiding them too is refused and fits nothing.
+    const last = "sold · last traded 6m–1y ago";
+    expect(svg4()!.querySelectorAll(".wh-cf-bar")).toHaveLength(barsOf("s5").length);
+    const before = fits.mock.calls.length;
+    fireEvent.click(legendRow(last));
+    expect(legendRow(last).getAttribute("aria-pressed")).toBe("true");
+    expect(legendRow(last).querySelector("b")!.textContent).toBe("−488");
+    expect(barsOf("s5").length).toBeGreaterThan(0);
+    expect(fits.mock.calls.length).toBe(before);
+  });
+
+  it("resets the toggles, hover and readouts when the window changes", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    // N1: a row hidden, a row isolated and both charts read, in 7d; then 30d from Chart 3.
+    pick(chart4(), "Window", "7d");
+    const spoil = () => {
+      fireEvent.click(legendRow("bought <1d ago"));
+      expect(legendRow("bought <1d ago").querySelector("b")!.textContent).toBe("off");
+      fireEvent.mouseEnter(legendRow("sold · last traded 1m–3m ago"));
+      expect(svg4()!.querySelector(".wh-cf-dim")).not.toBeNull();
+      fireEvent.keyDown(svg3()!, { key: "ArrowUp" });
+      fireEvent.keyDown(svg4()!, { key: "ArrowUp" });
+      expect(readout()).toHaveLength(5);
+      expect(readout(chart4()).length).toBeGreaterThan(0);
+    };
+    const reset = () => {
+      expect(
+        [...chart4().querySelectorAll(".wh-cf-legend button")].every(
+          (key) => key.getAttribute("aria-pressed") === "true",
+        ),
+      ).toBe(true);
+      expect(legend4()).toEqual(PAGE4["30d z0"].legend);
+      expect(svg4()!.querySelector(".wh-cf-dim")).toBeNull();
+      expect(readout()).toEqual([]);
+      expect(readout(chart4())).toEqual([]);
+    };
+    spoil();
+    pick(chart3(), "Window", "30d");
+    expect(pressed(chart4(), "Window")).toEqual(["30d"]);
+    reset();
+    // A window button resets even when it is the window already shown, in either chart.
+    spoil();
+    pick(chart3(), "Window", "30d");
+    reset();
+    spoil();
+    pick(chart4(), "Window", "30d");
+    reset();
+  });
+
+  it("keeps the toggles across a zoom unless nothing would be shown", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    // A zoom keeps a hidden row hidden (A:3824-3826).
+    fireEvent.click(legendRow("bought <1d ago"));
+    pick(chart4(), "Zoom", "±50%");
+    expect(legendRow("bought <1d ago").querySelector("b")!.textContent).toBe("off");
+    pick(chart4(), "Zoom", "All");
+    fireEvent.click(legendRow("bought <1d ago"));
+    expect(legend4()).toEqual(PAGE4["30d z0"].legend);
+    // Review Focus 3: every row hidden but "10y+", which ±25% does not have: every row comes back.
+    for (const row of legend4().slice(0, -1)) {
+      const label = row.split(" / ")[0];
+      if (label !== "sold · last traded 10y+ ago") fireEvent.click(legendRow(label));
+    }
+    expect(
+      [...chart4().querySelectorAll(".wh-cf-legend button")].filter(
+        (key) => key.getAttribute("aria-pressed") === "true",
+      ),
+    ).toHaveLength(1);
+    pick(chart4(), "Zoom", "±25%");
+    // page-recorded legend of 30d ±25%, all on; the net is "+253,707".
+    expect(legend4()).toEqual(shownNet(PAGE4["30d z25"].legend));
+    expect(legend4().at(-1)).toBe("net of what is shown / +253,707");
+  });
+
+  it("follows Chart 3's ±10% zoom with no pill pressed", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    pick(chart3(), "Zoom", "±10%");
+    expect(svg4()!.getAttribute("data-rows")).toBe("33");
+    expect(pressed(chart4(), "Zoom")).toEqual([]);
+    for (const name of ["All", "±50%", "±25%"])
+      expect(
+        within(within(chart4()).getByRole("group", { name: "Zoom" }))
+          .getByRole("button", { name })
+          .getAttribute("aria-pressed"),
+      ).toBe("false");
+    expect(legend4().at(-1)).toMatch(/^net of what is shown \/ /);
+    // Chart 4's All takes both charts back.
+    pick(chart4(), "Zoom", "All");
+    expect(pressed(chart3(), "Zoom")).toEqual(["All"]);
+    expect(svg4()!.getAttribute("data-rows")).toBe("252");
+  });
+
+  it("isolates a legend row on hover and focus without the engine", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    const before = fits.mock.calls.length;
+    const isolated = (key: string) => {
+      const own = new Set(barsOf(key));
+      const bars = [...svg4()!.querySelectorAll(".wh-cf-bar")];
+      expect(own.size, key).toBeGreaterThan(0);
+      for (const bar of bars) expect(bar.classList.contains("wh-cf-dim")).toBe(!own.has(bar));
+    };
+    const row = legendRow("sold · last traded 1m–3m ago");
+    fireEvent.mouseEnter(row);
+    isolated("s3");
+    fireEvent.mouseLeave(row);
+    expect(svg4()!.querySelector(".wh-cf-dim")).toBeNull();
+    fireEvent.focus(legendRow("bought <1d ago"));
+    isolated("a0");
+    fireEvent.blur(legendRow("bought <1d ago"));
+    expect(svg4()!.querySelector(".wh-cf-dim")).toBeNull();
+    // Chart 3 is never dimmed, and nothing was fitted.
+    fireEvent.mouseEnter(row);
+    expect(svg3()!.querySelector(".wh-cf-dim")).toBeNull();
+    expect(fits.mock.calls.length).toBe(before);
+    // A click hides the row and ends the isolation; a hidden row isolates nothing.
+    fireEvent.click(row);
+    expect(svg4()!.querySelector(".wh-cf-dim")).toBeNull();
+    fireEvent.mouseEnter(row);
+    expect(svg4()!.querySelector(".wh-cf-dim")).toBeNull();
+  });
+
+  it("reads a bucket with the keyboard", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    const svg = svg4()!;
+    expect(chart4().querySelector(".wh-cf-readout")!.getAttribute("aria-live")).toBe("polite");
+    const before = fits.mock.calls.length;
+    fireEvent.focus(svg);
+    fireEvent.keyDown(svg, { key: "ArrowUp" });
+    // page-recorded tooltip format; the first key reads the bucket that holds spot.
+    expect(readout(chart4())).toEqual([
+      "$82,000 – $82,500",
+      "bought <1d ago +73,948",
+      "bought 1d–1w ago +95,458",
+      "bought 1w–1m ago +67,094",
+      "sold from levels last traded <1d ago −16,490",
+      "net +220,010",
+      "aging removed · 30d window",
+    ]);
+    expect(svg.querySelector(".wh-cf-cursor")).not.toBeNull();
+    // Chart 3 keeps its own reading.
+    expect(readout()).toEqual([]);
+    fireEvent.keyDown(svg, { key: "End" });
+    expect(readout(chart4())[0]).toBe("$125,500 – $126,000");
+    fireEvent.keyDown(svg, { key: "Escape" });
+    expect(readout(chart4())).toEqual([]);
+    expect(fits.mock.calls.length).toBe(before);
+  });
+
+  it("puts the three explanations under Chart 4", async () => {
+    show();
+    await screen.findByText(TITLE4);
+    const read = chart4().querySelector(".wh-seller-read")!;
+    expect(chart4().lastElementChild).toBe(read);
+    expect([...read.querySelectorAll("h4")].map((heading) => heading.textContent)).toEqual([
+      "What it shows",
+      "What extreme values imply",
+      "How to read",
+    ]);
+    const bodies = [...read.querySelectorAll("p")].map((body) => body.textContent ?? "");
+    expect(
+      bodies[0].startsWith("The same buying and selling with ageing removed and split by age."),
+    ).toBe(true);
+    expect(
+      bodies[1].startsWith(
+        "Summed over every bucket, bought minus sold is the coins mined in the window,",
+      ),
+    ).toBe(true);
+    expect(bodies[2].startsWith("Window and Zoom are shared with Chart 3.")).toBe(true);
+    // Chart 4 sits under Chart 3.
+    expect(
+      chart3().compareDocumentPosition(chart4()) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
 });

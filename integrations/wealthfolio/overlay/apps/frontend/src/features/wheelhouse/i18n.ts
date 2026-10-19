@@ -879,6 +879,21 @@ const en = {
     "A large Net Buy cluster at spot is a fresh cost base: many coins are now held at today's price, which tends to be defended or tested there. A large Net Sell cluster below spot means older, cheaper coins were spent, mostly profit taking; above spot it means holders who bought higher sold out. In the STH view, a big hollow aging bar means much of the decline is coins maturing into LTH, not selling. The chart measures coins moved, not intent, and every window ends at the latest snapshot.",
   "costflow.c3.how":
     "Price runs up the vertical axis and BTC across: right is accumulation, left distribution, and the dashed line is spot. Switch windows to see whether a cluster is new or has been building. The Clusters table lists each peak with its width, BTC and share of its side; turn Bell curves on for the components table, and use ⚙ with Manual smoothing to change the curve's width and peak cutoff. Hover the chart or use the arrow keys to read one bucket.",
+  "costflow.c4.title": "Chart 4 — Buy & Sell Side By Cost Basis · Age Breakdown",
+  "costflow.c4.noAge":
+    "Chart 4 needs the age-cohort snapshots and the daily high and low for {{day}}, which are missing or from another block.",
+  "costflow.c4.noGrid": "Chart 4 needs the $500 snapshots, which are missing.",
+  "costflow.c4.axis.buy": "Net accumulation → BTC",
+  "costflow.c4.axis.sell": "BTC ← Net distribution",
+  "costflow.c4.note":
+    "Bought is exact. Sold is grouped by when price was last at that level, which bounds how young those coins can be; drawn faint because it is an inference, not a measurement. Click a legend row to hide it, hover to isolate.",
+  "costflow.c4.noClusters": "No clusters at this smoothing setting.",
+  "costflow.c4.shows":
+    "The same buying and selling with ageing removed and split by age. Bought, on the right, is the latest snapshot's supply younger than the window, split exactly by age band: those coins moved during the window. Sold, on the left, is what the bucket held at the start of the window minus what is still there and older than the window. Sold coins can no longer be aged, so each sold bar takes the colour of when price was last at that level — the youngest those coins can be — and is drawn faint because it is an inference, not a measurement.",
+  "costflow.c4.implies":
+    "Summed over every bucket, bought minus sold is the coins mined in the window, so at Zoom All, with nothing hidden, the net row reads as issuance, not demand. Sold bars in the old colours (six months and more) mean long-held coins were spent at those cost bases; bought bars mostly in the youngest band mean the buying is very recent. The window starts at a day's close while bought counts coins younger than the window in the latest snapshot, so the oldest band counted can include coins bought up to a day before the window began.",
+  "costflow.c4.how":
+    "Window and Zoom are shared with Chart 3. Click a legend row to hide it — the curves, clusters and the net row then cover only what is shown — and hover a row to isolate it. The Clusters table lists the peaks of each side, as in Chart 3; bell curves are drawn on the chart only.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1722,6 +1737,20 @@ const zh: Record<MessageKey, string> = {
     "现价附近的大块净买入是新形成的成本区：大量筹码以当前价格持有，往往在这里被防守或检验。现价下方的大块净卖出说明更早、更便宜的币被花掉了，多为获利了结；在现价上方，则是高位买入的人离场。STH 视图里空心的币龄迁移柱很大时，短期持有者的减少主要是币龄增长转入长期持有者，而不是卖出。这张图衡量的是移动的币量，不是意图；每个窗口的终点都是最新的快照。",
   "costflow.c3.how":
     "纵轴是价格，横轴是 BTC：右边是累积，左边是派发，虚线是现价。切换窗口，看一个聚类是新出现的还是逐步累积的。Clusters 表列出每个峰的宽度、BTC 和占该侧的比例；打开 Bell curves 后出现正态分量表；平滑选 Manual 时，可用 ⚙ 调整曲线的带宽和峰值阈值。在图上悬停或用方向键可以读取单个价格桶。",
+  "costflow.c4.title": "图 4 — 按成本价的买卖两侧 · 币龄拆分",
+  "costflow.c4.noAge": "图 4 需要 {{day}} 的币龄群体快照和每日最高价、最低价，目前缺失或来自另一个区块。",
+  "costflow.c4.noGrid": "图 4 需要 $500 桶宽的快照，目前缺失。",
+  "costflow.c4.axis.buy": "净累积 → BTC",
+  "costflow.c4.axis.sell": "BTC ← 净派发",
+  "costflow.c4.note":
+    "买入是精确值。卖出按该价位上次成交的时间分组，这给出了这些币最年轻的可能币龄；它是推断而不是测量，所以画得较淡。点击图例中的一行可以隐藏它，悬停可以单独突出它。",
+  "costflow.c4.noClusters": "当前平滑设置下没有聚类。",
+  "costflow.c4.shows":
+    "同样的买卖，剔除币龄迁移后按币龄拆分。右侧的买入是最新快照中比窗口更年轻的筹码，按币龄段精确拆分：这些币都在窗口期内移动过。左侧的卖出是窗口起点时该价格桶的筹码，减去现在仍在桶里、且比窗口更老的部分。卖出的币已无法确定币龄，所以每根卖出柱按该价位上次成交的时间上色，那是这些币最年轻的可能币龄；它是推断而不是测量，所以画得较淡。",
+  "costflow.c4.implies":
+    "对全部价格桶求和，买入减卖出等于窗口期内新挖出的币，所以在 Zoom All 且没有隐藏行时，净额读作发行量，而不是需求。老币颜色（六个月及以上）的卖出柱，说明长期持有的币在这些成本价被花掉；买入集中在最年轻一档，说明买入发生得很近。窗口起点是某天的收盘，而买入按最新快照中比窗口年轻的币计算，所以计入的最老一档可能包含窗口开始前不到一天买入的币。",
+  "costflow.c4.how":
+    "Window 和 Zoom 与图 3 共用。点击图例中的一行可以隐藏它，此时曲线、聚类和净额都只按所示部分计算；悬停一行可以单独突出它。Clusters 表与图 3 一样列出两侧的峰；正态曲线只画在图上。",
 };
 
 export const messages = { en, zh };
