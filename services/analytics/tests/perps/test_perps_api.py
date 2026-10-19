@@ -47,7 +47,6 @@ from wheelhouse_service.perps.sync import (
     DirectionCheck,
     Directions,
     PerpsSync,
-    QtyUnits,
     StoredStates,
     Verdict,
     derived_key,
@@ -798,14 +797,6 @@ def test_status_reports_hosts_and_direction(tmp_path: Path):
     path = tmp_path / "perps.sqlite"
     store = PerpsStore(path)
     now = SAMPLE_NOW
-    units = QtyUnits(
-        events=0,
-        min_qty=None,
-        min_notional=None,
-        max_notional=None,
-        notional_in_range=None,
-        min_qty_matches=None,
-    )
     store.set_state(
         last_run_at=SAMPLE_COMPUTED.isoformat(),
         last_error="sync_failed",
@@ -818,7 +809,7 @@ def test_status_reports_hosts_and_direction(tmp_path: Path):
             }
         ),
         direction_check=Directions(
-            binance=check("ok"), bybit=check("pending"), bybit_qty=units
+            binance=check("ok"), bybit=check("pending"), okx=check("ok")
         ).model_dump_json(),
     )
 
@@ -844,15 +835,60 @@ def test_status_reports_hosts_and_direction(tmp_path: Path):
     ]
     assert status["direction"] == "pending"
     assert status["direction_check"]["binance"]["verdict"] == "ok"
-    assert status["direction_check"]["bybit_qty"]["notional_in_range"] is None
+    assert status["direction_check"]["okx"]["verdict"] == "ok"
+    assert set(status["direction_check"]) == {"binance", "bybit", "okx"}
 
-    def both(binance: Verdict, bybit: Verdict) -> Verdict:
-        return direction(Directions(binance=check(binance), bybit=check(bybit), bybit_qty=units))
+    def merged(binance: Verdict, bybit: Verdict, okx: Verdict) -> Verdict:
+        return direction(Directions(binance=check(binance), bybit=check(bybit), okx=check(okx)))
 
-    assert both("ok", "ok") == "ok"
-    assert both("ok", "pending") == "pending"
-    assert both("ok", "inverted") == both("inverted", "pending") == "inverted"
+    # All three venues: ok when each is, inverted when any is.
+    assert merged("ok", "ok", "ok") == "ok"
+    assert merged("ok", "pending", "ok") == merged("ok", "ok", "pending") == "pending"
+    assert merged("ok", "inverted", "ok") == merged("inverted", "pending", "ok") == "inverted"
+    assert merged("ok", "ok", "inverted") == merged("pending", "pending", "inverted") == "inverted"
     assert direction(None) == "pending"
+
+
+def test_hyperliquid_view_is_served(tmp_path: Path):
+    path = tmp_path / "perps.sqlite"
+    store = PerpsStore(path)
+    grid = synthetic_grid(SAMPLE_START, SAMPLE_LAST)
+    save(store, "hyperliquid", "4h", compute_states(grid, "4h", rules=V1))
+    save(store, "hyperliquid", "8h", None, ["series_missing:bybit:oi", "coinalyze_units:okx"])
+    errors = {name: host("500") for name in (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST)}
+    store.set_state(hosts=json.dumps(errors))
+
+    with TestClient(router_app(path, Clock(SAMPLE_NOW))) as http:
+        view = get_states(http, "hyperliquid")
+        marker = get_states(http, "hyperliquid", "8h")
+
+    assert (view["exchange"], view["data_state"], view["last"]) == (
+        "hyperliquid",
+        "fresh",
+        iso(SAMPLE_LAST),
+    )
+    assert view["blocks"] and view["tables"]
+    # It reads every host: All's OI and liquidations, and Hyperliquid's own from Coinalyze.
+    assert view["reasons"] == [
+        f"rest_error:{name}:500" for name in (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST)
+    ]
+    assert marker["data_state"] == "unavailable"
+    assert marker["reasons"][:2] == ["series_missing:bybit:oi", "coinalyze_units:okx"]
+
+
+def test_every_view_names_a_coinalyze_error(tmp_path: Path):
+    path = tmp_path / "perps.sqlite"
+    store = PerpsStore(path)
+    for exchange in EXCHANGES:
+        save(store, exchange, "4h", None)
+    store.set_state(hosts=json.dumps({CZ_HOST: host("key_missing")}))
+
+    with TestClient(router_app(path, Clock(SAMPLE_NOW))) as http:
+        views = {exchange: get_states(http, exchange) for exchange in EXCHANGES}
+
+    # Every view reads its liquidations from Coinalyze.
+    for view in views.values():
+        assert view["reasons"] == [f"rest_error:{CZ_HOST}:key_missing"]
 
 
 def test_capability_and_get_only_routes(tmp_path: Path):

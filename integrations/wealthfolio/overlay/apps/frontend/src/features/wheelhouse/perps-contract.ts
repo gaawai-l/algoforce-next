@@ -113,7 +113,7 @@ export const perpStatesViewSchema: z.ZodType<
   z.ZodTypeDef,
   unknown
 > = z.object({
-  exchange: z.enum(["all", "binance", "bybit"]),
+  exchange: z.enum(["all", "binance", "bybit", "hyperliquid"]),
   window: z.enum(["4h", "8h"]),
   data_state: dataState,
   reasons: z.array(z.string()),
@@ -150,14 +150,7 @@ export const perpsStatusSchema: z.ZodType<PerpsStatus, z.ZodTypeDef, unknown> =
       .object({
         binance: directionCheckSchema,
         bybit: directionCheckSchema,
-        bybit_qty: z.object({
-          events: int,
-          min_qty: z.number().nullable(),
-          min_notional: z.number().nullable(),
-          max_notional: z.number().nullable(),
-          notional_in_range: z.boolean().nullable(),
-          min_qty_matches: z.boolean().nullable(),
-        }),
+        okx: directionCheckSchema,
       })
       .nullable(),
   });

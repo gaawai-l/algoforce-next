@@ -1220,7 +1220,8 @@
               "enum": [
                 "all",
                 "binance",
-                "bybit"
+                "bybit",
+                "hyperliquid"
               ],
               "type": "string",
               "default": "all",
@@ -3556,7 +3557,7 @@
           "long_share"
         ],
         "title": "DirectionCheck",
-        "description": "One venue's liquidation sides against the price (spec \u00a76), as currently mapped."
+        "description": "One venue's liquidation sides against the price (spec \u00a76, proposal \u00a73.3)."
       },
       "Directions": {
         "properties": {
@@ -3566,8 +3567,8 @@
           "bybit": {
             "$ref": "#/components/schemas/DirectionCheck"
           },
-          "bybit_qty": {
-            "$ref": "#/components/schemas/QtyUnits"
+          "okx": {
+            "$ref": "#/components/schemas/DirectionCheck"
           }
         },
         "additionalProperties": false,
@@ -3575,9 +3576,10 @@
         "required": [
           "binance",
           "bybit",
-          "bybit_qty"
+          "okx"
         ],
-        "title": "Directions"
+        "title": "Directions",
+        "description": "Each venue whose liquidations Coinalyze reports; pending for one excluded by its units."
       },
       "Episode": {
         "properties": {
@@ -5117,7 +5119,8 @@
             "enum": [
               "all",
               "binance",
-              "bybit"
+              "bybit",
+              "hyperliquid"
             ],
             "title": "Exchange"
           },
@@ -5897,81 +5900,6 @@
           "bars_ago"
         ],
         "title": "PrevCountdown"
-      },
-      "QtyUnits": {
-        "properties": {
-          "events": {
-            "type": "integer",
-            "title": "Events"
-          },
-          "min_qty": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Min Qty"
-          },
-          "min_notional": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Min Notional"
-          },
-          "max_notional": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Notional"
-          },
-          "notional_in_range": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notional In Range"
-          },
-          "min_qty_matches": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Min Qty Matches"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "events",
-          "min_qty",
-          "min_notional",
-          "max_notional",
-          "notional_in_range",
-          "min_qty_matches"
-        ],
-        "title": "QtyUnits",
-        "description": "Bybit's liquidation size `v` checked as BTC: notionals v\u00b7p and the smallest size."
       },
       "Quote-Input": {
         "properties": {

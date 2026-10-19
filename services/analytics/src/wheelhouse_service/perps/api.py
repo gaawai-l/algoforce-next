@@ -16,7 +16,7 @@ from .coinalyze import Coinalyze
 from .collector import LIVE_WITHIN, STREAMS, Collectors, Connection
 from .models import CollectorStatus, HostStatus, PerpsStatus, PerpStatesView, freshness
 from .rows import Exchange, Stream
-from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, PerpsRest
+from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, CZ_HOST, PerpsRest
 from .states import BLOCKS_PER_DAY, DAY, REFERENCE_DAYS, Window
 from .store import PerpsStore
 from .sync import (
@@ -30,16 +30,19 @@ from .sync import (
 )
 
 # What each view reads; only these give it a `collector_down` or `rest_error` reason. Every view
-# prices with Bybit spot; Binance's OI comes from its history and its archive files.
+# prices with Bybit spot and reads its liquidations from Coinalyze; Binance's OI comes from its
+# history and its archive files. Hyperliquid's view reads All's OI and liquidations.
 VIEW_STREAMS: dict[Exchange, tuple[Stream, ...]] = {
     "all": STREAMS,
     "binance": ("binance_liq",),
     "bybit": ("bybit_liq", "bybit_trades"),
+    "hyperliquid": STREAMS,
 }
 VIEW_HOSTS: dict[Exchange, tuple[str, ...]] = {
-    "all": (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST),
-    "binance": (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST),
-    "bybit": (BYBIT_HOST,),
+    "all": (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST),
+    "binance": (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST),
+    "bybit": (BYBIT_HOST, CZ_HOST),
+    "hyperliquid": (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST),
 }
 # Before the worker's first derive there is no payload, whatever else is wrong.
 NOT_DERIVED = "not_derived"
@@ -162,10 +165,10 @@ def states_view(
 
 
 def direction(check: Directions | None) -> Verdict:
-    """Both venues together: ok only when both are, inverted when either is."""
+    """The three venues together: ok only when all are, inverted when any is."""
     if check is None:
         return "pending"
-    verdicts = {check.binance.verdict, check.bybit.verdict}
+    verdicts = {check.binance.verdict, check.bybit.verdict, check.okx.verdict}
     if "inverted" in verdicts:
         return "inverted"
     return "ok" if verdicts == {"ok"} else "pending"

@@ -36,6 +36,14 @@ const exchangeKey: Record<Exchange, MessageKey> = {
   all: "perp.exchange.all",
   binance: "perp.exchange.binance",
   bybit: "perp.exchange.bybit",
+  hyperliquid: "perp.exchange.hyperliquid",
+};
+// The venues whose liquidation sides /perps/status checks, each on its own.
+type Venue = "binance" | "bybit" | "okx";
+const venueKey: Record<Venue, MessageKey> = {
+  binance: "perp.venue.binance",
+  bybit: "perp.venue.bybit",
+  okx: "perp.venue.okx",
 };
 const stateKey: Record<PerpState, MessageKey> = {
   shortsq: "perp.state.shortsq",
@@ -70,18 +78,19 @@ const seriesKey: Record<string, MessageKey> = {
 };
 // Their side comes from the exchanges' liquidation fields, checked against price in /perps/status.
 const SQUEEZES: readonly PerpState[] = ["shortsq", "longsq"];
-// The venues whose liquidations a view reads, each checked on its own.
-const VENUES: Record<Exchange, readonly ("binance" | "bybit")[]> = {
-  all: ["binance", "bybit"],
+// The venues whose liquidations a view reads: Hyperliquid's are estimated from All's.
+const VENUES: Record<Exchange, readonly Venue[]> = {
+  all: ["binance", "bybit", "okx"],
   binance: ["binance"],
   bybit: ["bybit"],
+  hyperliquid: ["binance", "bybit", "okx"],
 };
 
-// A view's squeezes are verified by its own venue's check; All venues needs the combined
-// verdict. No status or no check yet is not ok.
+// A view's squeezes are verified by its own venue's check; All venues and Hyperliquid need the
+// combined verdict. No status or no check yet is not ok.
 function verdictOf(status: PerpsStatus | undefined, exchange: Exchange) {
   if (!status) return "pending";
-  if (exchange === "all") return status.direction;
+  if (exchange === "all" || exchange === "hyperliquid") return status.direction;
   return status.direction_check?.[exchange].verdict ?? "pending";
 }
 
@@ -498,7 +507,7 @@ export function PerpStates() {
         {reasons(data, true)}
         {inverted.map((venue) => (
           <p key={venue} className="wh-onchain-warn">
-            {text("perp.inverted", { venue: text(exchangeKey[venue]) })}
+            {text("perp.inverted", { venue: text(venueKey[venue]) })}
           </p>
         ))}
         {data.collecting ? (

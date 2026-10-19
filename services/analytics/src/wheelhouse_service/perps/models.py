@@ -83,7 +83,7 @@ class PerpsStatus(Model):
     last_error: str | None  # "sync_failed" when the last round failed unexpectedly
     hosts: list[HostStatus]
     collectors: list[CollectorStatus]
-    # Both venues' liquidation sides: ok when both are, inverted when either is, else pending.
+    # The three venues' liquidation sides: ok when all are, inverted when any is, else pending.
     direction: Verdict
-    # Each venue's check and Bybit's size units; null before the first round.
+    # Each venue's check; null before the first round.
     direction_check: Directions | None

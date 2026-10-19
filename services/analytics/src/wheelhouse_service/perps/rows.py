@@ -4,8 +4,9 @@ from typing import Literal
 
 from ..market import Model
 
-# The exchange views a page can show: each venue on its own, or both summed.
-Exchange = Literal["all", "binance", "bybit"]
+# The exchange views a page can show: Binance or Bybit on its own, All venues (Binance, Bybit and
+# OKX summed), or Hyperliquid with its liquidations estimated from All's.
+Exchange = Literal["all", "binance", "bybit", "hyperliquid"]
 # The collected WebSocket streams; each one's coverage is recorded on its own.
 Stream = Literal["binance_liq", "bybit_liq", "bybit_trades"]
 # The venues Coinalyze reports on, and the kinds of series read from it.

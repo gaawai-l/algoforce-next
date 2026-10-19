@@ -450,6 +450,33 @@ def test_qc_codes() -> None:
     assert r.series_missing == ["bybit:oi"]
 
 
+def test_window_qc_joins_qc_and_missing() -> None:
+    parts = [filler() for _ in range(12)]
+    rest: dict[str, Values] = {"bybit:price": [1.0] * (12 * H4), "binance:oi": [None] * (12 * H4)}
+    plain = grid(*parts, rest=rest, quarantined=1)
+    assert (plain.window_qc, plain.window_missing) == ((), ())
+    g = replace(
+        plain,
+        window_qc=("missing:okx:oi", "missing:hyperliquid:oi"),
+        window_missing=("okx:oi",),
+    )
+    r = compute_states(g, "4h", rules=V1)
+    # The windows' codes come after the buckets' ones and the archive's.
+    assert r.qc == [
+        "missing:binance:oi",
+        f"gap:binance:oi:{12 * H4 * STEP}",
+        "archive_quarantined:1",
+        "missing:okx:oi",
+        "missing:hyperliquid:oi",
+    ]
+    assert r.series_missing == ["binance:oi", "okx:oi"]
+    # Nothing else changes.
+    blank = {"qc": [], "series_missing": []}
+    assert r.model_copy(update=blank) == compute_states(plain, "4h", rules=V1).model_copy(
+        update=blank
+    )
+
+
 def test_blocks_limited_to_30d_view() -> None:
     # 40 days of blocks and a 15-bucket forming block: last - 30d falls inside block 60.
     r = compute_states(grid(*[filler() for _ in range(240)], filler(n=15)), "4h", rules=V1)

@@ -60,7 +60,8 @@ function status(direction: PerpsStatus["direction"]): PerpsStatus {
   };
 }
 
-// Each venue's own check, and the combined verdict the service derives from both.
+// Binance's and Bybit's own checks, OKX's ok, and the combined verdict the service derives from
+// all three.
 function checked(
   binance: PerpsStatus["direction"],
   bybit: PerpsStatus["direction"],
@@ -71,26 +72,19 @@ function checked(
     down: 25,
     long_share: verdict === "inverted" ? 0.2 : 0.8,
   });
-  const both = [binance, bybit];
+  const all = [binance, bybit, "ok"];
   return {
     ...status(
-      both.includes("inverted")
+      all.includes("inverted")
         ? "inverted"
-        : both.every((verdict) => verdict === "ok")
+        : all.every((verdict) => verdict === "ok")
           ? "ok"
           : "pending",
     ),
     direction_check: {
       binance: check(binance),
       bybit: check(bybit),
-      bybit_qty: {
-        events: 40,
-        min_qty: 0.001,
-        min_notional: 60,
-        max_notional: 250_000,
-        notional_in_range: true,
-        min_qty_matches: true,
-      },
+      okx: check("ok"),
     },
   };
 }

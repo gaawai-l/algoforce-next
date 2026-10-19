@@ -1,5 +1,6 @@
-"""REST worker for the perp states: backfills and refreshes the public series, derives the six
-state payloads, checks the liquidation direction and prunes (spec §2, §3.1, §3.7, §3.8, §6)."""
+"""REST worker for the perp states: backfills and refreshes the public series and Coinalyze's,
+derives the eight state payloads, checks the liquidation direction and prunes (spec §2, §3.1,
+§3.7, §3.8, §6; proposal §3)."""
 
 import json
 import logging
@@ -17,16 +18,16 @@ from pydantic import AwareDatetime
 from ..market import Model, timestamp
 from ..rules import Rule, Rules, rules_for_view
 from .coinalyze import KIND_VENUES, STEPS, Coinalyze, Interval, MarketCheck
-from .grid import BAR, build_grid, read_liquidations
-from .rows import CzKind, Exchange, Kline, OiPoint
+from .grid import BAR, VIEW_VENUES, build_grid
+from .rows import CzKind, CzPoint, CzVenue, Exchange, Kline, OiPoint
 from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, CZ_HOST, PerpsRest, RestError
 from .states import DAY, STEP, Grid, StatesResult, Window, compute_states
-from .store import LiquidationSizes, PerpsStore, Venue
+from .store import PerpsStore
 
 logger = logging.getLogger("wheelhouse.perps.sync")
 
 HOSTS = (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST)
-EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit")
+EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit", "hyperliquid")
 WINDOWS: tuple[Window, ...] = ("4h", "8h")
 # Binance keeps about 30 days of openInterestHist; older OI comes from the daily archive files.
 HIST_DAYS = 29
@@ -53,16 +54,13 @@ SLOT_OFFSET = 300
 IDLE_SECONDS = 30
 STOP_TIMEOUT_SECONDS = 25
 
-# The liquidation direction check (spec §6): buckets whose price moved at least this much in
-# 10 minutes and that have liquidations; the verdict needs this many falling ones.
-DIRECTION_MOVE = 0.003
+# The liquidation direction check (spec §6, proposal §3.3): closed 4h windows with liquidations
+# whose price moved at least this much from their first bucket to their last; the verdict needs
+# this many falling ones.
+DIRECTION_MOVE = 0.01
 DIRECTION_MIN_DOWN = 20
 DIRECTION_OK_ABOVE = 0.6
 DIRECTION_INVERTED_BELOW = 0.4
-# Bybit `v` in BTC: a single liquidation's notional lies in this range, and the smallest size is
-# the minimum order quantity.
-NOTIONAL_RANGE = (10.0, 50_000_000.0)
-MIN_QTY = 0.001
 
 
 def next_slot(at: datetime) -> datetime:
@@ -85,13 +83,14 @@ class StoredStates(Model):
     """One exchange view and window as the worker derives it.
 
     `states` is None when the view lacks a required REST series from `start` on; `reasons` then
-    name those series, and otherwise the ones with no value in the reference window.
+    name those series, and otherwise the ones with no value in the reference window; then the
+    venues it reads whose Coinalyze units failed their check.
     """
 
     exchange: Exchange
     window: Window
     start: AwareDatetime  # the grid's first bucket
-    reasons: list[str]  # series_missing:<venue>:<series>
+    reasons: list[str]  # series_missing:<venue>:<series>, coinalyze_units:<venue>
     states: StatesResult | None
     # The rules it was derived under; payloads stored before rules existed read as none.
     rules: list[Rule] = []
@@ -107,30 +106,20 @@ Verdict = Literal["ok", "inverted", "pending"]
 
 
 class DirectionCheck(Model):
-    """One venue's liquidation sides against the price (spec §6), as currently mapped."""
+    """One venue's liquidation sides against the price (spec §6, proposal §3.3)."""
 
     verdict: Verdict
-    samples: int  # buckets that moved at least DIRECTION_MOVE and have liquidations
+    samples: int  # 4h windows that moved at least DIRECTION_MOVE and have liquidations
     down: int  # of those, the falling ones
     long_share: float | None  # Σlong / (Σlong + Σshort) over the falling ones
 
 
-class QtyUnits(Model):
-    """Bybit's liquidation size `v` checked as BTC: notionals v·p and the smallest size."""
-
-    events: int
-    min_qty: float | None
-    min_notional: float | None
-    max_notional: float | None
-    # None while there are no events: nothing has been checked, which is not a failed check.
-    notional_in_range: bool | None
-    min_qty_matches: bool | None
-
-
 class Directions(Model):
+    """Each venue whose liquidations Coinalyze reports; pending for one excluded by its units."""
+
     binance: DirectionCheck
     bybit: DirectionCheck
-    bybit_qty: QtyUnits
+    okx: DirectionCheck
 
 
 def stored_hosts(state: Mapping[str, str | None]) -> dict[str, HostState]:
@@ -176,24 +165,26 @@ def _days[R: (Kline, OiPoint)](rows: Sequence[R], gap: Gap) -> list[list[R]]:
     return [days[day] for day in order]
 
 
-def direction_check(grid: Grid) -> DirectionCheck:
-    """Over one venue's grid: the 10m buckets whose price moved by DIRECTION_MOVE or more and
-    that have liquidations, and the long share of those where it fell."""
+def direction_check(
+    liq: Mapping[int, CzPoint], spot: Mapping[int, tuple[float, float | None, float | None]]
+) -> DirectionCheck:
+    """Over one venue's closed 4h windows: those with liquidations whose price, the closes of the
+    spot bars opening at w+5m and w+4h-5m (its first and last bucket), moved by DIRECTION_MOVE or
+    more, and the long share of those where it fell. Filled windows are left out."""
     samples = down = 0
     longs = shorts = 0.0
-    for i in range(1, len(grid.price)):
-        before, after = grid.price[i - 1], grid.price[i]
-        lliq, sliq = grid.long_liq[i], grid.short_liq[i]
-        if before is None or after is None or before <= 0 or lliq is None or sliq is None:
+    for w, point in sorted(liq.items()):
+        first, last = spot.get(w + BAR), spot.get(w + H4 - BAR)
+        if point.filled or first is None or last is None or first[0] <= 0:
             continue
-        move = after / before - 1
-        if abs(move) < DIRECTION_MOVE or lliq + sliq <= 0:
+        move = last[0] / first[0] - 1
+        if abs(move) < DIRECTION_MOVE or point.a + point.b <= 0:
             continue
         samples += 1
         if move < 0:
             down += 1
-            longs += lliq
-            shorts += sliq
+            longs += point.a
+            shorts += point.b
     share = longs / (longs + shorts) if down else None
     verdict: Verdict = "pending"
     if share is not None and down >= DIRECTION_MIN_DOWN:
@@ -204,27 +195,16 @@ def direction_check(grid: Grid) -> DirectionCheck:
     return DirectionCheck(verdict=verdict, samples=samples, down=down, long_share=share)
 
 
-def qty_units(sizes: LiquidationSizes) -> QtyUnits:
-    """Sizes and notionals of the distinct Bybit liquidations whose `v` and `p` are numbers."""
-    low, high = NOTIONAL_RANGE
-    qty, lowest, highest = sizes.min_qty, sizes.min_notional, sizes.max_notional
-    # All three are None exactly when there are no events.
-    return QtyUnits(
-        events=sizes.events,
-        min_qty=qty,
-        min_notional=lowest,
-        max_notional=highest,
-        notional_in_range=(
-            None if lowest is None or highest is None else low <= lowest and highest <= high
-        ),
-        min_qty_matches=None if qty is None else math.isclose(qty, MIN_QTY),
-    )
-
-
 def stored_markets(state: Mapping[str, str | None]) -> list[MarketCheck]:
     """The last unit check of the Coinalyze symbols; empty until one has been read."""
     stored = state.get("cz_markets")
     return [MarketCheck.model_validate(check) for check in json.loads(stored)] if stored else []
+
+
+def _excluded(state: Mapping[str, str | None]) -> frozenset[CzVenue]:
+    """The venues whose Coinalyze data is not used: their last unit check failed. Empty before a
+    check has been read (proposal §3.2)."""
+    return frozenset(check.venue for check in stored_markets(state) if not check.ok)
 
 
 class _Stopped(Exception):
@@ -354,8 +334,8 @@ class PerpsSync:
             self._record_hosts(run, hosts, clock())
             if self.stopping.is_set():
                 raise _Stopped  # nothing is derived once a stop is asked for
-            grids = self._derive(start, clock())
-            self._check_directions(grids, start)
+            self._derive(start, clock())
+            self._check_directions(start)
         finally:
             # Retention holds even when a step above fails unexpectedly.
             self.store.prune(
@@ -614,37 +594,34 @@ class PerpsSync:
     def _derive(self, start: int, at: datetime) -> dict[Exchange, Grid | list[str]]:
         return derive_states(self.store, start=start, at=at, rules=self.rules)
 
-    def _check_directions(self, grids: Mapping[Exchange, Grid | list[str]], start: int) -> None:
-        checks: dict[Venue, DirectionCheck] = {}
-        for venue in ("binance", "bybit"):
-            grid = grids[venue]
-            checks[venue] = (
-                direction_check(grid)
-                if isinstance(grid, Grid)
-                else DirectionCheck(verdict="pending", samples=0, down=0, long_share=None)
-            )
-        result = Directions(
-            binance=checks["binance"],
-            bybit=checks["bybit"],
-            bybit_qty=qty_units(self.store.liquidation_sizes(start)),
-        )
+    def _check_directions(self, start: int) -> None:
+        """Each venue's check over the 4hour liquidations of the whole grid."""
+        excluded = _excluded(self.store.state())
+        spot = self.store.klines("bybit", start)
+
+        def check(venue: CzVenue) -> DirectionCheck:
+            if venue in excluded:
+                return DirectionCheck(verdict="pending", samples=0, down=0, long_share=None)
+            return direction_check(self.store.cz_series("liq", H4, venue, start), spot)
+
+        result = Directions(binance=check("binance"), bybit=check("bybit"), okx=check("okx"))
         self.store.set_state(direction_check=result.model_dump_json())
 
 
 def derive_states(
     store: PerpsStore, *, start: int, at: datetime, rules: Rules
 ) -> dict[Exchange, Grid | list[str]]:
-    """Store the six payloads, derived from bucket `start` under `rules` and computed at `at`;
-    return each view's grid, or the series it lacks."""
+    """Store the eight payloads, derived from bucket `start` under `rules` and computed at `at`;
+    return each view's grid, or the series it lacks. A venue whose stored unit check failed is
+    left out of every view, and those that read it say so."""
     # Only the rules the payload records are applied.
     applied = rules_for_view("perps", rules)
+    excluded = _excluded(store.state())
     grids: dict[Exchange, Grid | list[str]] = {}
-    # Each venue's liquidations are read once: the All view reuses them.
-    venues: tuple[Venue, ...] = ("binance", "bybit")
-    liquidations = {venue: read_liquidations(store, venue, start) for venue in venues}
     for exchange in EXCHANGES:
-        grid = build_grid(store, exchange, start, liquidations)
+        grid = build_grid(store, exchange, start, excluded)
         grids[exchange] = grid
+        units = [f"coinalyze_units:{v}" for v in VIEW_VENUES[exchange] if v in excluded]
         for window in WINDOWS:
             states: StatesResult | None = None
             missing = grid if isinstance(grid, list) else []
@@ -655,7 +632,7 @@ def derive_states(
                 exchange=exchange,
                 window=window,
                 start=datetime.fromtimestamp(start, UTC),
-                reasons=[f"series_missing:{key}" for key in missing],
+                reasons=[f"series_missing:{key}" for key in missing] + units,
                 states=states,
                 rules=applied,
             )

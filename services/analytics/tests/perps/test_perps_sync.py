@@ -1,16 +1,14 @@
 """The perps REST worker: schedule, head and tail gaps, the OI hist/archive split, per-host
-backoff, the six derived payloads, the liquidation direction check and pruning."""
+backoff, the eight derived payloads, the liquidation direction check and pruning."""
 
 import io
 import json
 import logging
-import math
-import random
 import shutil
 import threading
 import time
 import zipfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -56,17 +54,19 @@ from wheelhouse_service.perps.store import PerpsStore, Venue
 from wheelhouse_service.perps.sync import (
     CZ_CALLS_PER_MINUTE,
     CZ_SETTLE,
+    DIRECTION_MOVE,
     H4,
     RETENTION_DAYS,
+    DirectionCheck,
     Directions,
     HostState,
     PerpsSync,
-    QtyUnits,
     StoredStates,
+    derive_states,
     derived_key,
+    direction_check,
     gaps,
     next_slot,
-    qty_units,
     stored_markets,
 )
 from wheelhouse_service.rules import ALL_RULES, Rules
@@ -79,7 +79,7 @@ NOW_TS = int(NOW.timestamp())
 TODAY = NOW_TS // DAY * DAY
 END = NOW_TS + 1  # fetch ranges are half-open and reach now
 LAST_BAR = NOW_TS // BAR * BAR - BAR  # the last closed 5m bar opens at 11:55
-EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit")
+EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit", "hyperliquid")
 WINDOWS: tuple[Window, ...] = ("4h", "8h")
 ARCHIVE_SHIFT = 0.5  # archive OI differs from hist OI so that the source of a row shows
 M5 = 300
@@ -117,8 +117,8 @@ class Clock:
 
 
 def close(t: int) -> float:
-    """The close of the 5m bar opening at t: 0.5% lower in odd 10m buckets, so every bucket moves
-    by more than 0.3% and the odd ones fall."""
+    """The close of the 5m bar opening at t: 0.5% lower in odd 10m buckets. A 4h window's first
+    bucket is even and its last odd, so the window falls 0.5%, short of DIRECTION_MOVE."""
     return 59_700.0 if t // STEP % 2 else 60_000.0
 
 
@@ -144,6 +144,9 @@ class FakeRest(PerpsRest):
         self.absent: set[date] = set()
         self.broken: set[date] = set()  # archive days answered with a 500
         self.bybit_oi_rows = True
+        # By 4h window: a factor on the spot closes of its second half, which moves it by more
+        # than DIRECTION_MOVE.
+        self.moves: dict[int, float] = {}
 
     def named(self, name: str) -> list[tuple[object, ...]]:
         return [call[1:] for call in self.calls if call[0] == name]
@@ -200,10 +203,14 @@ class FakeRest(PerpsRest):
         ]
         return points, False
 
+    def spot_close(self, t: int) -> float:
+        window = t // H4 * H4
+        return close(t) * self.moves.get(window, 1.0) if t - window >= H4 // 2 else close(t)
+
     def bybit_spot_klines(self, start: int, end: int) -> list[Kline]:
         self._ask(BYBIT_HOST, "bybit_spot_klines", start, end)
         return [
-            Kline(t=t, close=close(t), volume=None, taker_buy=None, source="bybit_spot")
+            Kline(t=t, close=self.spot_close(t), volume=None, taker_buy=None, source="bybit_spot")
             for t in stamps(start, end)
             if t + BAR <= self._now()
         ]
@@ -239,6 +246,19 @@ def clock_ts(hour: int, minute: int) -> int:
 
 def cz_point(t: int, revision: int = 0) -> CzPoint:
     return CzPoint(t=t, a=1.0 + t % 97 + revision, b=2.0 + t % 89)
+
+
+def seed_cz(store: PerpsStore, first: int, last: int = NEWEST) -> None:
+    """Closed 4hour rows of every kind and venue, a window each from `first` to `last`."""
+    for kind, venues in KIND_VENUES.items():
+        for venue in venues:
+            store.upsert_cz(kind, H4, venue, [cz_point(t) for t in range(first, last + 1, H4)])
+
+
+def liquidate(
+    store: PerpsStore, venue: CzVenue, windows: Iterable[int], a: float, b: float
+) -> None:
+    store.upsert_cz("liq", H4, venue, [CzPoint(t=w, a=a, b=b) for w in windows])
 
 
 CZ_CHECKS = [
@@ -785,9 +805,14 @@ def test_gaps_from_stamps_equal_gaps_from_all_rows(store: PerpsStore, stored: li
     assert gaps(store.stamps("kline", "bybit", start), start, END) == gaps(rows, start, END)
 
 
-def test_derives_six_payloads(store: PerpsStore, rest: FakeRest, clock: Clock):
-    worker(store, rest, clock).run_once()
+def test_derive_states_stores_eight_payloads(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    cz_worker(store, rest, clock, cz, meter).run_once()
 
+    assert sync_module.EXCHANGES == EXCHANGES
+    with store.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM derived").fetchone()[0] == 8
     for exchange in EXCHANGES:
         for window in WINDOWS:
             found = store.derived(derived_key(exchange, window))
@@ -801,6 +826,51 @@ def test_derives_six_payloads(store: PerpsStore, rest: FakeRest, clock: Clock):
             assert stored.states.window == window
             # Price reads the bar opening at 11:55, OI the row at 12:00: 11:50 is the last bucket.
             assert stored.states.last == clock_time(11, 50)
+            # Every window of Coinalyze's OI is there, the 08:00 one closed by 11:50.
+            assert stored.states.qc == []
+
+
+def test_units_mismatch_excludes_the_venue_and_gives_a_reason(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    start = start_of(2)
+    rest.moves = dict.fromkeys(range(start, NEWEST + 1, H4), 0.98)  # every window falls
+    cz.checks = [
+        check.model_copy(update={"ok": False}) if check.venue == "okx" else check
+        for check in CZ_CHECKS
+    ]
+    cz_worker(store, rest, clock, cz, meter).run_once()
+
+    # OKX's rows are stored, but no view reads them: the two views with OKX in them say why.
+    assert store.cz_latest("oi", H4)["okx"] == NEWEST
+    for exchange in ("all", "hyperliquid"):
+        for window in WINDOWS:
+            stored = payload(store, exchange, window)
+            assert stored.reasons == ["series_missing:okx:oi", "coinalyze_units:okx"]
+            assert stored.states is not None
+            assert not any(block.liq_covered for block in stored.states.blocks)
+    for exchange in ("binance", "bybit"):
+        stored = payload(store, exchange, "4h")
+        assert stored.reasons == [] and stored.states is not None
+        assert all(block.liq_covered for block in stored.states.blocks)
+    # OKX's direction is not checked; the others are.
+    check = Directions.model_validate_json(store.state()["direction_check"] or "")
+    assert check.okx == DirectionCheck(verdict="pending", samples=0, down=0, long_share=None)
+    assert check.binance.samples > 0 and check.bybit.samples > 0
+
+    # Hyperliquid's units fail instead: only its own view reads it.
+    checks = [
+        check.model_copy(update={"ok": False}) if check.venue == "hyperliquid" else check
+        for check in CZ_CHECKS
+    ]
+    store.set_state(cz_markets=json.dumps([check.model_dump(mode="json") for check in checks]))
+    derive_states(store, start=start, at=NOW, rules=V1)
+    assert payload(store, "hyperliquid", "4h").reasons == [
+        "series_missing:hyperliquid:oi",
+        "coinalyze_units:hyperliquid",
+    ]
+    for exchange in ("all", "binance", "bybit"):
+        assert payload(store, exchange, "4h").reasons == []
 
 
 def test_missing_series_stores_unavailable_marker(store: PerpsStore, rest: FakeRest, clock: Clock):
@@ -817,32 +887,50 @@ def test_missing_series_stores_unavailable_marker(store: PerpsStore, rest: FakeR
         assert payload(store, "binance", window).states is not None
 
 
-def test_direction_check_pending_ok_inverted_and_v_units(
+def test_direction_check_counts_windows_that_moved_one_percent():
+    w = TODAY
+    assert DIRECTION_MOVE == 0.01
+
+    def spot(first: float, last: float) -> dict[int, tuple[float, float | None, float | None]]:
+        # The window's first and last bucket prices: the bars opening at w+5m and w+4h-5m.
+        return {
+            w: (1.0, None, None),
+            w + BAR: (first, None, None),
+            w + H4 - BAR: (last, None, None),
+        }
+
+    def samples(liq: CzPoint, prices: dict[int, tuple[float, float | None, float | None]]) -> int:
+        return direction_check({w: liq}, prices).samples
+
+    liq = CzPoint(t=w, a=1.0, b=0.0)
+    assert samples(liq, spot(100.0, 99.0)) == 1  # 1% exactly
+    assert samples(liq, spot(100.0, 101.0)) == 1
+    assert samples(liq, spot(100.0, 99.1)) == 0
+    assert samples(liq, {w + BAR: (100.0, None, None)}) == 0  # no last price
+    # Nothing liquidated, or an interval Coinalyze left out: no sample.
+    assert samples(CzPoint(t=w, a=0.0, b=0.0), spot(100.0, 98.0)) == 0
+    assert samples(CzPoint(t=w, a=1.0, b=0.0, filled=True), spot(100.0, 98.0)) == 0
+
+
+def test_direction_check_pending_ok_inverted_per_window(
     store: PerpsStore, rest: FakeRest, clock: Clock
 ):
-    start = start_of(2)
-    for stream in ("binance_liq", "bybit_liq"):
-        store.extend_coverage(store.open_coverage(stream, 0, start), NOW_TS)
-    falling = [start + (2 * k + 1) * STEP for k in range(25)]  # odd buckets fall 0.5%
-    rising = start + 2 * STEP
-
-    def liquidate(buckets: list[int]) -> None:
-        for t in buckets:
-            store.insert_liquidations(
-                "binance",
-                0,
-                [
-                    liquidation("binance", t + 60, "SELL", "1.000"),
-                    liquidation("binance", t + 120, "BUY", "0.100"),
-                ],
-            )
-            # Bybit `Sell` maps to shorts: on falling prices that reads as inverted.
-            store.insert_liquidations("bybit", 0, [liquidation("bybit", t + 60, "Sell", "1.000")])
-
-    liquidate(falling[:19])
-    # A rising bucket is sampled but stays out of the metric.
-    store.insert_liquidations("bybit", 0, [liquidation("bybit", rising + 60, "Buy", "0.001")])
-    sync = worker(store, rest, clock)
+    windows = list(range(start_of(10), NEWEST + 1, H4))
+    falling = windows[2:52:2]  # 25 windows that fall 2.5%
+    rising, flat = windows[1], windows[3]
+    rest.moves = dict.fromkeys(falling, 0.98) | {rising: 1.02}
+    sides: dict[CzVenue, tuple[float, float]] = {
+        "binance": (1.0, 0.1),
+        "bybit": (0.0, 1.0),  # shorts on falling prices: that reads as inverted
+        "okx": (0.5, 0.5),
+    }
+    for venue, (longs, shorts) in sides.items():
+        liquidate(store, venue, falling[:19], longs, shorts)
+    # A rising window is sampled but stays out of the metric; one that moved 0.5% is not.
+    liquidate(store, "bybit", [rising, flat], 0.001, 0.0)
+    # Nothing liquidated in a falling window: no sample.
+    store.upsert_cz("liq", H4, "okx", [CzPoint(t=falling[19], a=0.0, b=0.0, filled=True)])
+    sync = worker(store, rest, clock, horizon_days=10)
     sync.run_once()
 
     check = Directions.model_validate_json(store.state()["direction_check"] or "")
@@ -854,8 +942,10 @@ def test_direction_check_pending_ok_inverted_and_v_units(
     assert check.binance.long_share == pytest.approx(1 / 1.1)
     assert (check.bybit.verdict, check.bybit.samples, check.bybit.down) == ("pending", 20, 19)
     assert check.bybit.long_share == 0.0
+    assert (check.okx.verdict, check.okx.samples, check.okx.down) == ("pending", 19, 19)
 
-    liquidate(falling[19:])
+    for venue, (longs, shorts) in sides.items():
+        liquidate(store, venue, falling[19:], longs, shorts)
     clock.advance(minutes=10)
     sync.run_once()
 
@@ -863,21 +953,8 @@ def test_direction_check_pending_ok_inverted_and_v_units(
     assert (check.binance.verdict, check.binance.down) == ("ok", 25)
     assert check.binance.long_share == pytest.approx(1 / 1.1)
     assert (check.bybit.verdict, check.bybit.down) == ("inverted", 25)
-    units = check.bybit_qty
-    assert (units.events, units.min_qty) == (26, 0.001)
-    assert units.min_notional == pytest.approx(59.7)
-    assert units.max_notional == pytest.approx(59_700.0)
-    assert units.notional_in_range and units.min_qty_matches
-
-    # A size in contracts of $1 would show as an implausible notional.
-    store.insert_liquidations("bybit", 0, [liquidation("bybit", rising + 120, "Buy", "1000.000")])
-    clock.advance(minutes=10)
-    sync.run_once()
-
-    units = Directions.model_validate_json(store.state()["direction_check"] or "").bybit_qty
-    assert units.max_notional == pytest.approx(59_700_000.0)
-    assert not units.notional_in_range
-    assert units.min_qty_matches
+    # Between 0.4 and 0.6 the sides are not told apart.
+    assert (check.okx.verdict, check.okx.down, check.okx.long_share) == ("pending", 25, 0.5)
 
 
 def test_prune_keeps_125d_and_1h_trade_ids(store: PerpsStore, rest: FakeRest, clock: Clock):
@@ -913,68 +990,6 @@ def test_prune_keeps_125d_and_1h_trade_ids(store: PerpsStore, rest: FakeRest, cl
         assert [row[0] for row in db.execute("SELECT id FROM trade_ids")] == ["30m"]
     # Only the ids go after an hour; the 10m sums stay.
     assert len(store.trades("bybit", 0)) == 2
-
-
-def test_qty_units_unknown_without_events(store: PerpsStore):
-    units = qty_units(store.liquidation_sizes(0))
-
-    # Nothing to check yet: the checks are unknown, not failed.
-    assert units.events == 0
-    assert (units.min_qty, units.min_notional, units.max_notional) == (None, None, None)
-    assert units.notional_in_range is None
-    assert units.min_qty_matches is None
-
-
-def reference_qty_units(events: Sequence[tuple[int, float, str, str]]) -> QtyUnits:
-    """The check as it was before the fields were stored: every Bybit event parsed in Python."""
-    sizes: dict[str, tuple[float, float]] = {}
-    for _, _, raw_json, key in events:
-        raw = json.loads(raw_json)
-        try:
-            qty, price = float(raw["v"]), float(raw["p"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if math.isfinite(qty) and math.isfinite(price):
-            sizes[key] = (qty, qty * price)
-    qtys = [qty for qty, _ in sizes.values()]
-    notionals = [notional for _, notional in sizes.values()]
-    return QtyUnits(
-        events=len(sizes),
-        min_qty=min(qtys, default=None),
-        min_notional=min(notionals, default=None),
-        max_notional=max(notionals, default=None),
-        notional_in_range=10 <= min(notionals) and max(notionals) <= 5e7 if sizes else None,
-        min_qty_matches=math.isclose(min(qtys), 0.001) if sizes else None,
-    )
-
-
-def test_qty_units_from_sql_equals_the_python_check(store: PerpsStore):
-    start = start_of(2)
-    rng = random.Random(7)
-
-    def event(ts: int, qty: str, price: str | None) -> RawLiquidation:
-        raw: dict[str, object] = {"T": ts * 1000, "s": "BTCUSDT", "S": "Buy", "v": qty}
-        if price is not None:
-            raw["p"] = price
-        return RawLiquidation(
-            event_ts=ts, key=f"{ts * 1000}|Buy|{qty}|{price}", raw=json.dumps(raw)
-        )
-
-    for n in range(200):
-        ts = start + rng.randrange(-DAY, 2 * DAY)
-        qty = rng.choice(("0.001", "0.002", "0.150", "3.000", "1000.000"))
-        price = rng.choice(("59700.0", "61234.5", "0.5", "n/a", None))
-        row = event(ts, qty, price)
-        for conn in rng.choice(((0,), (1,), (0, 1), (0, 0))):
-            store.insert_liquidations("bybit", conn, [row])
-        if n == 100:
-            # Every case so far, and again once more events have come in.
-            assert qty_units(store.liquidation_sizes(start)) == reference_qty_units(
-                store.liquidations("bybit", start)
-            )
-    units = qty_units(store.liquidation_sizes(start))
-    assert units == reference_qty_units(store.liquidations("bybit", start))
-    assert units.events > 50 and units.notional_in_range is False
 
 
 def test_prune_runs_after_a_failed_round(
@@ -1050,7 +1065,7 @@ def test_rules_reach_compute_states_and_the_payloads(
     # Every rule is on, and O1 and O6 are the ones implemented for the perps.
     worker(store, rest, clock, rules=ALL_RULES).run_once()
 
-    assert seen == [O1O6] * 6
+    assert seen == [O1O6] * 8
     for exchange in EXCHANGES:
         for window in WINDOWS:
             stored = payload(store, exchange, window)
@@ -1061,7 +1076,7 @@ def test_rules_reach_compute_states_and_the_payloads(
     seen.clear()
     clock.advance(minutes=10)
     worker(store, rest, clock, rules=V1).run_once()
-    assert seen == [V1] * 6
+    assert seen == [V1] * 8
     stored = payload(store, "all", "4h")
     assert stored.rules == []
     assert stored.states is not None
@@ -1087,7 +1102,7 @@ def test_o1_reaches_compute_states_and_leaves_the_forming_block_out(
         return payload(store, "all", "4h")
 
     v1, o1 = derived(V1), derived(O1)
-    assert seen == [V1] * 6 + [O1] * 6
+    assert seen == [V1] * 8 + [O1] * 8
     assert (v1.rules, o1.rules) == ([], ["O1"])
     assert v1.states is not None and o1.states is not None
     forming = o1.states.blocks[-1]
@@ -1100,29 +1115,24 @@ def test_o1_reaches_compute_states_and_leaves_the_forming_block_out(
 
 
 def full_round(directory: Path, horizon_days: int | None = None) -> PerpsStore:
-    """One v1 round at NOW, with both liquidation streams covered from 121 days back and 25
-    falling buckets with liquidations 110 days back, before the 90-day reference."""
+    """One v1 round at NOW over Coinalyze's 4hour rows of every kind from 121 days back, with 25
+    windows 110 days back, before the 90-day reference, that fell 2.5% with liquidations: mostly
+    longs at Binance and OKX, shorts at Bybit. Every other window moved 0.5%."""
     directory.mkdir(parents=True, exist_ok=True)
     store = PerpsStore(directory / "perps.sqlite")
-    start = start_of(120)
-    for stream in ("binance_liq", "bybit_liq"):
-        store.extend_coverage(store.open_coverage(stream, 0, start), NOW_TS)
+    seed_cz(store, start_of(120))
     old = TODAY - 110 * DAY
-    for t in (old + (2 * k + 1) * STEP for k in range(25)):  # odd buckets fall 0.5%
-        store.insert_liquidations(
-            "binance",
-            0,
-            [
-                liquidation("binance", t + 60, "SELL", "1.000"),
-                liquidation("binance", t + 120, "BUY", "0.100"),
-            ],
-        )
-        store.insert_liquidations("bybit", 0, [liquidation("bybit", t + 60, "Sell", "1.000")])
+    falling = range(old, old + 25 * H4, H4)
+    liquidate(store, "binance", falling, 1.0, 0.1)
+    liquidate(store, "bybit", falling, 0.0, 1.0)
+    liquidate(store, "okx", falling, 1.0, 0.1)
     clock = Clock()
+    rest = FakeRest(clock)
+    rest.moves = dict.fromkeys(falling, 0.98)
     if horizon_days is None:
-        sync = PerpsSync(store, FakeRest(clock), clock=clock, rules=V1)
+        sync = PerpsSync(store, rest, clock=clock, rules=V1)
     else:
-        sync = worker(store, FakeRest(clock), clock, horizon_days=horizon_days)
+        sync = worker(store, rest, clock, horizon_days=horizon_days)
     assert sync.run_once()
     return store
 
@@ -1143,28 +1153,27 @@ def test_round_backfills_121_days_and_checks_directions_over_the_whole_grid(
             assert payload(store, exchange, window).start == moment(start_of(120))
     assert min(store.klines("bybit", 0)) == start_of(120)
 
-    # The liquidations 110 days back lie in the grid, though not in the 90-day reference: the
-    # direction check and Bybit's size units now read the whole grid, 121 days.
+    # The windows 110 days back lie in the grid, though not in the 90-day reference: the
+    # direction check reads the whole grid, 121 days, each venue on its own.
     check = Directions.model_validate_json(store.state()["direction_check"] or "")
-    assert (check.binance.verdict, check.binance.down) == ("ok", 25)
-    assert (check.bybit.verdict, check.bybit.down) == ("inverted", 25)
-    assert check.bybit_qty.events == 25
+    assert (check.binance.verdict, check.binance.samples, check.binance.down) == ("ok", 25, 25)
+    assert (check.bybit.verdict, check.bybit.samples, check.bybit.down) == ("inverted", 25, 25)
+    assert (check.okx.verdict, check.okx.samples, check.okx.down) == ("ok", 25, 25)
     # A 90-day backfill reads 91 days: it saw none of them ...
     store_90 = full_round(tmp_path / "horizon-90", horizon_days=90)
     check_90 = Directions.model_validate_json(store_90.state()["direction_check"] or "")
-    assert (check_90.binance.samples, check_90.bybit.samples, check_90.bybit_qty.events) == (
-        0,
-        0,
-        0,
-    )
+    assert (check_90.binance.samples, check_90.bybit.samples, check_90.okx.samples) == (0, 0, 0)
     # ... and its v1 states, thresholds and tables are the same as those of the 121 days.
     for exchange in EXCHANGES:
         for window in WINDOWS:
             states = payload(store, exchange, window).states
             assert states is not None
             assert states == payload(store_90, exchange, window).states
-    judged = payload(store, "binance", "4h").states
-    assert judged is not None and not judged.collecting
+    # Coinalyze's rows cover the grid: every view is judged, none lacks a series.
+    for exchange in EXCHANGES:
+        judged = payload(store, exchange, "4h")
+        assert judged.reasons == []
+        assert judged.states is not None and not judged.states.collecting
 
 
 def test_derive_command_keeps_the_grid_start_of_the_stored_payloads(

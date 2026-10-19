@@ -49,14 +49,7 @@ function status(view: PerpStatesView): PerpsStatus {
     direction_check: {
       binance: check,
       bybit: check,
-      bybit_qty: {
-        events: 40,
-        min_qty: 0.001,
-        min_notional: 60,
-        max_notional: 250_000,
-        notional_in_range: true,
-        min_qty_matches: true,
-      },
+      okx: check,
     },
   };
 }
@@ -338,7 +331,7 @@ describe("perps status contract", () => {
     const parsed = perpsStatusSchema.parse(status(fullSample()));
     expect(parsed.direction).toBe("ok");
     expect(parsed.hosts[1].backoff_until).toBe("2026-10-17T11:10:00Z");
-    expect(parsed.direction_check?.bybit_qty.events).toBe(40);
+    expect(parsed.direction_check?.okx.verdict).toBe("ok");
     expect(parsed.collectors).toHaveLength(3);
     expect(parsed.collectors[0].problems).toEqual({ rotated: 2, stalled: 1 });
     expect(parsed.collectors[1].problems).toEqual({});
@@ -358,19 +351,18 @@ describe("perps status contract", () => {
     expect(parsed.direction_check).toBeNull();
   });
 
-  it("keeps an unchecked Bybit size unit null, not a failed check", () => {
+  it("keeps an unchecked venue's long share null, not a failed check", () => {
     const payload = status(fullSample());
     if (!payload.direction_check) throw new Error("no direction check");
-    payload.direction_check.bybit_qty = {
-      events: 0,
-      min_qty: null,
-      min_notional: null,
-      max_notional: null,
-      notional_in_range: null,
-      min_qty_matches: null,
+    payload.direction_check.okx = {
+      verdict: "pending",
+      samples: 0,
+      down: 0,
+      long_share: null,
     };
     const parsed = perpsStatusSchema.parse(payload);
-    expect(parsed.direction_check?.bybit_qty.notional_in_range).toBeNull();
+    expect(parsed.direction_check?.okx.long_share).toBeNull();
+    expect(parsed.direction_check?.okx.verdict).toBe("pending");
   });
 
   it("rejects a verdict or a stream outside the contract", () => {

@@ -1,23 +1,37 @@
-"""Stored perp inputs folded into the 10m grid: mapping, data edge, coverage and liquidations."""
+"""Stored perp inputs folded into the 10m grid: mapping, data edge, Coinalyze's windows placed on
+the buckets, the composite views and the Hyperliquid estimate."""
 
 import csv
 import json
-import random
-from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from wheelhouse_service.perps.grid import REQUIRED, build_grid, read_liquidations
-from wheelhouse_service.perps.rows import Exchange, Kline, OiPoint, RawLiquidation, Stream, Trade
-from wheelhouse_service.perps.states import Grid
+from wheelhouse_service.perps.grid import (
+    H4,
+    REQUIRED,
+    VIEW_VENUES,
+    build_grid,
+    cz_delta,
+    cz_liquidations,
+    cz_oi,
+    estimate_liquidations,
+)
+from wheelhouse_service.perps.rows import CzKind, CzPoint, CzVenue, Exchange, Kline, OiPoint
+from wheelhouse_service.perps.states import Grid, compute_states
 from wheelhouse_service.perps.store import PerpsStore, Venue
+from wheelhouse_service.rules import Rules
 
 STEP = 600
+DAY = 86_400
+M5 = 300
 T0 = 1_792_022_400  # 2026-10-15 00:00 UTC
+W = T0  # a 4h window
 FIXTURE = Path(__file__).parent / "fixtures" / "public-2026-10-15"
+V1: Rules = frozenset()
+O1O6: Rules = frozenset({"O1", "O6"})
 
 
 def at(hm: str) -> int:
@@ -84,41 +98,6 @@ def rest(store: PerpsStore, last: int) -> None:
     oi(store, "bybit", T0, last + STEP, value=500.0)
 
 
-def cover(store: PerpsStore, stream: Stream, start: float, end: float, conn: int = 0) -> None:
-    store.extend_coverage(store.open_coverage(stream, conn, start), end)
-
-
-def binance_liq(
-    ts: float, side: str, z: str, status: str = "FILLED", ap: str = "80000"
-) -> RawLiquidation:
-    ms = int(ts * 1000)
-    raw = {
-        "s": "BTCUSDT",
-        "S": side,
-        "o": "LIMIT",
-        "f": "IOC",
-        "q": z,
-        "p": "79900",
-        "ap": ap,
-        "X": status,
-        "l": z,
-        "z": z,
-        "T": ms,
-        "ps": "BTCUSDT",
-        "st": 1,
-    }
-    return RawLiquidation(event_ts=ts, key=f"{ms}|{side}|{z}|{ap}", raw=json.dumps(raw))
-
-
-def bybit_liq(ts: float, side: str, v: str, p: str = "80000") -> RawLiquidation:
-    ms = int(ts * 1000)
-    raw = {"T": ms, "s": "BTCUSDT", "S": side, "v": v, "p": p}
-    return RawLiquidation(event_ts=ts, key=f"{ms}|{side}|{v}|{p}", raw=json.dumps(raw))
-
-
-# --- Public fixture, 2026-10-15. ---
-
-
 def load_public(store: PerpsStore, *, hist: bool = True) -> None:
     klines = json.loads((FIXTURE / "binance_klines_5m.json").read_text())
     store.upsert_klines(
@@ -179,7 +158,7 @@ def test_grid_public_1015(store: PerpsStore):
     assert grid.oi[idx("23:40")] == 94418.15
     assert grid.vd[idx("23:40")] == pytest.approx((2 * 30.440 - 70.575) + (2 * 56.774 - 87.320))
     assert None not in grid.price + grid.oi + grid.vd
-    # Nothing collected: liquidations uncovered, never 0; Binance's delta needs no collector.
+    # Nothing from Coinalyze: liquidations uncovered, never 0; Binance's delta is its klines'.
     assert set(grid.long_liq) == set(grid.short_liq) == {None}
     assert not any(grid.liq_covered)
     assert all(grid.vd_covered)
@@ -254,100 +233,6 @@ def test_price_reads_closing_bar_and_vd_needs_both_bars(store: PerpsStore):
     assert grid.vd[idx("00:10")] == 2 * (2 * 6.0 - 10.0)
 
 
-def test_bucket_coverage_union_one_connection_down_vs_both(store: PerpsStore):
-    rest(store, at("01:50"))
-    # Connection 0 drops at 1500 s and again at 3200 s; connection 1 is down from 3000 s to 3700 s.
-    cover(store, "binance_liq", T0, T0 + 1500, conn=0)
-    cover(store, "binance_liq", T0 + 1700, T0 + 3200, conn=0)
-    cover(store, "binance_liq", T0 + 3800, T0 + 6000, conn=0)
-    cover(store, "binance_liq", T0 + 60, T0 + 3000, conn=1)
-    cover(store, "binance_liq", T0 + 3700, T0 + 6000, conn=1)
-
-    grid = grid_of(store, "binance")
-    # Union: [0, 3200] and [3700, 6000]. A bucket counts only if it lies wholly inside.
-    expected = [True] * 5 + [False] * 2 + [True] * 3 + [False] * 2
-    assert grid.liq_covered == expected
-    assert grid.long_liq == [0.0 if c else None for c in expected]
-    assert grid.short_liq == grid.long_liq
-
-
-def test_liquidation_max_count_per_connection(store: PerpsStore):
-    rest(store, at("00:50"))
-    cover(store, "binance_liq", T0, T0 + 3600, conn=0)
-    cover(store, "binance_liq", T0, T0 + 3600, conn=1)
-    twin = binance_liq(T0 + 100, "SELL", "0.5")
-    missed = binance_liq(T0 + 200, "SELL", "0.2")
-    # Two real liquidations share a key; connection 1 saw one of them and one that 0 missed.
-    store.insert_liquidations("binance", 0, [twin, twin])
-    store.insert_liquidations("binance", 1, [twin, missed])
-
-    grid = grid_of(store, "binance")
-    assert grid.long_liq[0] == pytest.approx(2 * 0.5 + 0.2)
-    assert grid.short_liq[0] == 0.0
-    assert grid.long_liq[1:] == [0.0] * 5
-
-
-def test_binance_filled_only_and_sides(store: PerpsStore):
-    rest(store, at("00:50"))
-    cover(store, "binance_liq", T0, T0 + 3600)
-    store.insert_liquidations(
-        "binance",
-        0,
-        [
-            binance_liq(T0 + 10, "SELL", "0.5"),  # a long position liquidated
-            binance_liq(T0 + 20, "BUY", "0.3"),  # a short position liquidated
-            binance_liq(T0 + 30, "SELL", "0.1", status="PARTIALLY_FILLED"),
-            binance_liq(T0 + 610, "BUY", "0.7", status="NEW"),
-            binance_liq(T0 + 620, "BUY", "0.4"),
-        ],
-    )
-    grid = grid_of(store, "binance")
-    assert grid.long_liq[:2] == [0.5, 0.0]
-    assert grid.short_liq[:2] == [0.3, 0.4]
-
-
-def test_bybit_sides_and_qty(store: PerpsStore):
-    rest(store, at("00:50"))
-    cover(store, "bybit_liq", T0, T0 + 3600)
-    store.insert_liquidations(
-        "bybit",
-        0,
-        [
-            bybit_liq(T0 + 10, "Buy", "0.4"),  # a long position liquidated
-            bybit_liq(T0 + 20, "Buy", "0.15"),
-            bybit_liq(T0 + 30, "Sell", "0.25"),  # a short position liquidated
-        ],
-    )
-    grid = grid_of(store, "bybit")
-    assert grid.long_liq[0] == pytest.approx(0.55)
-    assert grid.short_liq[0] == 0.25
-    assert grid.long_liq[1:] == grid.short_liq[1:] == [0.0] * 5
-
-
-def test_covered_empty_bucket_is_zero_uncovered_is_none(store: PerpsStore):
-    rest(store, at("00:50"))
-    cover(store, "bybit_liq", T0, T0 + 1200)  # buckets 00:00 and 00:10
-    cover(store, "bybit_trades", T0 + 600, T0 + 3600)  # buckets 00:10 to 00:50
-    store.insert_liquidations(
-        "bybit", 0, [bybit_liq(T0 + 700, "Buy", "1"), bybit_liq(T0 + 1300, "Sell", "2")]
-    )
-    store.record_trades(
-        "bybit",
-        [
-            Trade(id="1", ts=T0 + 5, side="Buy", qty=9.0),  # in an uncovered bucket
-            Trade(id="2", ts=T0 + 1250, side="Buy", qty=3.0),
-            Trade(id="3", ts=T0 + 1260, side="Sell", qty=1.0),
-        ],
-    )
-    grid = grid_of(store, "bybit")
-    assert grid.liq_covered == [True, True, False, False, False, False]
-    assert grid.long_liq == [0.0, 1.0, None, None, None, None]
-    assert grid.short_liq == [0.0, 0.0, None, None, None, None]  # the 1300 s event is uncovered
-    assert grid.vd_covered == [False, True, True, True, True, True]
-    assert grid.vd == [None, 0.0, 2.0, 0.0, 0.0, 0.0]
-    assert grid.rest_series == {"bybit:price": grid.price, "bybit:oi": grid.oi}
-
-
 def test_null_rows_count_toward_last(store: PerpsStore):
     spot(store, T0, at("00:55"))
     perp(store, T0, at("00:55"))
@@ -372,153 +257,415 @@ def test_missing_series_returned(store: PerpsStore):
     assert isinstance(build_grid(store, "binance", T0), Grid)
     assert build_grid(store, "bybit", T0) == ["bybit:oi"]
     assert build_grid(store, "all", T0) == ["bybit:oi"]
+    assert build_grid(store, "hyperliquid", T0) == ["bybit:oi"]
     assert REQUIRED == {
         "binance": ("bybit:price", "binance:oi", "binance:kline"),
         "bybit": ("bybit:price", "bybit:oi"),
         "all": ("bybit:price", "binance:oi", "binance:kline", "bybit:oi"),
+        "hyperliquid": ("bybit:price", "binance:oi", "bybit:oi"),
     }
 
 
-def test_all_view_none_if_any_venue_none(store: PerpsStore):
-    rest(store, at("00:30"))
-    store.upsert_oi("bybit", [OiPoint(t=at("00:20"), oi=None, source="bybit")])  # bucket 00:10
-    cover(store, "binance_liq", T0, T0 + 2400)
-    cover(store, "bybit_liq", T0 + 600, T0 + 2400)  # not bucket 00:00
-    cover(store, "bybit_trades", T0, T0 + 1800)  # not bucket 00:30
-    store.insert_liquidations("binance", 0, [binance_liq(T0 + 700, "SELL", "1")])
-    store.insert_liquidations(
-        "bybit", 0, [bybit_liq(T0 + 800, "Buy", "2"), bybit_liq(T0 + 5, "Sell", "4")]
+# --- Coinalyze columns (proposal §3.3, §3.4). ---
+
+
+def point(t: int, a: float, b: float, *, filled: bool = False) -> CzPoint:
+    return CzPoint(t=t, a=a, b=b, filled=filled)
+
+
+def cz(
+    store: PerpsStore,
+    kind: CzKind,
+    venue: CzVenue,
+    step: int,
+    first: int,
+    last: int,
+    a: float,
+    b: float,
+    skip: Collection[int] = (),
+) -> None:
+    """One venue's Coinalyze rows every `step` from `first` to `last`, but those in `skip`."""
+    rows = [point(t, a, b) for t in range(first, last + 1, step) if t not in skip]
+    store.upsert_cz(kind, step, venue, rows)
+
+
+# Every 5min interval's liquidations (longs, shorts), volumes (volume, taker buy) and OI (open,
+# close). A 10m bucket sums two liquidation intervals: Binance (0.5, 0.25), Bybit (1.0, 1.5) and
+# OKX (2.0, 4.0), (3.5, 5.75) together. Its delta is 2·buy − volume over two: Bybit 4.0, OKX
+# −2.0, Hyperliquid 2.0, and Binance's klines give 4.0. Its OI is the second interval's close.
+LIQ5: dict[CzVenue, tuple[float, float]] = {
+    "binance": (0.25, 0.125),
+    "bybit": (0.5, 0.75),
+    "okx": (1.0, 2.0),
+}
+OHLCV5: dict[CzVenue, tuple[float, float]] = {
+    "bybit": (4.0, 3.0),
+    "okx": (2.0, 0.5),
+    "hyperliquid": (1.0, 1.0),
+}
+OI5: dict[CzVenue, tuple[float, float]] = {"okx": (240.0, 250.0), "hyperliquid": (430.0, 437.5)}
+
+
+def five_min(
+    store: PerpsStore,
+    last: int,
+    skip: Mapping[tuple[CzKind, CzVenue], Collection[int]] | None = None,
+) -> None:
+    """Every venue's 5min intervals that the buckets up to `last` read, but those in `skip`."""
+    kinds: tuple[tuple[CzKind, dict[CzVenue, tuple[float, float]]], ...] = (
+        ("liq", LIQ5),
+        ("ohlcv", OHLCV5),
+        ("oi", OI5),
     )
-    store.record_trades("bybit", [Trade(id="1", ts=T0 + 1300, side="Sell", qty=0.5)])
+    for kind, values in kinds:
+        for venue, (a, b) in values.items():
+            gone = (skip or {}).get((kind, venue), ())
+            cz(store, kind, venue, M5, W, last + M5, a, b, gone)
+
+
+def test_closed_window_value_sits_in_its_last_bucket():
+    longs, shorts = cz_liquidations({W: CzPoint(t=W, a=3.0, b=1.0)}, {}, W, W + H4 - STEP)
+    assert longs.values == [0.0] * 23 + [3.0] and shorts.values == [0.0] * 23 + [1.0]
+    assert all(longs.covered) and longs.whole == [False] * 23 + [True]
+    assert shorts.covered == longs.covered and shorts.whole == longs.whole
+
+
+def test_window_past_last_uses_5min():
+    rows5 = {W + k * 300: CzPoint(t=W + k * 300, a=0.1, b=0.0) for k in range(12)}
+    longs, _ = cz_liquidations({W: CzPoint(t=W, a=9.0, b=0.0)}, rows5, W, W + 5 * STEP)
+    assert longs.values == [0.2] * 6 and all(longs.covered)  # never the 9.0 window total
+    assert not any(longs.whole)
+
+
+def test_bucket_missing_a_5min_point_is_uncovered():
+    # A closed window without its 4hour row is read from 5min too; W+15m is missing.
+    rows5 = {t: point(t, 0.25, 0.5) for t in range(W, W + H4, M5) if t != W + 3 * M5}
+    longs, shorts = cz_liquidations({}, rows5, W, W + H4 - STEP)
+    assert longs.values == [0.5, None] + [0.5] * 22
+    assert shorts.values == [1.0, None] + [1.0] * 22
+    assert longs.covered == shorts.covered == [True, False] + [True] * 22
+    assert not any(longs.whole)
+    delta = cz_delta({}, rows5, W, W + H4 - STEP)
+    assert delta.values == [1.5, None] + [1.5] * 22
+    assert delta.covered == longs.covered
+    # OI reads the bucket's second interval alone: only bucket 1 lacks it.
+    oi = cz_oi({}, rows5, W, W + H4 - STEP)
+    assert oi.values == [0.5, None] + [0.5] * 22 and all(oi.covered)
+
+
+def test_filled_run_is_uncovered():
+    end = W + 3 * H4 - STEP
+    rows5 = {t: point(t, 0.5, 0.5) for t in range(W - H4, W + 3 * H4, M5)}
+    # Two filled windows in a row: 48 buckets uncovered, and 5min does not fill them in.
+    run = {
+        W: point(W, 0.0, 0.0, filled=True),
+        W + H4: point(W + H4, 0.0, 0.0, filled=True),
+        W + 2 * H4: point(W + 2 * H4, 2.0, 1.0),
+    }
+    longs, shorts = cz_liquidations(run, rows5, W, end)
+    assert longs.values == [None] * 48 + [0.0] * 23 + [2.0]
+    assert shorts.values == [None] * 48 + [0.0] * 23 + [1.0]
+    assert longs.covered == [False] * 48 + [True] * 24
+    assert longs.whole == [False] * 71 + [True]
+    # A lone filled window is 24 zeros, covered: no liquidations in it.
+    lone = {
+        W: point(W, 1.0, 1.0),
+        W + H4: point(W + H4, 0.0, 0.0, filled=True),
+        W + 2 * H4: point(W + 2 * H4, 2.0, 1.0),
+    }
+    longs, _ = cz_liquidations(lone, rows5, W, end)
+    assert longs.values[24:48] == [0.0] * 24 and all(longs.covered)
+    assert longs.whole[47]
+    # The newest filled window shows 0 until the next one is filled too.
+    longs, _ = cz_liquidations({W: point(W, 0.0, 0.0, filled=True)}, rows5, W, W + H4 - STEP)
+    assert longs.values == [0.0] * 24 and all(longs.covered)
+    # A filled window at the start whose previous one (read from start - H4) is filled.
+    before = {W - H4: point(W - H4, 0.0, 0.0, filled=True), W: point(W, 0.0, 0.0, filled=True)}
+    longs, _ = cz_liquidations(before, rows5, W, W + H4 - STEP)
+    assert longs.values == [None] * 24 and not any(longs.covered)
+    # One whose next window is filled too, though past `last`: uncovered as well.
+    after = {W: point(W, 0.0, 0.0, filled=True), W + H4: point(W + H4, 0.0, 0.0, filled=True)}
+    longs, _ = cz_liquidations(after, rows5, W, W + 5 * STEP)
+    assert longs.values == [None] * 6 and not any(longs.covered)
+
+
+def test_oi_window_open_first_close_last_middle_none():
+    rows4 = {W: point(W, 100.0, 130.0)}
+    oi = cz_oi(rows4, {}, W, W + H4 - STEP)
+    assert oi.values == [100.0] + [None] * 22 + [130.0]
+    assert all(oi.covered) and oi.whole == [True] + [False] * 22 + [True]
+    # The window past `last` reads its buckets' second 5min interval: no first one is stored,
+    # and bucket 2's second one is missing.
+    w1 = W + H4
+    rows5 = {
+        t + M5: point(t + M5, 0.0, float(k))
+        for k, t in enumerate(range(w1, w1 + 4 * STEP, STEP))
+        if k != 2
+    }
+    oi = cz_oi(rows4, rows5, W, w1 + 3 * STEP)
+    assert oi.values == [100.0] + [None] * 22 + [130.0] + [0.0, 1.0, None, 3.0]
+    assert all(oi.covered)
+    assert oi.whole == [True] + [False] * 22 + [True] + [False] * 4
+
+
+def test_delta_is_two_buy_minus_volume():
+    rows4 = {W: point(W, 10.0, 7.0)}  # 2 · 7 − 10
+    rows5 = {W + H4 + k * M5: point(W + H4 + k * M5, 3.0, 1.0 + k) for k in range(4)}
+    delta = cz_delta(rows4, rows5, W, W + H4 + STEP)
+    # 2 · (1 + 2) − (3 + 3) and 2 · (3 + 4) − (3 + 3)
+    assert delta.values == [0.0] * 23 + [4.0] + [0.0, 8.0]
+    assert all(delta.covered) and delta.whole == [False] * 23 + [True] + [False] * 2
+
+
+def test_composite_rest_gap_at_window_end_uncovers_the_window(store: PerpsStore):
+    last = W + 2 * H4 - STEP  # two closed windows, W1 the second
+    w1 = W + H4
+    rest(store, last)
+    for venue in ("bybit", "okx"):
+        cz(store, "ohlcv", venue, H4, W, w1, 10.0, 7.0)
+    cz(store, "oi", "okx", H4, W, w1, 300.0, 310.0)
+    for venue in VIEW_VENUES["all"]:
+        cz(store, "liq", venue, H4, W, w1, 1.0, 2.0)
+    # Binance's kline and OI are missing at W1's end bucket.
+    with store.connection(write=True) as db:
+        db.execute("DELETE FROM kline WHERE venue='binance' AND t=?", (last,))
+    store.upsert_oi("binance", [OiPoint(t=last + STEP, oi=None, source="hist")])
 
     grid = grid_of(store, "all")
     bn_vd = 2 * (2 * 6.0 - 10.0)
-    assert grid.oi == [1500.0, None, 1500.0, 1500.0]
+    assert grid.rest_series["binance:kline"][24:] == [bn_vd] * 23 + [None]
+    assert grid.vd[:24] == [bn_vd] * 23 + [bn_vd + 4.0 + 4.0]
+    assert grid.vd[24:] == [None] * 24
+    assert grid.vd_covered == [True] * 24 + [False] * 24
+    assert grid.oi[:24] == [1500.0 + 300.0] + [None] * 22 + [1500.0 + 310.0]
+    assert grid.oi[24:] == [None] * 24
+    # The liquidations have no gap at W1's end.
+    assert grid.long_liq[24:] == [0.0] * 23 + [3.0] and all(grid.liq_covered)
+
+    first, second = compute_states(grid, "4h", rules=V1).blocks
+    assert first.delta_covered and first.delta_sum == 24 * bn_vd + 8.0
+    assert first.oi_close == 1810.0
+    # Not the Binance-only partial sum, nor W1's OI four hours before its end.
+    assert not second.delta_covered and second.delta_sum is None
+    assert second.oi_close is None and second.imputed.doi
+
+
+def test_estimate_liquidations():
+    longs, shorts, cov = estimate_liquidations(
+        [0.0, 4.0, 4.0, None, 4.0, 4.0],
+        [0.0, 2.0, 2.0, None, 2.0, 2.0],
+        [True, True, True, False, True, True],
+        [None, 100.0, None, 100.0, 0.0, 100.0],
+        [10.0, 25.0, 25.0, 25.0, 25.0, None],
+    )
+    assert longs == [0.0, 1.0, None, None, None, None]
+    assert shorts == [0.0, 0.5, None, None, None, None]
+    assert cov == [True, True, False, False, False, False]
+
+
+def test_all_view_none_if_any_venue_none(store: PerpsStore):
+    last = at("00:30")
+    rest(store, last)
+    store.upsert_oi("bybit", [OiPoint(t=at("00:20"), oi=None, source="bybit")])  # bucket 00:10
+    # Binance's liquidations lack the 00:05 interval (bucket 00:00), Bybit's volumes the 00:35
+    # one (bucket 00:30).
+    five_min(store, last, {("liq", "binance"): {at("00:05")}, ("ohlcv", "bybit"): {at("00:35")}})
+
+    grid = grid_of(store, "all")
+    assert grid.oi == [1750.0, None, 1750.0, 1750.0]
     assert grid.rest_series["binance:oi"] == [1000.0] * 4
     assert grid.rest_series["bybit:oi"] == [500.0, None, 500.0, 500.0]
-    assert grid.vd == [bn_vd, bn_vd, bn_vd - 0.5, None]
-    assert grid.rest_series["binance:kline"] == [bn_vd] * 4
+    assert grid.vd == [6.0, 6.0, 6.0, None]
+    assert grid.rest_series["binance:kline"] == [4.0] * 4
     assert grid.vd_covered == [True, True, True, False]
     assert grid.liq_covered == [False, True, True, True]
-    assert grid.long_liq == [None, 3.0, 0.0, 0.0]
-    assert grid.short_liq == [None, 0.0, 0.0, 0.0]
+    assert grid.long_liq == [None, 3.5, 3.5, 3.5]
+    assert grid.short_liq == [None, 5.75, 5.75, 5.75]
     assert list(grid.rest_series) == list(REQUIRED["all"])
 
 
-def reference_liquidations(
-    store: PerpsStore, venue: Venue, start: int, covered: Sequence[bool]
-) -> tuple[list[float | None], list[float | None]]:
-    """The derive as it was before the fields were stored: every raw event parsed and merged in
-    Python, a key counting as often as the connection that saw it most."""
-    counts: dict[str, Counter[int]] = defaultdict(Counter)
-    events: dict[str, tuple[float, bool, float]] = {}
-    for conn, ts, raw_json, key in store.liquidations(venue, start):
-        raw = json.loads(raw_json)
-        if venue == "binance" and raw["X"] != "FILLED":
-            continue
-        longs = raw["S"] == ("SELL" if venue == "binance" else "Buy")
-        counts[key][conn] += 1
-        events[key] = (ts, longs, float(raw["z" if venue == "binance" else "v"]))
-    sums: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])
-    for key, per_conn in counts.items():
-        ts, longs, qty = events[key]
-        i = int((ts - start) // STEP)
-        if 0 <= i < len(covered) and covered[i]:
-            sums[i][0 if longs else 1] += max(per_conn.values()) * qty
-    return (
-        [sums[i][0] if c else None for i, c in enumerate(covered)],
-        [sums[i][1] if c else None for i, c in enumerate(covered)],
-    )
-
-
-def assert_close(actual: list[float | None], expected: list[float | None]) -> None:
-    assert [x is None for x in actual] == [x is None for x in expected]
-    assert [x for x in actual if x is not None] == pytest.approx(
-        [x for x in expected if x is not None], rel=1e-12, abs=1e-12
-    )
-
-
-@pytest.mark.parametrize("seed", [1, 2, 3])
-def test_liquidation_sums_match_the_python_merge(store: PerpsStore, seed: int):
-    """Random events: keys on both connections or one, a key repeated on a connection, events
-    before the start, past the grid and in uncovered buckets, and Binance events not FILLED."""
-    rng = random.Random(seed)
-    last = at("05:50")
+def test_all_view_sums_three_venues_and_is_none_where_okx_is(store: PerpsStore):
+    last = at("00:30")
     rest(store, last)
-    batches: dict[tuple[Venue, int], list[RawLiquidation]] = defaultdict(list)
-    for venue in ("binance", "bybit"):
-        stream: Stream = "binance_liq" if venue == "binance" else "bybit_liq"
-        # Each connection drops now and then; both are down over one stretch of 25 minutes.
-        hole = T0 + rng.uniform(3600, 14400)
-        for conn in (0, 1):
-            t = T0 - 300.0
-            while t < last + 1800:
-                end = t + rng.uniform(600, 5400)
-                for lo, hi in ((t, min(end, hole)), (max(t, hole + 1500), end)):
-                    if lo < hi:
-                        cover(store, stream, lo, hi, conn)
-                t = end + rng.choice((0, 0, 30, 900))
-        for _ in range(300):
-            ts = rng.randrange((T0 - 1200) * 1000, (last + 1800) * 1000) / 1000
-            qty = f"{rng.choice((0.001, 0.004, 0.25, 1.5, 7.123)):.3f}"
-            if venue == "binance":
-                side = rng.choice(("SELL", "BUY"))
-                status = rng.choice(("FILLED", "FILLED", "FILLED", "PARTIALLY_FILLED", "NEW"))
-                event = binance_liq(
-                    ts, side, qty, status=status, ap=str(rng.randrange(70000, 90000))
-                )
-            else:
-                event = bybit_liq(
-                    ts, rng.choice(("Buy", "Sell")), qty, p=str(rng.randrange(70000, 90000))
-                )
-            seen = rng.choice(((1, 0), (0, 1), (1, 1), (2, 1), (1, 2), (2, 0)))
-            for conn, times in enumerate(seen):
-                batches[venue, conn] += [event] * times
-            if venue == "binance" and rng.random() < 0.1:
-                # The same key pushed again with a status that does not count.
-                raw = {**json.loads(event.raw), "X": "PARTIALLY_FILLED"}
-                twin = RawLiquidation(event_ts=ts, key=event.key, raw=json.dumps(raw))
-                batches[venue, rng.randrange(2)] += [twin] * rng.randrange(1, 4)
-    for (venue, conn), rows in batches.items():
-        rng.shuffle(rows)
-        for first in range(0, len(rows), 50):
-            store.insert_liquidations(venue, conn, rows[first : first + 50])
+    five_min(
+        store,
+        last,
+        {
+            ("liq", "okx"): {at("00:15")},  # bucket 00:10
+            ("ohlcv", "okx"): {at("00:20")},  # bucket 00:20
+            ("oi", "okx"): {at("00:35")},  # bucket 00:30
+        },
+    )
 
-    views = {exchange: grid_of(store, exchange) for exchange in ("binance", "bybit", "all")}
-    expected = {}
-    for venue in ("binance", "bybit"):
-        grid = views[venue]
-        expected[venue] = reference_liquidations(store, venue, T0, grid.liq_covered)
-        assert_close(grid.long_liq, expected[venue][0])
-        assert_close(grid.short_liq, expected[venue][1])
-        assert any(grid.liq_covered) and not all(grid.liq_covered)
-        assert any(value for value in grid.long_liq if value)
-    for side in (0, 1):
-        both = [
-            None if a is None or b is None else a + b
-            for a, b in zip(expected["binance"][side], expected["bybit"][side], strict=True)
-        ]
-        assert_close(views["all"].long_liq if side == 0 else views["all"].short_liq, both)
+    grid = grid_of(store, "all")
+    assert grid.long_liq == [0.5 + 1.0 + 2.0, None, 3.5, 3.5]
+    assert grid.short_liq == [0.25 + 1.5 + 4.0, None, 5.75, 5.75]
+    assert grid.liq_covered == [True, False, True, True]
+    assert grid.vd == [4.0 + 4.0 - 2.0, 6.0, None, 6.0]
+    assert grid.vd_covered == [True, True, False, True]
+    assert grid.oi == [1000.0 + 500.0 + 250.0, 1750.0, 1750.0, None]
+    # OKX only joins All: the single-venue views are whole.
+    bybit = grid_of(store, "bybit")
+    assert (bybit.long_liq, bybit.vd, bybit.oi) == ([1.0] * 4, [4.0] * 4, [500.0] * 4)
+    binance = grid_of(store, "binance")
+    assert (binance.long_liq, binance.vd, binance.oi) == ([0.5] * 4, [4.0] * 4, [1000.0] * 4)
+    assert all(binance.liq_covered) and all(bybit.vd_covered)
 
 
-def test_liquidation_coverage_is_read_before_the_events(
-    store: PerpsStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # An event is committed before the coverage that spans it: reading the events first could
-    # pair them with coverage that grew in between and so miss events of a covered bucket.
-    calls: list[str] = []
-    coverage, sums = store.coverage, store.liquidation_sums
+def test_hyperliquid_view_last_is_bounded_by_binance_and_bybit_oi(store: PerpsStore):
+    spot(store, T0, at("00:55"))  # price through 00:50
+    perp(store, T0, at("00:15"))  # Binance's delta through 00:10, which the view does not read
+    oi(store, "binance", T0, at("00:40"))  # OI through 00:30
+    oi(store, "bybit", T0, at("01:00"))  # OI through 00:50
 
-    def record_coverage(stream: Stream, since: float) -> list[tuple[float, float]]:
-        calls.append(f"coverage:{stream}")
-        return coverage(stream, since)
+    assert grid_of(store, "hyperliquid").last == at("00:30")
+    assert grid_of(store, "all").last == at("00:10")
+    oi(store, "binance", T0, at("01:00"))
+    grid = grid_of(store, "hyperliquid")
+    assert grid.last == at("00:50")
+    assert list(grid.rest_series) == list(REQUIRED["hyperliquid"])
+    # Nothing from Coinalyze: no OI, no delta and no estimate.
+    assert set(grid.oi) == set(grid.vd) == set(grid.long_liq) == {None}
+    assert not any(grid.vd_covered) and not any(grid.liq_covered)
 
-    def record_sums(venue: Venue, start: int) -> dict[int, tuple[float, float]]:
-        calls.append(f"sums:{venue}")
-        return dict(sums(venue, start))
 
-    monkeypatch.setattr(store, "coverage", record_coverage)
-    monkeypatch.setattr(store, "liquidation_sums", record_sums)
-    read_liquidations(store, "binance", T0)
-    read_liquidations(store, "bybit", T0)
-    assert calls == ["coverage:binance_liq", "sums:binance", "coverage:bybit_liq", "sums:bybit"]
+def test_hyperliquid_view_reads_its_own_oi_and_delta_and_estimates_liquidations(
+    store: PerpsStore,
+):
+    last = at("00:30")
+    rest(store, last)
+    five_min(
+        store,
+        last,
+        {
+            ("oi", "okx"): {at("00:15")},  # All's OI at 00:10
+            ("oi", "hyperliquid"): {at("00:25")},  # Hyperliquid's at 00:20
+            ("liq", "bybit"): {at("00:35")},  # All's liquidations at 00:30
+        },
+    )
+
+    grid = grid_of(store, "hyperliquid")
+    assert grid.oi == [437.5, 437.5, None, 437.5]
+    assert grid.vd == [2.0] * 4 and all(grid.vd_covered)
+    # All's liquidations times Hyperliquid's OI over All's (437.5 / 1750 = 0.25).
+    assert grid.long_liq == [3.5 * 0.25, None, None, None]
+    assert grid.short_liq == [5.75 * 0.25, None, None, None]
+    assert grid.liq_covered == [True, False, False, False]
+
+
+def test_hyperliquid_estimate_of_a_whole_window_takes_its_end_share(store: PerpsStore):
+    last = W + H4 - STEP
+    rest(store, last)
+    for venue in VIEW_VENUES["all"]:
+        cz(store, "liq", venue, H4, W, W, 1.0, 2.0)
+    cz(store, "oi", "okx", H4, W, W, 240.0, 250.0)
+    cz(store, "oi", "hyperliquid", H4, W, W, 400.0, 437.5)
+    cz(store, "ohlcv", "hyperliquid", H4, W, W, 10.0, 7.0)
+
+    grid = grid_of(store, "hyperliquid")
+    # The window's (3, 6) at its end, times 437.5 / 1750; its other buckets have none.
+    assert grid.long_liq == [0.0] * 23 + [0.75] and grid.short_liq == [0.0] * 23 + [1.5]
+    assert all(grid.liq_covered)
+    assert grid.oi == [400.0] + [None] * 22 + [437.5]
+    assert grid.vd == [0.0] * 23 + [4.0]
+
+    # Without All's OI at the end there is no share for the window: all of it is uncovered.
+    store.upsert_oi("binance", [OiPoint(t=last + STEP, oi=None, source="hist")])
+    grid = grid_of(store, "hyperliquid")
+    assert grid.long_liq == grid.short_liq == [None] * 24
+    assert not any(grid.liq_covered)
+
+
+def test_window_qc_reports_missing_okx_oi(store: PerpsStore):
+    # Twelve closed windows and a forming one, whose OI is not stored and not counted.
+    last = T0 + 2 * DAY + 5 * STEP
+    rest(store, last)
+    cz(store, "oi", "okx", H4, W, W + 11 * H4, 240.0, 250.0)
+    cz(store, "oi", "hyperliquid", H4, W, W + 11 * H4, 400.0, 437.5)
+    grid = grid_of(store, "all")
+    assert (grid.window_qc, grid.window_missing) == ((), ())
+    assert compute_states(grid, "4h", rules=V1).qc == []
+
+    # One window in twelve is over 1%.
+    with store.connection(write=True) as db:
+        db.execute("DELETE FROM cz_series WHERE venue='okx' AND t=?", (W + 5 * H4,))
+    grid = grid_of(store, "all")
+    assert (grid.window_qc, grid.window_missing) == (("missing:okx:oi",), ())
+    states = compute_states(grid, "4h", rules=V1)
+    assert states.qc == ["missing:okx:oi"] and states.series_missing == []
+    assert grid_of(store, "hyperliquid").window_qc == ("missing:okx:oi",)
+    # The single-venue views read no Coinalyze OI.
+    for exchange in ("binance", "bybit"):
+        assert (grid_of(store, exchange).window_qc, grid_of(store, exchange).window_missing) == (
+            (),
+            (),
+        )
+
+    # None at all in the reference: the series is missing.
+    with store.connection(write=True) as db:
+        db.execute("DELETE FROM cz_series WHERE kind='oi'")
+    grid = grid_of(store, "all")
+    assert (grid.window_qc, grid.window_missing) == (("missing:okx:oi",), ("okx:oi",))
+    assert compute_states(grid, "4h", rules=V1).series_missing == ["okx:oi"]
+    hyperliquid = grid_of(store, "hyperliquid")
+    assert hyperliquid.window_qc == ("missing:okx:oi", "missing:hyperliquid:oi")
+    assert hyperliquid.window_missing == ("okx:oi", "hyperliquid:oi")
+
+
+def test_excluded_venue_is_uncovered(store: PerpsStore):
+    last = at("00:30")
+    rest(store, last)
+    five_min(store, last)
+    assert grid_of(store, "all").long_liq == [3.5] * 4
+
+    def built(exchange: Exchange, venue: CzVenue) -> Grid:
+        grid = build_grid(store, exchange, T0, frozenset({venue}))
+        assert isinstance(grid, Grid), grid
+        return grid
+
+    # OKX's columns are all missing, so All's are.
+    okx_out = built("all", "okx")
+    assert okx_out.long_liq == okx_out.vd == okx_out.oi == [None] * 4
+    assert not any(okx_out.liq_covered) and not any(okx_out.vd_covered)
+    assert built("bybit", "okx") == grid_of(store, "bybit")
+    # Binance's liquidations go; its OI and delta come from its own REST.
+    binance = built("binance", "binance")
+    assert binance.long_liq == [None] * 4 and not any(binance.liq_covered)
+    assert (binance.oi, binance.vd) == ([1000.0] * 4, [4.0] * 4)
+    # Hyperliquid's OI and delta go, and the estimate with its OI.
+    hyperliquid = built("hyperliquid", "hyperliquid")
+    assert hyperliquid.oi == hyperliquid.vd == hyperliquid.long_liq == [None] * 4
+
+
+def test_only_4hour_history_is_judged_under_o6(store: PerpsStore):
+    start = T0 - 100 * DAY
+    last = T0 - STEP  # the end bucket of the window before T0: no forming block
+    spot(store, start, last + M5)
+    perp(store, start, last + M5)
+    oi(store, "binance", start, last + STEP)
+    oi(store, "bybit", start, last + STEP, value=500.0)
+    windows = range(start, T0, H4)
+    kinds: tuple[tuple[CzKind, tuple[CzVenue, ...]], ...] = (
+        ("liq", VIEW_VENUES["all"]),
+        ("ohlcv", ("bybit", "okx")),
+        ("oi", ("okx",)),
+    )
+    for kind, venues in kinds:
+        for n, venue in enumerate(venues):
+            store.upsert_cz(
+                kind,
+                H4,
+                venue,
+                [
+                    point(w, 300.0 + (k + n) % 7, 300.0 + (k + 2 * n) % 11)
+                    for k, w in enumerate(windows)
+                ],
+            )
+
+    grid = build_grid(store, "all", start)
+    assert isinstance(grid, Grid) and grid.last == last
+    states = compute_states(grid, "4h", rules=O1O6)
+    assert len(states.blocks) >= 30 * 6 and not states.blocks[-1].forming
+    assert all(block.covered for block in states.blocks)
+    assert not any(block.imputed.sums or block.imputed.doi for block in states.blocks)
+    assert all(block.state is not None for block in states.blocks)

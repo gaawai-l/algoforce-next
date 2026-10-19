@@ -1281,7 +1281,7 @@ export interface components {
         };
         /**
          * DirectionCheck
-         * @description One venue's liquidation sides against the price (spec §6), as currently mapped.
+         * @description One venue's liquidation sides against the price (spec §6, proposal §3.3).
          */
         DirectionCheck: {
             /**
@@ -1296,11 +1296,14 @@ export interface components {
             /** Long Share */
             long_share: number | null;
         };
-        /** Directions */
+        /**
+         * Directions
+         * @description Each venue whose liquidations Coinalyze reports; pending for one excluded by its units.
+         */
         Directions: {
             binance: components["schemas"]["DirectionCheck"];
             bybit: components["schemas"]["DirectionCheck"];
-            bybit_qty: components["schemas"]["QtyUnits"];
+            okx: components["schemas"]["DirectionCheck"];
         };
         /** Episode */
         Episode: {
@@ -1823,7 +1826,7 @@ export interface components {
              * Exchange
              * @enum {string}
              */
-            exchange: "all" | "binance" | "bybit";
+            exchange: "all" | "binance" | "bybit" | "hyperliquid";
             /**
              * Window
              * @enum {string}
@@ -2053,24 +2056,6 @@ export interface components {
             qualified: boolean;
             /** Bars Ago */
             bars_ago: number;
-        };
-        /**
-         * QtyUnits
-         * @description Bybit's liquidation size `v` checked as BTC: notionals v·p and the smallest size.
-         */
-        QtyUnits: {
-            /** Events */
-            events: number;
-            /** Min Qty */
-            min_qty: number | null;
-            /** Min Notional */
-            min_notional: number | null;
-            /** Max Notional */
-            max_notional: number | null;
-            /** Notional In Range */
-            notional_in_range: boolean | null;
-            /** Min Qty Matches */
-            min_qty_matches: boolean | null;
         };
         /** Quote */
         "Quote-Input": {
@@ -3716,7 +3701,7 @@ export interface operations {
     states_api_wheelhouse_v1_perps_states_get: {
         parameters: {
             query?: {
-                exchange?: "all" | "binance" | "bybit";
+                exchange?: "all" | "binance" | "bybit" | "hyperliquid";
                 window?: "4h" | "8h";
             };
             header?: never;

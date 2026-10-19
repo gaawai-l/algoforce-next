@@ -49,8 +49,8 @@ TABLE_STATES: tuple[State, ...] = (
 class Grid:
     """One exchange view on the 10m grid: one entry per bucket from `start` to `last`.
 
-    Collected inputs are 0.0 in covered buckets without events and None where uncovered; REST
-    inputs are None where missing.
+    Liquidations and Coinalyze's delta are 0.0 in covered buckets without any and None where
+    uncovered; REST inputs and Coinalyze's OI are None where missing.
     """
 
     start: int  # the first bucket, a multiple of STEP
@@ -61,10 +61,12 @@ class Grid:
     long_liq: list[float | None]
     short_liq: list[float | None]
     liq_covered: list[bool]
-    vd_covered: list[bool]  # all True for a view that does not need Bybit's collected delta
+    vd_covered: list[bool]  # all True where the delta comes from Binance's klines alone
     # Every REST series the view needs, e.g. `bybit:price`, `binance:oi`, for QC.
     rest_series: dict[str, list[float | None]]
     quarantined_days: int
+    window_qc: tuple[str, ...] = ()  # QC codes worked out per 4h window (Coinalyze OI)
+    window_missing: tuple[str, ...] = ()  # series with no window at all in the reference
 
     def __post_init__(self) -> None:
         if self.start % STEP or self.last % STEP:
@@ -398,7 +400,8 @@ def _judged_past(b: Block, past: Sequence[Block], need: int, *, judge: bool) -> 
 
 
 def _qc(grid: Grid, ref_start: int) -> tuple[list[str], list[str]]:
-    """QC codes over the reference window's buckets, and the REST series with no value there."""
+    """QC codes over the reference window's buckets, and the REST series with no value there;
+    then the grid's own per-window codes and series."""
     first = max(0, (ref_start - grid.start) // STEP)
     codes: list[str] = []
     missing: list[str] = []
@@ -420,7 +423,7 @@ def _qc(grid: Grid, ref_start: int) -> tuple[list[str], list[str]]:
             missing.append(key)
     if grid.quarantined_days:
         codes.append(f"archive_quarantined:{grid.quarantined_days}")
-    return codes, missing
+    return codes + list(grid.window_qc), missing + list(grid.window_missing)
 
 
 def compute_states(grid: Grid, window: Window, *, rules: Rules) -> StatesResult:
