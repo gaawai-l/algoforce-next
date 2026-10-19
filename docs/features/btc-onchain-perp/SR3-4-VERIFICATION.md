@@ -120,11 +120,50 @@
 
 ## 3. 实时对照（可选）
 
-待 controller 填写。
+2026-10-19 约 23:25–23:45 UTC，controller 在同一时刻打开原站 https://alphabtc-regime.vercel.app/onchain/state-report 和本地页面。两边的 D 都是 10-19，快照 23:23 UTC，spot $82,153。
+
+本地环境：
+- 分支 `claude/cost-flow` @0d87153，analytics 起在 8797，`WHEELHOUSE_RULES=v1`、`WHEELHOUSE_PERPS=off`；
+- 数据目录用主检出 `onchain.sqlite` 的备份副本，overlay 起在 1430；
+- 新增的取数（6 个年龄快照、日高低价）跑了一轮，用时 8,789 ms。之后 `/onchain/cost-flow` 为 fresh，两个网格都在，`age` 不为空，reasons 为空。
+
+| 状态 | 图 3 | 图 4 |
+|---|---|---|
+| 30d · All（默认） | 图例 +1,164,702 / −1,150,749 相同；Clusters 5 行逐格相同（`5 clusters · 1 in · 4 out`） | 图例 16 项逐项相同，`net (issuance) +13,953`；表格逐格相同 |
+| 90d · All | 图例 +1,939,014 / −1,897,933 和 7 行聚类逐格相同 | 唯一的差别来自 `bOn` 修正：原站默认隐藏 bought 1m–3m，本地显示 +1,398,374。本地手动隐藏该组后，图例数值、`3 clusters · 1 in · 2 out` 和 3 行聚类都与原站逐格相同。标签按规则 4 写 "net of what is shown"，原站写 "net (issuance)"，属预期 |
+| 7d · STH · 两侧 Bells On | 图例 +410,409 / −360,352、5 行 K、5 行 M（含 BIC 选出的 k）逐格相同 | — |
+
+图上的 K 标签用表格编号（U4）：原站是每侧各自编号，这处差别是有意的。
 
 ## 4. 浏览器检查与耗时
 
-待 controller 填写。
+**1440 px 以上**
+- 自动化窗口是全屏的 2,056 px，`resize_window` 无效，所以直接在全宽下检查：
+  - 两张图、图例和表格正常；
+  - Window、Zoom、Holders 联动正常；
+  - 图 4 点击图例隐藏后会重算聚类（7 → 3）。
+- 重新加载并切换窗口、Zoom、Holders 之后，控制台没有报错。
+- 页面顶部的 "Python service unavailable (HTTP 403)" 来自 :1430 的 POST 来源检查（只接受 :1420），与本功能无关。
+
+**390 px**
+检查方法：用真实点击打开一个 390 px 的同源弹窗，再检查它的 DOM。
+- `scrollWidth` = 390，除表格容器外没有元素溢出。
+- 两张图的 SVG 宽 330 px，SVG 里没有越界的文字。
+- 两侧控件单列，表格在各自的容器里横向滚动（clientWidth 330，scrollWidth 681，`overflow-x: auto`）。
+- 图 4 的图例 15 项各占一行。
+- 两张图的三栏说明都纵向展开，宽 330 px。
+- Flows 切换条在 4 个按钮时一行放得下，第 5 个子视图加入后再看换行。
+
+**耗时**
+在 390 px 的弹窗里读 `performance.getEntriesByName("costflow-fit")`。这个工具无法通过 CDP 设置 CPU 降速，所以下表是**未降速**的实测值：
+
+| 操作 | 每次 fit 耗时 |
+|---|---|
+| 图 3 STH、Aging Show、Smoothing Manual、Bells On：拖动滑杆 8 步 | 2.3–4.4 ms |
+| 图 4 90d、Bells On：点击图例 3 次 | 0.2–3.4 ms |
+
+- 每一步记到两条 measure，是开发模式下 React StrictMode 对 `useMemo` 双调用造成的，生产构建只有一条。
+- 按 4 倍降速估算，最多约 18 ms，远低于 100 ms 的门槛，所以不做 Web Worker。
 
 ## 5. QC 变弱的说明（U3）
 
