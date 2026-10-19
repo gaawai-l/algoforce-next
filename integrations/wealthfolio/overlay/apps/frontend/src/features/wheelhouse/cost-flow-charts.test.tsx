@@ -60,11 +60,14 @@ const TITLE3 = "Chart 3 — Buy & Sell Side By Cost Basis";
 function show(view: CostFlowView = s2) {
   mocks.costFlow.mockResolvedValue(view);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <CostFlowCharts />
-    </QueryClientProvider>,
-  );
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <CostFlowCharts />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 // The chart's width as useChartWidth reads it; `initial` is reported as soon as it is observed.
@@ -459,8 +462,15 @@ it("tunes a side by hand", async () => {
     expect(input.getAttribute("step")).toBe(step);
     expect(input.value).toBe(value);
   }
+  // The frame commits onto the setting current when it runs: Bells On, picked while the cutoff
+  // waits for its frame, stays on.
   fireEvent.input(cutoff, { target: { value: "0.40" } });
+  pick(side("neg"), "Bell curves", "On");
   flush();
+  expect(chip("neg")).toBe("0.020 / 0.40");
+  expect(
+    tableRows("components").filter((row) => row[1] === "Net Sell (Distribution)").length,
+  ).toBeGreaterThan(0);
   // derived from page values: only the sell peak of strength 99% (K3) clears a 0.40 cutoff.
   const sells = tableRows("clusters").filter((row) => row[1] === "Net Sell (Distribution)");
   expect(sells).toHaveLength(1);
@@ -749,4 +759,49 @@ it("says the flows are unavailable without inventing numbers", async () => {
   );
   expect(screen.getByText("Loading the cost-basis flows…")).toBeTruthy();
   expect(container.textContent ?? "").not.toMatch(/\d/);
+});
+
+it("does not refit when an option already on is picked again", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  const count = fits.mock.calls.length;
+  // Each pick makes a new setting object with the same six values.
+  pick(side("neg"), "Smoothing", "Auto");
+  pick(side("neg"), "Bell curves", "Off");
+  pick(side("neg"), "How many", "auto");
+  pick(side("pos"), "Smoothing", "Auto");
+  expect(fits.mock.calls.length).toBe(count);
+  pick(side("neg"), "Bell curves", "On");
+  expect(fits.mock.calls.length).toBe(count + 1);
+  pick(side("neg"), "Bell curves", "On");
+  expect(fits.mock.calls.length).toBe(count + 1);
+});
+
+it("drops a reading when a refresh changes the rows", async () => {
+  const { client } = show();
+  await screen.findByText(TITLE3);
+  // A poll's result, as the 5-minute refetch delivers it (observers hear of it on the next tick).
+  const poll = (view: CostFlowView) =>
+    act(async () => {
+      client.setQueryData(["wh", "onchain", "cost-flow"], view);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  fireEvent.keyDown(svg3()!, { key: "ArrowUp" });
+  expect(readout()).toHaveLength(5);
+  // The same payload again keeps the view, its rows and so the reading.
+  await poll(structuredClone(s2));
+  expect(client.getQueryData(["wh", "onchain", "cost-flow"])).toBe(s2);
+  expect(readout()).toHaveLength(5);
+  // The next snapshot: the rows are new, and the reading, which names a row by its index, goes.
+  const next = structuredClone(s2);
+  next.snapshot_at = "2026-10-19T07:04:42Z";
+  await poll(next);
+  expect(
+    screen.getByText("URPD snapshot 19 Oct 2026 · 07:04 UTC · Source Bitcoin Research Kit"),
+  ).toBeTruthy();
+  expect(readout()).toEqual([]);
+  expect(svg3()!.querySelector(".wh-cf-cursor")).toBeNull();
+  // The next key starts again from the row that holds spot.
+  fireEvent.keyDown(svg3()!, { key: "ArrowUp" });
+  expect(readout()[0]).toBe("$82,000 – $82,500");
 });

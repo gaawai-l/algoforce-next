@@ -2424,8 +2424,9 @@
   text-align: right;
   text-transform: none;
 }
+/* Room for Chart 3's five-line reading, so the tables below do not move as it comes and goes. */
 .wh-costflow .wh-cf-readout {
-  min-height: 1.6em;
+  min-height: 8em;
   margin-top: 8px;
   color: var(--wh-muted);
   font:

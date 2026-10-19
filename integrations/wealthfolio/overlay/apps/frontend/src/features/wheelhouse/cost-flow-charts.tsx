@@ -382,24 +382,26 @@ export function FlowPlot({
 }
 
 // One side's KDE, peaks and mixture, fitted only when the rows, the weights or the side's
-// setting change: hover, the readout and the chart's width never reach the engine. Each fit is
+// setting change: hover, the readout and the chart's width never reach the engine. The setting is
+// compared by its six values, so picking an option that is already on does not refit. Each fit is
 // timed as "costflow-fit" (User Timing) for the browser check.
 export function useSideCurves(
   rows: readonly { price: number }[],
   weights: readonly number[],
   setting: SideSetting,
 ): SideCurves | null {
+  const { smoothing, bw, minProm, mixture, kMode, kManual } = setting;
   return useMemo(() => {
     performance.mark("costflow-fit-start");
     const curves = fitSide(
       rows.map((row) => row.price),
       weights,
-      setting,
+      { smoothing, bw, minProm, mixture, kMode, kManual },
     );
     performance.measure("costflow-fit", "costflow-fit-start");
     performance.clearMarks("costflow-fit-start");
     return curves;
-  }, [rows, weights, setting]);
+  }, [rows, weights, smoothing, bw, minProm, mixture, kMode, kManual]);
 }
 
 // A:1675-1746 without the engines: each side's KDE scaled to 92% of its tallest bar with a K mark
@@ -823,6 +825,14 @@ const HOLDERS: readonly Holders[] = ["all", "sth", "lth"];
 const AGING = ["show", "hide"] as const;
 const NO_ROWS: FlowRow[] = [];
 
+// The bucket a chart reads, by its index in the rows it was read on. Rows from a refresh, or from
+// any other change, can hold another bucket at that index, so the reading holds only while its
+// rows are the ones drawn.
+interface Reading {
+  rows: readonly unknown[];
+  row: number;
+}
+
 function Chart3({
   view,
   shared,
@@ -833,8 +843,8 @@ function Chart3({
   view: CostFlowView;
   shared: Shared;
   onShared: (next: Partial<Shared>) => void;
-  active: number | null;
-  onActive: (row: number | null) => void;
+  active: Reading | null;
+  onActive: (next: Reading | null) => void;
 }) {
   const { text } = useWheelhouseText();
   const [holders, setHolders] = useState<Holders>("all");
@@ -888,6 +898,8 @@ function Chart3({
     [plot, step, posW, negW, pos, neg, cs],
   );
   const title = text("costflow.c3.title");
+  const reading = active !== null && active.rows === rows ? active.row : null;
+  const read = (row: number | null) => onActive(row === null ? null : { rows, row });
   const own = (change: () => void) => {
     onActive(null);
     change();
@@ -953,8 +965,8 @@ function Chart3({
             captions={[text("costflow.axis.sell"), text("costflow.axis.buy")]}
             label={title}
             dim={null}
-            active={active !== null && active < rows.length ? active : null}
-            onActive={onActive}
+            active={reading}
+            onActive={read}
           />
           <div className="wh-seller-legend wh-cf-legend">
             {legendRows(text, totals, holders).map((row) => (
@@ -989,8 +1001,8 @@ function Chart3({
             ))}
           </div>
           <div className="wh-cf-readout" aria-live="polite">
-            {active !== null && rows[active]
-              ? flowTip(text, rows[active], step, shared.window).map((line, i) => (
+            {reading !== null
+              ? flowTip(text, rows[reading], step, shared.window).map((line, i) => (
                   <p key={i}>{line}</p>
                 ))
               : null}
@@ -1030,7 +1042,7 @@ function Chart3({
 function Charts({ view }: { view: CostFlowView }) {
   const [shared, setShared] = useState<Shared>(SHARED);
   // The bucket Chart 3 reads; a new window or zoom replaces the rows, so it clears.
-  const [active3, setActive3] = useState<number | null>(null);
+  const [active3, setActive3] = useState<Reading | null>(null);
   const onShared = (next: Partial<Shared>) => {
     setActive3(null);
     setShared((current) => ({ ...current, ...next }));
