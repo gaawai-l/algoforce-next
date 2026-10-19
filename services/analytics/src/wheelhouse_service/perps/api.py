@@ -12,6 +12,7 @@ from fastapi import APIRouter, FastAPI
 from websockets.sync.client import connect as websocket_connect
 
 from ..rules import Rules, rules_for_view
+from .coinalyze import Coinalyze
 from .collector import LIVE_WITHIN, STREAMS, Collectors, Connection
 from .models import CollectorStatus, HostStatus, PerpsStatus, PerpStatesView, freshness
 from .rows import Exchange, Stream
@@ -178,10 +179,11 @@ def create_router(
     start_worker: bool = True,
     connect: Callable[..., Connection] | None = None,
     clock: Callable[[], datetime] = utc_now,
+    coinalyze_key: str | None = None,
 ) -> APIRouter:
     """`rules` are those the worker derives under; `start_worker` runs the REST worker and the
     collectors; `http` and `connect` replace the REST client and the WebSocket connection
-    factory."""
+    factory; `coinalyze_key` is the worker's Coinalyze key, None when there is none."""
     store: PerpsStore | None = None
     collectors: Collectors | None = None
 
@@ -192,7 +194,10 @@ def create_router(
         worker = None
         if start_worker:
             collectors = Collectors(store, connect=connect or websocket_connect)
-            worker = PerpsSync(store, PerpsRest(http), clock=utc_now, rules=rules)
+            rest = PerpsRest(http)
+            worker = PerpsSync(
+                store, rest, clock=utc_now, rules=rules, coinalyze=Coinalyze(rest, coinalyze_key)
+            )
             collectors.start()
             worker.start()
         yield

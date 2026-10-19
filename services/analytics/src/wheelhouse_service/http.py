@@ -63,9 +63,11 @@ def create_app(
     perps_http: httpx.Client | None = None,
     perps_connect: Callable[..., Connection] | None = None,
     rules: Rules | None = None,
+    coinalyze_key: str | None = None,
 ) -> FastAPI:
     """`start_perps` defaults to the WHEELHOUSE_PERPS setting; nothing starts without
-    `start_worker`. `rules` defaults to the WHEELHOUSE_RULES setting."""
+    `start_worker`. `rules` defaults to the WHEELHOUSE_RULES setting and `coinalyze_key` to
+    the WHEELHOUSE_COINALYZE_KEY one."""
     repository: Repository | None = None
 
     def repo() -> Repository:
@@ -334,6 +336,7 @@ def create_app(
     run_perps = start_worker and (
         Settings.from_env().perps_enabled if start_perps is None else start_perps
     )
+    key = Settings.from_env().coinalyze_key if coinalyze_key is None else coinalyze_key
     app.include_router(
         perps_router(
             data_dir / "perps.sqlite",
@@ -341,6 +344,7 @@ def create_app(
             rules=configured,
             start_worker=run_perps,
             connect=perps_connect,
+            coinalyze_key=key,
         )
     )
     return app

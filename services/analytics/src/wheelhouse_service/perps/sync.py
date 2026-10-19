@@ -5,7 +5,7 @@ import json
 import logging
 import math
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from functools import partial
@@ -16,15 +16,16 @@ from pydantic import AwareDatetime
 
 from ..market import Model, timestamp
 from ..rules import Rule, Rules, rules_for_view
+from .coinalyze import KIND_VENUES, STEPS, Coinalyze, Interval, MarketCheck
 from .grid import BAR, build_grid, read_liquidations
-from .rows import Exchange, Kline, OiPoint
-from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, PerpsRest, RestError
+from .rows import CzKind, Exchange, Kline, OiPoint
+from .sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, CZ_HOST, PerpsRest, RestError
 from .states import DAY, STEP, Grid, StatesResult, Window, compute_states
 from .store import LiquidationSizes, PerpsStore, Venue
 
 logger = logging.getLogger("wheelhouse.perps.sync")
 
-HOSTS = (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST)
+HOSTS = (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST)
 EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit")
 WINDOWS: tuple[Window, ...] = ("4h", "8h")
 # Binance keeps about 30 days of openInterestHist; older OI comes from the daily archive files.
@@ -37,6 +38,16 @@ OVERLAP = 3
 HORIZON_DAYS = 120
 RETENTION_DAYS = 125
 TRADE_IDS_SECONDS = 3600
+# Coinalyze (proposal §3.2). A closed 4hour window is fetched again every round for CZ_SETTLE
+# after it closes: its value may not be complete at once. 5min intervals are kept for a day.
+H4 = STEPS["4hour"]
+CZ_SETTLE = 3600
+CZ_5MIN_KEEP = DAY
+# This process's share of the key's 40 calls a minute: a second process may use the rest.
+CZ_CALLS_PER_MINUTE = 20
+CZ_MINUTE = 60.0
+# The market list (units, buy/sell data) is read again after this long.
+CZ_MARKETS_EVERY = DAY
 # Rounds run at HH:05, HH:15, ...: Binance publishes its history rows 2-4 minutes late.
 SLOT_OFFSET = 300
 IDLE_SECONDS = 30
@@ -210,6 +221,12 @@ def qty_units(sizes: LiquidationSizes) -> QtyUnits:
     )
 
 
+def stored_markets(state: Mapping[str, str | None]) -> list[MarketCheck]:
+    """The last unit check of the Coinalyze symbols; empty until one has been read."""
+    stored = state.get("cz_markets")
+    return [MarketCheck.model_validate(check) for check in json.loads(stored)] if stored else []
+
+
 class _Stopped(Exception):
     """The worker is stopping: its round is abandoned before the next request."""
 
@@ -235,13 +252,24 @@ class PerpsSync:
         clock: Callable[[], datetime],
         rules: Rules,
         horizon_days: int = HORIZON_DAYS,
+        coinalyze: Coinalyze | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+        pause: Callable[[float], bool] | None = None,
     ) -> None:
+        """`coinalyze` is None when the history is not fetched. `monotonic` times the pacing of
+        its requests and `pause(seconds)` waits between them, answering whether the worker is
+        stopping; it defaults to waiting on the stop event."""
         self.store = store
         self.rest = rest
         self.clock = clock
         self.rules = rules
         self.horizon_days = horizon_days
+        self.coinalyze = coinalyze
+        self.monotonic = monotonic
         self.stopping = Event()
+        self.pause = pause if pause is not None else self.stopping.wait
+        # (monotonic time, symbols) of the Coinalyze requests made in the last minute.
+        self._cz_spent: deque[tuple[float, int]] = deque()
         self.thread: Thread | None = None
         self._next: datetime | None = None  # None until the first run, which is not delayed
 
@@ -330,7 +358,9 @@ class PerpsSync:
             self._check_directions(grids, start)
         finally:
             # Retention holds even when a step above fails unexpectedly.
-            self.store.prune(now - RETENTION_DAYS * DAY, now - TRADE_IDS_SECONDS)
+            self.store.prune(
+                now - RETENTION_DAYS * DAY, now - TRADE_IDS_SECONDS, now - CZ_5MIN_KEEP
+            )
 
     def _fetch(self, run: _Round, start: int, now: int) -> None:
         end = now + 1  # ranges are half-open and reach now
@@ -362,6 +392,100 @@ class PerpsSync:
             end,
         )
         self._binance_oi(run, start, end)
+        self._coinalyze(run, start, now)
+
+    def _coinalyze(self, run: _Round, start: int, now: int) -> None:
+        """Fetch the Coinalyze history (proposal §3.2) and store it; the first failure closes the
+        host and ends this part of the round.
+
+        Per kind: the 4hour series from `start` when it needs a backfill, or the last OVERLAP
+        windows when one is settling or a venue is behind, and the 5min series from the window
+        before the current one every round. A bar that closed while a request was in flight was
+        left out by the client, and a later round fetches it: no cursor skips it. Once all kinds
+        are in, the unit check is read if a day has passed.
+        """
+        client = self.coinalyze
+        if client is None:
+            return
+        state = self.store.state()
+        newest = now // H4 * H4 - H4  # the newest closed 4hour window
+        for kind, venues in KIND_VENUES.items():
+            latest = self.store.cz_latest(kind, H4)
+            marker = state.get(f"cz_4h:{kind}")
+            backfilled_from = None if marker is None else int(json.loads(marker)["from"])
+            backfill = (
+                backfilled_from is None
+                or backfilled_from > start
+                or any(venue not in latest for venue in venues)
+            )
+            frm: int | None = None
+            if backfill:
+                frm = start
+            elif now - (newest + H4) < CZ_SETTLE or any(latest[v] < newest for v in venues):
+                frm = max(start, min(latest[v] for v in venues) - (OVERLAP - 1) * H4)
+            if frm is not None:
+                if not self._cz_history(run, client, kind, "4hour", frm, now):
+                    return
+                if backfill:
+                    self.store.set_state(**{f"cz_4h:{kind}": json.dumps({"from": start})})
+            if not self._cz_history(run, client, kind, "5min", newest, now):
+                return
+        self._cz_markets(run, client, state, now)
+
+    def _cz_history(
+        self, run: _Round, client: Coinalyze, kind: CzKind, interval: Interval, frm: int, to: int
+    ) -> bool:
+        """Fetch one history request and store it per venue; False if the host failed."""
+        found = self._cz_ask(
+            run, len(KIND_VENUES[kind]), partial(client.history, kind, interval, frm, to)
+        )
+        if found is None:
+            return False
+        for venue, points in found.items():
+            self.store.upsert_cz(kind, STEPS[interval], venue, points)
+        return True
+
+    def _cz_markets(
+        self, run: _Round, client: Coinalyze, state: Mapping[str, str | None], now: int
+    ) -> None:
+        """Read the market list when none is stored or its read is CZ_MARKETS_EVERY old; a
+        failed read keeps the old result."""
+        read = state.get("cz_markets_at")
+        if read is not None and now - datetime.fromisoformat(read).timestamp() < CZ_MARKETS_EVERY:
+            return
+        checks = self._cz_ask(run, 1, client.markets)
+        if checks is not None:
+            self.store.set_state(
+                cz_markets=json.dumps([check.model_dump(mode="json") for check in checks]),
+                cz_markets_at=timestamp(datetime.fromtimestamp(now, UTC)),
+            )
+
+    def _cz_ask[T](self, run: _Round, cost: int, call: Callable[[], T]) -> T | None:
+        """`_ask` for Coinalyze, after waiting until `cost` more symbol-calls fit in the minute."""
+        if run.open(CZ_HOST):
+            self._pace(cost)
+        return self._ask(run, CZ_HOST, call)
+
+    def _pace(self, cost: int) -> None:
+        """Record a request of `cost` symbol-calls, first waiting until no 60 s window would
+        hold more than CZ_CALLS_PER_MINUTE. Raises _Stopped if the wait says the worker stops."""
+        while True:
+            at = self.monotonic()
+            while self._cz_spent and self._cz_spent[0][0] <= at - CZ_MINUTE:
+                self._cz_spent.popleft()
+            excess = sum(spent for _, spent in self._cz_spent) + cost - CZ_CALLS_PER_MINUTE
+            if excess <= 0 or not self._cz_spent:
+                break
+            # Until enough of the oldest requests have left the minute.
+            wait, freed = 0.0, 0
+            for sent, spent in self._cz_spent:
+                freed += spent
+                wait = sent + CZ_MINUTE - at
+                if freed >= excess:
+                    break
+            if self.pause(wait):
+                raise _Stopped
+        self._cz_spent.append((at, cost))
 
     def _ask[T](self, run: _Round, host: str, call: Callable[[], T]) -> T | None:
         """The call's result; None without asking when the host is closed for the round, or when

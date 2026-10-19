@@ -33,7 +33,7 @@ from wheelhouse_service.perps.api import (
 from wheelhouse_service.perps.collector import STREAMS, Collectors
 from wheelhouse_service.perps.models import PerpStatesView, freshness
 from wheelhouse_service.perps.rows import Exchange, Stream
-from wheelhouse_service.perps.sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST
+from wheelhouse_service.perps.sources import ARCHIVE_HOST, BINANCE_HOST, BYBIT_HOST, CZ_HOST
 from wheelhouse_service.perps.states import (
     TABLE_STATES,
     Grid,
@@ -256,11 +256,18 @@ def router_app(
     http: httpx.Client | None = None,
     connect: Callable[..., Any] | None = None,
     rules: Rules = V1,
+    coinalyze_key: str | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(
         create_router(
-            path, http, rules=rules, start_worker=start_worker, connect=connect, clock=clock
+            path,
+            http,
+            rules=rules,
+            start_worker=start_worker,
+            connect=connect,
+            clock=clock,
+            coinalyze_key=coinalyze_key,
         )
     )
     return app
@@ -520,7 +527,7 @@ def test_unavailable_while_perps_are_off(tmp_path: Path):
         "last_error": None,
         "hosts": [
             {"host": name, "last_success": None, "error": None, "backoff_until": None}
-            for name in (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST)
+            for name in (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST)
         ],
         "collectors": [{"stream": stream, **never} for stream in STREAMS],
         "direction": "pending",
@@ -833,6 +840,7 @@ def test_status_reports_hosts_and_direction(tmp_path: Path):
             "backoff_until": None,
         },
         {"host": BYBIT_HOST, "last_success": None, "error": "retcode:10006", "backoff_until": None},
+        {"host": CZ_HOST, "last_success": None, "error": None, "backoff_until": None},
     ]
     assert status["direction"] == "pending"
     assert status["direction_check"]["binance"]["verdict"] == "ok"
@@ -953,6 +961,102 @@ def test_create_app_hands_the_rules_to_perps(tmp_path: Path, monkeypatch: pytest
     assert label() == (["O1", "O6"], True, V1)
     assert label(rules=O1O6) == (["O1", "O6"], False, O1O6)
     assert seen == []
+
+
+KEY = "test-key-0000"
+
+
+def coinalyze_listener() -> tuple[httpx.Client, Callable[..., Any], list[httpx.Request]]:
+    """Like `blocked`, but Coinalyze answers with an empty list, and its requests are kept."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == CZ_HOST:
+            seen.append(request)
+            return httpx.Response(200, json=[])
+        raise httpx.ConnectError("network is blocked in this test", request=request)
+
+    def connect(url: str, **_: object) -> Any:
+        raise OSError("network is blocked in this test")
+
+    return httpx.Client(transport=httpx.MockTransport(handler)), connect, seen
+
+
+def wait_for(condition: Callable[[], object]) -> None:
+    deadline = time.monotonic() + 10
+    while not condition():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+
+
+def test_the_router_hands_its_key_to_the_workers_coinalyze_client(tmp_path: Path):
+    client, connect, seen = coinalyze_listener()
+    app = router_app(
+        tmp_path / "perps.sqlite",
+        Clock(SAMPLE_NOW),
+        start_worker=True,
+        http=client,
+        connect=connect,
+        coinalyze_key=KEY,
+    )
+
+    with TestClient(app) as http:
+        wait_for(lambda: seen)
+        wait_for(lambda: http.get(f"{PREFIX}/status").json()["last_run_at"])
+        hosts = {h["host"]: h for h in http.get(f"{PREFIX}/status").json()["hosts"]}
+
+    # The key travels in the header of the Coinalyze requests alone.
+    assert {request.headers["api_key"] for request in seen} == {KEY}
+    assert not any(KEY in str(request.url) for request in seen)
+    assert hosts[CZ_HOST]["error"] is None and hosts[CZ_HOST]["last_success"] is not None
+
+
+def test_without_a_key_the_worker_records_key_missing_and_asks_nothing(tmp_path: Path):
+    client, connect, seen = coinalyze_listener()
+    app = router_app(
+        tmp_path / "perps.sqlite",
+        Clock(SAMPLE_NOW),
+        start_worker=True,
+        http=client,
+        connect=connect,
+    )
+
+    with TestClient(app) as http:
+        wait_for(lambda: http.get(f"{PREFIX}/status").json()["last_run_at"])
+        hosts = {h["host"]: h for h in http.get(f"{PREFIX}/status").json()["hosts"]}
+
+    assert seen == []
+    assert hosts[CZ_HOST] == {
+        "host": CZ_HOST,
+        "last_success": None,
+        "error": "key_missing",
+        "backoff_until": None,
+    }
+
+
+def test_create_app_takes_the_coinalyze_key_from_its_argument_or_the_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    runs = iter(range(10))
+
+    def keys(**options: Any) -> set[str]:
+        client, connect, seen = coinalyze_listener()
+        app = create_app(
+            tmp_path / f"run-{next(runs)}" / "m.sqlite",
+            start_perps=True,
+            perps_http=client,
+            perps_connect=connect,
+            **options,
+        )
+        with other_workers_held(), TestClient(app) as http:
+            wait_for(lambda: http.get(f"{PREFIX}/status").json()["last_run_at"])
+        return {request.headers["api_key"] for request in seen}
+
+    assert keys() == set()  # no variable and no .env: no key
+    assert keys(coinalyze_key=KEY) == {KEY}
+    monkeypatch.setenv("WHEELHOUSE_COINALYZE_KEY", "from-the-environment")
+    assert keys() == {"from-the-environment"}
+    assert keys(coinalyze_key=KEY) == {KEY}
 
 
 def test_sample_json_regenerates_identically(tmp_path: Path):

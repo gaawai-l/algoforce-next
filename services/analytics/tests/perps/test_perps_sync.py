@@ -10,7 +10,7 @@ import shutil
 import threading
 import time
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -20,17 +20,43 @@ import pytest
 from wheelhouse_service import derive
 from wheelhouse_service.market import timestamp
 from wheelhouse_service.onchain.store import OnchainStore
-from wheelhouse_service.perps.rows import Exchange, Kline, OiPoint, RawLiquidation, Trade
+from wheelhouse_service.perps import sync as sync_module
+from wheelhouse_service.perps.coinalyze import (
+    BASE_ASSET,
+    FIELDS,
+    KIND_VENUES,
+    MARKETS_PATH,
+    PATHS,
+    STEPS,
+    SYMBOLS,
+    Coinalyze,
+    Interval,
+    MarketCheck,
+)
+from wheelhouse_service.perps.rows import (
+    CzKind,
+    CzPoint,
+    CzVenue,
+    Exchange,
+    Kline,
+    OiPoint,
+    RawLiquidation,
+    Trade,
+)
 from wheelhouse_service.perps.sources import (
     ARCHIVE_HOST,
     BINANCE_HOST,
     BYBIT_HOST,
+    CZ_HOST,
     PerpsRest,
     RestError,
 )
 from wheelhouse_service.perps.states import Grid, StatesResult, Window, compute_states
 from wheelhouse_service.perps.store import PerpsStore, Venue
 from wheelhouse_service.perps.sync import (
+    CZ_CALLS_PER_MINUTE,
+    CZ_SETTLE,
+    H4,
     RETENTION_DAYS,
     Directions,
     HostState,
@@ -41,6 +67,7 @@ from wheelhouse_service.perps.sync import (
     gaps,
     next_slot,
     qty_units,
+    stored_markets,
 )
 from wheelhouse_service.rules import ALL_RULES, Rules
 
@@ -55,6 +82,11 @@ LAST_BAR = NOW_TS // BAR * BAR - BAR  # the last closed 5m bar opens at 11:55
 EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit")
 WINDOWS: tuple[Window, ...] = ("4h", "8h")
 ARCHIVE_SHIFT = 0.5  # archive OI differs from hist OI so that the source of a row shows
+M5 = 300
+KEY = "test-key-0000"
+WINDOW = NOW_TS // H4 * H4  # 12:00, the 4hour window forming at NOW
+NEWEST = WINDOW - H4  # 08:00, the newest closed 4hour window
+CLOSED_5MIN = NOW_TS // M5 * M5 - M5  # 11:55, the newest closed 5min interval
 V1: Rules = frozenset()
 O1: Rules = frozenset({"O1"})
 O6: Rules = frozenset({"O6"})
@@ -199,6 +231,168 @@ def clock() -> Clock:
 @pytest.fixture
 def rest(clock: Clock) -> FakeRest:
     return FakeRest(clock)
+
+
+def clock_ts(hour: int, minute: int) -> int:
+    return int(clock_time(hour, minute).timestamp())
+
+
+def cz_point(t: int, revision: int = 0) -> CzPoint:
+    return CzPoint(t=t, a=1.0 + t % 97 + revision, b=2.0 + t % 89)
+
+
+CZ_CHECKS = [
+    MarketCheck(venue=venue, symbol=symbol, denominated=BASE_ASSET, buy_sell=True, ok=True)
+    for venue, symbol in SYMBOLS.items()
+]
+
+
+class Meter:
+    """The worker's monotonic clock and pause, faked: a pause moves the clock instead of
+    sleeping, and answers as asked whether the worker is stopping."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.pauses: list[float] = []
+        self.stop = False
+
+    def __call__(self) -> float:
+        return self.now
+
+    def pause(self, seconds: float) -> bool:
+        self.pauses.append(seconds)
+        self.now += seconds
+        return self.stop
+
+
+class FakeCoinalyze(Coinalyze):
+    """Coinalyze over synthetic closed series, every call recorded and no request made.
+
+    `times` holds the meter's time and the symbols charged for each request, markets included;
+    each request takes `latency` seconds of it.
+    """
+
+    def __init__(self, clock: Clock, meter: Meter, latency: float = 0.0) -> None:
+        super().__init__(PerpsRest(clock=clock), KEY, clock)
+        self.clock = clock
+        self.meter = meter
+        self.latency = latency
+        self.calls: list[tuple[CzKind, Interval, int, int]] = []
+        self.times: list[tuple[float, int]] = []
+        self.markets_calls = 0
+        self.revision = 0  # added to every value: a later fetch that corrects an earlier one
+        self.late: dict[tuple[CzKind, CzVenue], int] = {}  # a venue's data ends at this stamp
+        self.checks = CZ_CHECKS
+        self.history_error: RestError | None = None
+        self.markets_error: RestError | None = None
+
+    def _charge(self, cost: int) -> None:
+        self.times.append((self.meter.now, cost))
+        self.meter.now += self.latency
+
+    def history(
+        self, kind: CzKind, interval: Interval, frm: int, to: int
+    ) -> dict[CzVenue, list[CzPoint]]:
+        self.calls.append((kind, interval, frm, to))
+        self._charge(len(KIND_VENUES[kind]))
+        if self.history_error:
+            raise self.history_error
+        step, now = STEPS[interval], self.clock().timestamp()
+        return {
+            venue: [
+                cz_point(t, self.revision)
+                for t in range(-(-frm // step) * step, to + 1, step)
+                if t + step <= now and t <= self.late.get((kind, venue), t)
+            ]
+            for venue in KIND_VENUES[kind]
+        }
+
+    def markets(self) -> list[MarketCheck]:
+        self.markets_calls += 1
+        self._charge(1)
+        if self.markets_error:
+            raise self.markets_error
+        return list(self.checks)
+
+
+def wire(
+    omit_liq: frozenset[str] = frozenset(),
+) -> Callable[[httpx.Request], httpx.Response]:
+    """Coinalyze's replies in its own shape: every interval from `from` to `to` for each symbol
+    asked for, the ones still open at `to` included. The liquidation symbols in `omit_liq` are
+    left out, as Coinalyze does for a symbol with nothing to report."""
+    paths = {path: kind for kind, path in PATHS.items()}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == MARKETS_PATH:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "symbol": symbol,
+                        "oi_lq_vol_denominated_in": BASE_ASSET,
+                        "has_buy_sell_data": True,
+                    }
+                    for symbol in SYMBOLS.values()
+                ],
+            )
+        query = request.url.params
+        kind = paths[request.url.path]
+        step = STEPS[query["interval"]]
+        first, second = FIELDS[kind]
+        stamps = range(-(-int(query["from"]) // step) * step, int(query["to"]) + 1, step)
+        history = [{"t": t, first: cz_point(t).a, second: cz_point(t).b} for t in stamps]
+        left_out = omit_liq if kind == "liq" else frozenset()
+        symbols = [symbol for symbol in query["symbols"].split(",") if symbol not in left_out]
+        return httpx.Response(
+            200, json=[{"symbol": symbol, "history": history} for symbol in symbols]
+        )
+
+    return handler
+
+
+def real_coinalyze(
+    clock: Clock, handler: Callable[[httpx.Request], httpx.Response], key: str | None = KEY
+) -> tuple[Coinalyze, list[httpx.Request]]:
+    """The real client over a handler, and the requests the handler saw."""
+    seen: list[httpx.Request] = []
+
+    def record(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return handler(request)
+
+    rest = PerpsRest(httpx.Client(transport=httpx.MockTransport(record)), clock)
+    return Coinalyze(rest, key, clock), seen
+
+
+def cz_worker(
+    store: PerpsStore,
+    rest: PerpsRest,
+    clock: Clock,
+    coinalyze: Coinalyze,
+    meter: Meter,
+    horizon_days: int = 2,
+) -> PerpsSync:
+    return PerpsSync(
+        store,
+        rest,
+        clock=clock,
+        rules=V1,
+        horizon_days=horizon_days,
+        coinalyze=coinalyze,
+        monotonic=meter,
+        pause=meter.pause,
+    )
+
+
+@pytest.fixture
+def meter() -> Meter:
+    return Meter()
+
+
+@pytest.fixture
+def cz(clock: Clock, meter: Meter) -> FakeCoinalyze:
+    return FakeCoinalyze(clock, meter)
 
 
 def worker(
@@ -1035,3 +1229,495 @@ def test_derive_command_rederives_the_perps_of_a_copy(
     derive.main(["--data-dir", str(bare), "--rules", "O6"])
     assert capsys.readouterr().out == "derived none\n"
     assert not (bare / "perps.sqlite").exists()
+
+
+# --- Coinalyze history (proposal §3.2, §3.4, §3.7). ---
+
+
+def test_without_a_coinalyze_client_nothing_is_fetched_or_recorded(
+    store: PerpsStore, rest: FakeRest, clock: Clock
+):
+    assert worker(store, rest, clock).run_once()
+
+    assert all(store.cz_latest(kind, step) == {} for kind in KIND_VENUES for step in (H4, M5))
+    assert stored_markets(store.state()) == []
+    assert hosts_of(store)[CZ_HOST] == HostState(last_success=None, error=None, until=None)
+
+
+def test_first_round_backfills_4hour_from_grid_start_and_5min_from_previous_window(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    start = start_of(2)
+    assert H4 == 14_400
+    cz_worker(store, rest, clock, cz, meter).run_once()
+
+    # Per kind the 4hour history, then the 5min one; the unit check follows all three.
+    assert cz.calls == [
+        (kind, interval, frm, NOW_TS)
+        for kind in KIND_VENUES
+        for interval, frm in (("4hour", start), ("5min", WINDOW - H4))
+    ]
+    assert len(cz.calls) == 6 and cz.markets_calls == 1
+    assert [cost for _, cost in cz.times] == [3, 3, 3, 3, 2, 2, 1]
+    for kind, venues in KIND_VENUES.items():
+        for venue in venues:
+            four = store.cz_series(kind, H4, venue, 0)
+            five = store.cz_series(kind, M5, venue, 0)
+            assert list(four) == list(range(start, NEWEST + 1, H4))
+            assert list(five) == list(range(WINDOW - H4, CLOSED_5MIN + 1, M5))
+            assert four[NEWEST] == cz_point(NEWEST) and five[CLOSED_5MIN] == cz_point(CLOSED_5MIN)
+        assert store.cz_latest(kind, H4) == dict.fromkeys(venues, NEWEST)
+        assert store.cz_latest(kind, M5) == dict.fromkeys(venues, CLOSED_5MIN)
+        assert json.loads(store.state()[f"cz_4h:{kind}"] or "") == {"from": start}
+    assert stored_markets(store.state()) == CZ_CHECKS
+    assert datetime.fromisoformat(store.state()["cz_markets_at"] or "") == NOW
+    assert hosts_of(store)[CZ_HOST] == HostState(last_success=NOW, error=None, until=None)
+    # The round went on to derive the payloads.
+    assert store.derived(derived_key("all", "4h")) is not None
+
+
+def test_next_round_in_the_same_window_after_settling_fetches_only_5min(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    sync = cz_worker(store, rest, clock, cz, meter)
+    sync.run_once()
+    cz.calls.clear()
+
+    # 13:05 is more than CZ_SETTLE after the 12:00 close, and the 12:00 window is still forming.
+    assert CZ_SETTLE == 3600
+    clock.now = clock_time(13, 5)
+    assert sync.run_once()
+
+    assert cz.calls == [
+        (kind, "5min", WINDOW - H4, clock_ts(13, 5)) for kind in ("liq", "ohlcv", "oi")
+    ]
+    assert cz.markets_calls == 1
+    # The 5min series reaches the newest closed interval.
+    assert store.cz_latest("liq", M5) == dict.fromkeys(KIND_VENUES["liq"], clock_ts(13, 0))
+
+
+def test_rounds_in_the_first_hour_after_a_close_refetch_the_last_three_windows(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    sync = cz_worker(store, rest, clock, cz, meter)
+    sync.run_once()
+
+    # The 12:00 close is not settled before 13:00. Each round fetches again the last OVERLAP
+    # (3) windows: from min(latest) - 2 * H4.
+    for minute in (5, 15, 25, 35, 45, 55):
+        cz.calls.clear()
+        cz.revision += 1
+        clock.now = clock_time(12, minute)
+        assert sync.run_once()
+        four = [call for call in cz.calls if call[1] == "4hour"]
+        assert four == [
+            (kind, "4hour", NEWEST - 2 * H4, clock_ts(12, minute)) for kind in KIND_VENUES
+        ], minute
+    # The corrected windows were replaced, the ones before them left as they were.
+    series = store.cz_series("oi", H4, "okx", 0)
+    assert series[NEWEST] == cz_point(NEWEST, 6)
+    assert series[NEWEST - 2 * H4] == cz_point(NEWEST - 2 * H4, 6)
+    assert series[NEWEST - 3 * H4] == cz_point(NEWEST - 3 * H4, 0)
+
+    cz.calls.clear()
+    clock.now = clock_time(13, 5)
+    assert sync.run_once()
+    assert [call for call in cz.calls if call[1] == "4hour"] == []
+
+
+def test_a_closed_window_is_picked_up_by_the_round_after_it_closes(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    sync = cz_worker(store, rest, clock, cz, meter)
+    sync.run_once()
+    assert store.cz_latest("liq", H4) == dict.fromkeys(KIND_VENUES["liq"], NEWEST)
+    assert max(store.cz_series("liq", M5, "bybit", 0)) == CLOSED_5MIN
+
+    # The next window closes at 16:00. Nothing was kept back that could skip it: the round at
+    # 16:05 fetches it as a correction, and the 5min from 12:00 on.
+    cz.calls.clear()
+    clock.now = clock_time(16, 5)
+    assert sync.run_once()
+
+    assert ("liq", "4hour", NEWEST - 2 * H4, clock_ts(16, 5)) in cz.calls
+    assert ("liq", "5min", WINDOW, clock_ts(16, 5)) in cz.calls
+    assert store.cz_latest("liq", H4) == dict.fromkeys(KIND_VENUES["liq"], WINDOW)
+    assert max(store.cz_series("liq", M5, "bybit", 0)) == clock_ts(16, 0)
+
+
+def test_a_venue_behind_the_newest_window_pulls_a_correction_after_settling(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    sync = cz_worker(store, rest, clock, cz, meter)
+    cz.late[("ohlcv", "okx")] = NEWEST - H4  # OKX's volume is a window late
+    sync.run_once()
+    clock.now = clock_time(13, 5)
+    cz.calls.clear()
+    assert sync.run_once()
+
+    # Settled, but OKX's volume has no row for the newest window: fetched again from three
+    # windows before its newest, and only that kind.
+    assert [call for call in cz.calls if call[1] == "4hour"] == [
+        ("ohlcv", "4hour", NEWEST - H4 - 2 * H4, clock_ts(13, 5))
+    ]
+    assert store.cz_latest("ohlcv", H4) == {
+        "bybit": NEWEST,
+        "okx": NEWEST - H4,
+        "hyperliquid": NEWEST,
+    }
+
+    del cz.late[("ohlcv", "okx")]
+    clock.now = clock_time(13, 15)
+    cz.calls.clear()
+    assert sync.run_once()
+    assert len([call for call in cz.calls if call[1] == "4hour"]) == 1
+    assert store.cz_latest("ohlcv", H4)["okx"] == NEWEST
+
+    clock.now = clock_time(13, 25)
+    cz.calls.clear()
+    assert sync.run_once()
+    assert [call for call in cz.calls if call[1] == "4hour"] == []
+
+
+def test_4hour_is_backfilled_again_without_a_marker_from_a_later_start_or_with_a_venue_missing(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    start = start_of(2)
+    cz.late[("ohlcv", "hyperliquid")] = start - 1  # nothing in the grid: no rows at all
+    sync = cz_worker(store, rest, clock, cz, meter)
+    sync.run_once()
+    assert store.cz_latest("ohlcv", H4).keys() == {"bybit", "okx"}
+
+    def four(minutes: int) -> list[tuple[CzKind, Interval, int, int]]:
+        cz.calls.clear()
+        clock.now = clock_time(13, minutes)
+        assert sync.run_once()
+        return [call for call in cz.calls if call[1] == "4hour"]
+
+    # A venue without rows is fetched from the grid start, round after round.
+    assert four(5) == [("ohlcv", "4hour", start, clock_ts(13, 5))]
+    assert four(15) == [("ohlcv", "4hour", start, clock_ts(13, 15))]
+    del cz.late[("ohlcv", "hyperliquid")]
+    assert four(25) == [("ohlcv", "4hour", start, clock_ts(13, 25))]
+    assert four(35) == []
+
+    # No marker: that kind starts over.
+    store.set_state(**{"cz_4h:oi": None})
+    assert four(45) == [("oi", "4hour", start, clock_ts(13, 45))]
+    assert json.loads(store.state()["cz_4h:oi"] or "") == {"from": start}
+    assert four(55) == []
+
+    # A marker from a later start than the grid's, as after a longer horizon is configured.
+    store.set_state(**{"cz_4h:liq": json.dumps({"from": start + DAY})})
+    clock.now = clock_time(14, 5)
+    cz.calls.clear()
+    assert sync.run_once()
+    assert [call for call in cz.calls if call[1] == "4hour"] == [
+        ("liq", "4hour", start, clock_ts(14, 5))
+    ]
+    assert json.loads(store.state()["cz_4h:liq"] or "") == {"from": start}
+
+    # A marker from an earlier start is enough: the grid moves forward each day.
+    store.set_state(**{"cz_4h:liq": json.dumps({"from": start - DAY})})
+    clock.now = clock_time(14, 15)
+    cz.calls.clear()
+    assert sync.run_once()
+    assert [call for call in cz.calls if call[1] == "4hour"] == []
+
+
+def test_open_bars_are_never_stored(store: PerpsStore, rest: FakeRest, clock: Clock):
+    # Coinalyze's replies reach to `to`, so they hold the intervals still open: 12:00 of both
+    # steps. OKX's liquidations are left out, as for a symbol with nothing to report.
+    client, _ = real_coinalyze(clock, wire(omit_liq=frozenset({SYMBOLS["okx"]})))
+    sync = cz_worker(store, rest, clock, client, Meter())
+    sync.run_once()
+
+    start = start_of(2)
+    for kind, venues in KIND_VENUES.items():
+        for venue in venues:
+            assert max(store.cz_series(kind, H4, venue, 0)) == NEWEST, (kind, venue)
+            assert max(store.cz_series(kind, M5, venue, 0)) == CLOSED_5MIN, (kind, venue)
+    # Zero only where Coinalyze left a closed interval out of a liquidation range.
+    for step, first, last in ((H4, start, NEWEST), (M5, WINDOW - H4, CLOSED_5MIN)):
+        okx = store.cz_series("liq", step, "okx", 0)
+        assert list(okx) == list(range(first, last + 1, step))
+        assert all(p.filled and (p.a, p.b) == (0.0, 0.0) for p in okx.values())
+        binance = store.cz_series("liq", step, "binance", 0)
+        assert not any(p.filled for p in binance.values())
+    assert max(store.cz_series("oi", M5, "okx", 0)) == CLOSED_5MIN
+
+    # They are stored once they have closed.
+    clock.now = clock_time(16, 5)
+    sync.run_once()
+    assert max(store.cz_series("liq", H4, "binance", 0)) == WINDOW
+    assert max(store.cz_series("liq", M5, "binance", 0)) == clock_ts(16, 0)
+    assert store.cz_series("liq", M5, "binance", 0)[WINDOW] == cz_point(WINDOW)
+
+
+def test_coinalyze_calls_are_paced(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    sync = cz_worker(store, rest, clock, cz, meter)
+    sync.run_once()
+
+    # A first round costs 8 + 8 + 1 = 17 symbol-calls, under the limit: no wait.
+    assert CZ_CALLS_PER_MINUTE == 20
+    assert sum(cost for _, cost in cz.times) == 17
+    assert meter.pauses == []
+
+    # A second one in the same minute, past the settling hour, adds the 8 of the 5min series.
+    clock.now = clock_time(13, 5)
+    assert sync.run_once()
+
+    assert sum(cost for _, cost in cz.times) == 25 > CZ_CALLS_PER_MINUTE
+    # The first of them fits (17 + 3 = 20). The next would be 23: it waits for the minute to
+    # pass, then the rest go.
+    assert meter.pauses == [60.0]
+    assert [at for at, _ in cz.times[-3:]] == [0.0, 60.0, 60.0]
+    for at, _ in cz.times:
+        spent = sum(cost for t, cost in cz.times if at - 60 < t <= at)
+        assert spent <= CZ_CALLS_PER_MINUTE, at
+    assert store.cz_latest("oi", M5) == dict.fromkeys(KIND_VENUES["oi"], clock_ts(13, 0))
+
+
+def test_a_host_that_is_closed_is_not_waited_for(
+    store: PerpsStore,
+    rest: FakeRest,
+    clock: Clock,
+    cz: FakeCoinalyze,
+    meter: Meter,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(sync_module, "CZ_CALLS_PER_MINUTE", 18)
+    sync = cz_worker(store, rest, clock, cz, meter)
+    sync.run_once()  # 17 of the 18 are spent
+    asked = len(cz.times)
+
+    # Backed off by an earlier 429: the next request would have to wait, but none is made.
+    until = timestamp(clock_time(14, 0))
+    store.set_state(
+        hosts=json.dumps({CZ_HOST: {"last_success": None, "error": "429", "until": until}})
+    )
+    clock.now = clock_time(13, 5)
+    assert sync.run_once()
+
+    assert len(cz.times) == asked and meter.pauses == []
+    assert hosts_of(store)[CZ_HOST].error == "429"
+
+
+def test_a_pause_lasts_only_until_enough_calls_have_left_the_minute(
+    store: PerpsStore,
+    rest: FakeRest,
+    clock: Clock,
+    meter: Meter,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(sync_module, "CZ_CALLS_PER_MINUTE", 7)
+    cz = FakeCoinalyze(clock, meter, latency=10.0)  # a request takes ten seconds
+    cz_worker(store, rest, clock, cz, meter).run_once()
+
+    # Costs 3, 3, 3, 3, 2, 2, 1 against 7 a minute. The first two requests (at 0 and 10) take 6.
+    # The third, ready at 20, needs only the first to leave the minute: 60 - 20 = 40 s, not the
+    # 50 s that would empty it. The fifth is ready at 80 with the third and fourth in the minute
+    # (60 and 70) and waits for the third to leave: 60 + 60 - 80 = 40 s.
+    assert meter.pauses == [40.0, 40.0]
+    assert [at for at, _ in cz.times] == [0.0, 10.0, 60.0, 70.0, 120.0, 130.0, 140.0]
+    for at, _ in cz.times:
+        assert sum(cost for t, cost in cz.times if at - 60 < t <= at) <= 7, at
+    # Every request went out: the waits only delayed them.
+    assert len(cz.calls) == 6 and cz.markets_calls == 1
+
+
+def test_a_stop_while_pacing_abandons_the_round_before_the_next_request(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    sync = cz_worker(store, rest, clock, cz, meter)
+    sync.run_once()
+    last_run = store.state()["last_run_at"]
+    cz.calls.clear()
+
+    # In the second round the second request has to wait, and the worker is stopping.
+    meter.stop = True
+    clock.now = clock_time(13, 5)
+    assert sync.run_once()
+
+    assert meter.pauses == [60.0]
+    assert cz.calls == [("liq", "5min", WINDOW - H4, clock_ts(13, 5))]  # nothing after the wait
+    assert store.cz_latest("liq", M5) == dict.fromkeys(KIND_VENUES["liq"], clock_ts(13, 0))
+    assert store.cz_latest("ohlcv", M5) == dict.fromkeys(KIND_VENUES["ohlcv"], CLOSED_5MIN)
+    assert store.cz_latest("oi", M5) == dict.fromkeys(KIND_VENUES["oi"], CLOSED_5MIN)
+    # A stopped round is neither a failure nor a finished round.
+    state = store.state()
+    assert state["last_run_at"] == last_run and state["last_error"] is None
+    found = store.derived(derived_key("all", "4h"))
+    assert found is not None and found[1] == NOW
+
+    # Not stopping any more, the next call carries the round through.
+    meter.stop = False
+    cz.calls.clear()
+    assert sync.run_once()
+    assert [call[0] for call in cz.calls] == ["liq", "ohlcv", "oi"]
+    assert store.cz_latest("oi", M5) == dict.fromkeys(KIND_VENUES["oi"], clock_ts(13, 0))
+    assert store.state()["last_run_at"] != last_run
+
+
+def test_the_default_pause_is_the_stop_event_wait(store: PerpsStore, rest: FakeRest, clock: Clock):
+    sync = PerpsSync(store, rest, clock=clock, rules=V1)
+    sync.stopping.set()
+    # Event.wait: True at once when the worker is stopping.
+    assert sync.pause(60.0) is True
+
+
+def test_coinalyze_429_closes_only_its_host(store: PerpsStore, rest: FakeRest, clock: Clock):
+    client, seen = real_coinalyze(clock, lambda request: httpx.Response(429))
+    sync = cz_worker(store, rest, clock, client, Meter())
+    assert sync.run_once()
+
+    # The first request failed, which ended Coinalyze's round.
+    assert len(seen) == 1
+    hosts = hosts_of(store)
+    cz_host = hosts[CZ_HOST]
+    assert cz_host.error == "429" and cz_host.last_success is None
+    assert cz_host.until is not None and cz_host.until >= NOW + timedelta(seconds=60)
+    assert store.cz_latest("liq", H4) == {}
+    # The exchanges' rows and the payloads are written as in any other round.
+    assert hosts[BINANCE_HOST] == HostState(last_success=NOW, error=None, until=None)
+    assert hosts[BYBIT_HOST] == HostState(last_success=NOW, error=None, until=None)
+    assert max(store.klines("binance", 0)) == LAST_BAR
+    assert max(store.klines("bybit", 0)) == LAST_BAR
+    assert max(store.oi("bybit", 0)) == NOW_TS // BAR * BAR
+    assert store.state()["last_error"] is None
+    assert payload(store, "all", "4h").states is not None
+
+    # A restarted worker keeps the stored backoff though its client forgot it ...
+    again, again_seen = real_coinalyze(clock, wire())
+    restarted = cz_worker(store, FakeRest(clock), clock, again, Meter())
+    clock.now = NOW + timedelta(seconds=30)
+    assert restarted.run_once()
+    assert again_seen == []
+    assert hosts_of(store)[CZ_HOST] == cz_host
+
+    # ... and asks once it is over: the success clears the error.
+    clock.now = clock_time(12, 5)
+    assert restarted.run_once()
+    assert len(again_seen) > 1
+    assert hosts_of(store)[CZ_HOST] == HostState(last_success=clock.now, error=None, until=None)
+    assert store.cz_latest("liq", H4)
+
+
+def test_key_missing_records_host_error(store: PerpsStore, rest: FakeRest, clock: Clock):
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("a request went out without a key")
+
+    for key in (None, ""):
+        client, seen = real_coinalyze(clock, refuse, key=key)
+        assert cz_worker(store, rest, clock, client, Meter()).run_once()
+
+        assert seen == []
+        assert hosts_of(store)[CZ_HOST] == HostState(
+            last_success=None, error="key_missing", until=None
+        )
+        assert store.cz_latest("liq", H4) == {}
+        assert stored_markets(store.state()) == []
+        assert max(store.klines("bybit", 0)) == int(clock.now.timestamp()) // BAR * BAR - BAR
+        assert payload(store, "all", "4h").states is not None
+        clock.now = clock_time(12, 5)
+
+
+def test_401_does_not_hold_the_host_into_the_next_round(
+    store: PerpsStore, rest: FakeRest, clock: Clock
+):
+    status = {"code": 401}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401) if status["code"] == 401 else wire()(request)
+
+    client, seen = real_coinalyze(clock, handler)
+    sync = cz_worker(store, rest, clock, client, Meter())
+    assert sync.run_once()
+
+    # Given up on for the round, with no backoff to carry over.
+    assert len(seen) == 1
+    assert hosts_of(store)[CZ_HOST] == HostState(last_success=None, error="401", until=None)
+
+    # A new key works at the next round, not ten minutes after it.
+    status["code"] = 200
+    clock.now = clock_time(12, 5)
+    assert sync.run_once()
+    assert len(seen) > 1
+    assert hosts_of(store)[CZ_HOST] == HostState(last_success=clock.now, error=None, until=None)
+    assert store.cz_latest("liq", H4)
+
+
+def test_markets_checked_once_a_day(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    sync = cz_worker(store, rest, clock, cz, meter)
+    assert stored_markets(store.state()) == []
+    sync.run_once()
+    assert cz.markets_calls == 1
+
+    for now in (clock_time(13, 5), clock_time(20, 5), NOW + timedelta(days=1, seconds=-1)):
+        clock.now = now
+        assert sync.run_once()
+    assert cz.markets_calls == 1
+
+    # A day on, it is read again, and the new result replaces the old one.
+    cz.checks = [
+        check.model_copy(update={"ok": False}) if check.venue == "okx" else check
+        for check in CZ_CHECKS
+    ]
+    clock.now = clock_time(12, 5) + timedelta(days=1)
+    assert sync.run_once()
+    assert cz.markets_calls == 2
+    assert stored_markets(store.state()) == cz.checks
+    assert datetime.fromisoformat(store.state()["cz_markets_at"] or "") == clock.now
+
+    # A failed read keeps the last result, and is tried again at the next round.
+    before = dict(store.state())
+    cz.markets_error = RestError(CZ_HOST, "500")
+    clock.now = clock_time(12, 5) + timedelta(days=2)
+    assert sync.run_once()
+    assert cz.markets_calls == 3
+    assert stored_markets(store.state()) == cz.checks
+    assert store.state()["cz_markets_at"] == before["cz_markets_at"]
+    assert hosts_of(store)[CZ_HOST].error == "500"
+
+    cz.markets_error = None
+    cz.checks = CZ_CHECKS
+    clock.now += timedelta(minutes=10)
+    assert sync.run_once()
+    assert cz.markets_calls == 4
+    assert stored_markets(store.state()) == CZ_CHECKS
+    assert hosts_of(store)[CZ_HOST].error is None
+
+
+def test_markets_are_not_read_after_a_failed_history_request(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    cz.history_error = RestError(CZ_HOST, "500")
+    assert cz_worker(store, rest, clock, cz, meter).run_once()
+
+    # The host is closed for the rest of the round: one request, no unit check.
+    assert len(cz.calls) == 1 and cz.markets_calls == 0
+    assert hosts_of(store)[CZ_HOST].error == "500"
+    assert store.cz_latest("liq", H4) == {}
+    assert "cz_4h:liq" not in store.state()
+
+
+def test_round_prunes_cz_5min_after_a_day_and_4hour_after_125(
+    store: PerpsStore, rest: FakeRest, clock: Clock, cz: FakeCoinalyze, meter: Meter
+):
+    old_5min = (NOW_TS - 2 * DAY) // M5 * M5
+    kept_5min = (NOW_TS - DAY + 2 * 3600) // M5 * M5
+    old_4h = (NOW_TS - 126 * DAY) // H4 * H4
+    kept_4h = (NOW_TS - 124 * DAY) // H4 * H4
+    store.upsert_cz("oi", M5, "okx", [cz_point(old_5min), cz_point(kept_5min)])
+    store.upsert_cz("oi", H4, "okx", [cz_point(old_4h), cz_point(kept_4h)])
+
+    cz_worker(store, rest, clock, cz, meter).run_once()
+
+    assert old_5min not in store.cz_series("oi", M5, "okx", 0)
+    assert kept_5min in store.cz_series("oi", M5, "okx", 0)
+    assert old_4h not in store.cz_series("oi", H4, "okx", 0)
+    assert kept_4h in store.cz_series("oi", H4, "okx", 0)

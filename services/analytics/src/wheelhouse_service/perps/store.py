@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
 from ..market import digest, timestamp
-from .rows import Kline, OiPoint, RawLiquidation, Stream, Trade
+from .coinalyze import STEPS
+from .rows import CzKind, CzPoint, CzVenue, Kline, OiPoint, RawLiquidation, Stream, Trade
 from .states import STEP
 
 Venue = Literal["binance", "bybit"]
@@ -127,6 +128,16 @@ class PerpsStore:
                 [(venue, r.t, r.oi, r.source) for r in rows],
             )
 
+    def upsert_cz(self, kind: CzKind, step: int, venue: CzVenue, points: Sequence[CzPoint]) -> None:
+        """Store closed Coinalyze intervals; an interval fetched again replaces the stored one."""
+        with self.connection(write=True) as db:
+            db.executemany(
+                "INSERT INTO cz_series(venue, kind, step, t, a, b, filled) VALUES(?,?,?,?,?,?,?) "
+                "ON CONFLICT(venue, kind, step, t) DO UPDATE SET "
+                "a=excluded.a, b=excluded.b, filled=excluded.filled",
+                [(venue, kind, step, p.t, p.a, p.b, int(p.filled)) for p in points],
+            )
+
     def record_trades(self, venue: Venue, trades: Sequence[Trade]) -> None:
         """Add the trades whose id is new to their 10m buckets; ids already seen are skipped."""
         sums: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])  # bucket: [buy, sell]
@@ -195,6 +206,28 @@ class PerpsStore:
         with self.connection() as db:
             row = db.execute("SELECT source FROM oi WHERE venue=? AND t=?", (venue, t)).fetchone()
         return None if row is None else str(row[0])
+
+    def cz_series(self, kind: CzKind, step: int, venue: CzVenue, since: int) -> dict[int, CzPoint]:
+        """The stored Coinalyze intervals starting at or after `since`, by start time."""
+        with self.connection() as db:
+            rows = db.execute(
+                "SELECT t, a, b, filled FROM cz_series "
+                "WHERE venue=? AND kind=? AND step=? AND t>=?",
+                (venue, kind, step, since),
+            ).fetchall()
+        return {
+            row["t"]: CzPoint(t=row["t"], a=row["a"], b=row["b"], filled=bool(row["filled"]))
+            for row in rows
+        }
+
+    def cz_latest(self, kind: CzKind, step: int) -> dict[CzVenue, int]:
+        """The start of each venue's newest stored interval; a venue without rows is absent."""
+        with self.connection() as db:
+            rows = db.execute(
+                "SELECT venue, MAX(t) FROM cz_series WHERE kind=? AND step=? GROUP BY venue",
+                (kind, step),
+            ).fetchall()
+        return {row[0]: row[1] for row in rows}
 
     def trades(self, venue: Venue, since: int) -> dict[int, tuple[float, float]]:
         """(buy, sell) by 10m bucket, from `since` on."""
@@ -317,12 +350,16 @@ class PerpsStore:
         with self.connection() as db:
             return {row["key"]: row["value"] for row in db.execute("SELECT * FROM sync_state")}
 
-    def prune(self, before: int, trade_ids_before: float) -> None:
-        """Drop everything older than `before`, coverage included, and trade ids older than
-        `trade_ids_before`."""
+    def prune(self, before: int, trade_ids_before: float, cz_5min_before: int) -> None:
+        """Drop everything older than `before`, coverage included, trade ids older than
+        `trade_ids_before` and Coinalyze 5min intervals older than `cz_5min_before`."""
         with self.connection(write=True) as db:
             for table in ("kline", "oi", "trades_10m"):
                 db.execute(f"DELETE FROM {table} WHERE t<?", (before,))
+            db.execute("DELETE FROM cz_series WHERE step=? AND t<?", (STEPS["4hour"], before))
+            db.execute(
+                "DELETE FROM cz_series WHERE step=? AND t<?", (STEPS["5min"], cz_5min_before)
+            )
             db.execute("DELETE FROM liquidations WHERE event_ts<?", (before,))
             db.execute("DELETE FROM coverage WHERE end<?", (before,))
             db.execute("DELETE FROM trade_ids WHERE ts<?", (trade_ids_before,))

@@ -8,10 +8,12 @@ from pathlib import Path
 
 from wheelhouse_service.market import digest
 from wheelhouse_service.perps import store as store_module
-from wheelhouse_service.perps.rows import Kline, OiPoint, RawLiquidation, Trade
+from wheelhouse_service.perps.rows import CzPoint, Kline, OiPoint, RawLiquidation, Trade
 from wheelhouse_service.perps.store import PerpsStore, liquidation_fields
 
 DAY = 86_400
+H4 = 14_400
+M5 = 300
 T0 = 1_792_022_400  # 2026-10-15 00:00 UTC
 MIGRATIONS = Path(store_module.__file__).with_name("migrations")
 WS = Path(__file__).parent / "fixtures" / "ws"
@@ -45,9 +47,11 @@ def test_store_wal_and_migration(tmp_path: Path):
         assert [tuple(row) for row in db.execute("SELECT version FROM perps_schema")] == [
             (1,),
             (2,),
+            (3,),
         ]
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {
+        "cz_series",
         "kline",
         "oi",
         "trades_10m",
@@ -92,7 +96,7 @@ def test_migration_002_maps_stored_liquidations_as_inserts_do(tmp_path: Path):
 
     store = PerpsStore(path)
     with store.connection() as db:
-        assert [row[0] for row in db.execute("SELECT version FROM perps_schema")] == [1, 2]
+        assert [row[0] for row in db.execute("SELECT version FROM perps_schema")] == [1, 2, 3]
         migrated = [
             (row["venue"], row["raw_json"], (row["longs"], row["qty"], row["price"]))
             for row in db.execute("SELECT * FROM liquidations ORDER BY id")
@@ -137,6 +141,125 @@ def test_migration_002_maps_stored_liquidations_as_inserts_do(tmp_path: Path):
             )
         ]
     assert inserted == [fields for _, _, fields in migrated]
+
+
+def test_migration_003_creates_cz_series_and_drops_the_old_direction_check(tmp_path: Path):
+    """A database at version 2 holds a direction check in the shape P6 replaced: opening it
+    applies migration 003, which removes that row and leaves the other state alone."""
+    path = tmp_path / "perps.sqlite3"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE perps_schema(version INTEGER PRIMARY KEY, checksum TEXT NOT NULL)")
+    for name in ("001_perps.sql", "002_liquidation_fields.sql"):
+        sql = (MIGRATIONS / name).read_text()
+        for statement in sql.split(";"):
+            if statement.strip():
+                db.execute(statement)
+        db.execute("INSERT INTO perps_schema VALUES(?,?)", (int(name[:3]), digest(sql)))
+    db.executemany(
+        "INSERT INTO sync_state(key, value) VALUES(?,?)",
+        [("direction_check", '{"binance": {}}'), ("last_error", None), ("hosts", "{}")],
+    )
+    db.commit()
+    db.close()
+
+    store = PerpsStore(path)
+
+    with store.connection() as db:
+        assert [row[0] for row in db.execute("SELECT version FROM perps_schema")] == [1, 2, 3]
+        columns = {row[1]: row[2] for row in db.execute("PRAGMA table_info(cz_series)")}
+        assert db.execute("SELECT COUNT(*) FROM cz_series").fetchone()[0] == 0
+    assert columns == {
+        "venue": "TEXT",
+        "kind": "TEXT",
+        "step": "INTEGER",
+        "t": "INTEGER",
+        "a": "REAL",
+        "b": "REAL",
+        "filled": "INTEGER",
+    }
+    assert store.state() == {"last_error": None, "hosts": "{}"}
+
+
+def test_migration_003_has_no_semicolon_in_a_comment():
+    # PerpsStore splits a migration on ";", so one inside a comment would cut a statement.
+    for file in MIGRATIONS.glob("*.sql"):
+        for line in file.read_text().splitlines():
+            if line.lstrip().startswith("--"):
+                assert ";" not in line, f"{file.name}: {line}"
+
+
+def cz(t: int, a: float = 1.0, b: float = 2.0, *, filled: bool = False) -> CzPoint:
+    return CzPoint(t=t, a=a, b=b, filled=filled)
+
+
+def test_cz_upsert_replaces_and_reads_back_filled(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    store.upsert_cz("liq", H4, "binance", [cz(T0, 1.5, 2.5), cz(T0 + H4, filled=False)])
+    store.upsert_cz("liq", H4, "binance", [cz(T0 + 2 * H4, 0.0, 0.0, filled=True)])
+    store.upsert_cz("liq", H4, "bybit", [cz(T0, 9.0, 8.0)])
+    store.upsert_cz("liq", M5, "binance", [cz(T0, 7.0, 7.0)])
+    store.upsert_cz("oi", H4, "okx", [cz(T0, 70.0, 71.0)])
+
+    assert store.cz_series("liq", H4, "binance", T0) == {
+        T0: cz(T0, 1.5, 2.5),
+        T0 + H4: cz(T0 + H4),
+        T0 + 2 * H4: cz(T0 + 2 * H4, 0.0, 0.0, filled=True),
+    }
+    # A row is told apart by venue, kind and step, and `since` is inclusive.
+    assert store.cz_series("liq", H4, "binance", T0 + H4) == {
+        T0 + H4: cz(T0 + H4),
+        T0 + 2 * H4: cz(T0 + 2 * H4, 0.0, 0.0, filled=True),
+    }
+    assert store.cz_series("liq", H4, "bybit", 0) == {T0: cz(T0, 9.0, 8.0)}
+    assert store.cz_series("liq", M5, "binance", 0) == {T0: cz(T0, 7.0, 7.0)}
+    assert store.cz_series("oi", H4, "okx", 0) == {T0: cz(T0, 70.0, 71.0)}
+    assert store.cz_series("oi", H4, "hyperliquid", 0) == {}
+    assert store.cz_series("ohlcv", H4, "bybit", 0) == {}
+
+    # Fetching an interval again replaces it, whichever way `filled` changes.
+    store.upsert_cz(
+        "liq", H4, "binance", [cz(T0, 0.0, 0.0, filled=True), cz(T0 + 2 * H4, 4.0, 5.0)]
+    )
+    assert store.cz_series("liq", H4, "binance", 0) == {
+        T0: cz(T0, 0.0, 0.0, filled=True),
+        T0 + H4: cz(T0 + H4),
+        T0 + 2 * H4: cz(T0 + 2 * H4, 4.0, 5.0),
+    }
+    store.upsert_cz("liq", H4, "binance", [])  # nothing to write is fine
+
+
+def test_cz_latest_lists_only_the_venues_with_rows(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    assert store.cz_latest("liq", H4) == {}
+    store.upsert_cz("liq", H4, "binance", [cz(T0), cz(T0 + H4), cz(T0 + 2 * H4)])
+    store.upsert_cz("liq", H4, "okx", [cz(T0)])
+    store.upsert_cz("liq", M5, "bybit", [cz(T0 + 9 * M5)])
+    store.upsert_cz("ohlcv", H4, "bybit", [cz(T0 + 5 * H4)])
+
+    assert store.cz_latest("liq", H4) == {"binance": T0 + 2 * H4, "okx": T0}
+    assert store.cz_latest("liq", M5) == {"bybit": T0 + 9 * M5}
+    assert store.cz_latest("ohlcv", H4) == {"bybit": T0 + 5 * H4}
+    assert store.cz_latest("oi", H4) == {}
+
+
+def test_prune_keeps_125_days_of_4hour_and_one_day_of_5min(tmp_path: Path):
+    store = PerpsStore(tmp_path / "perps.sqlite3")
+    now = T0 + 130 * DAY
+    four_before, five_before = now - 125 * DAY, now - DAY
+    for venue in ("binance", "okx"):
+        store.upsert_cz(
+            "liq", H4, venue, [cz(four_before - H4), cz(four_before), cz(five_before - H4)]
+        )
+        store.upsert_cz("liq", M5, venue, [cz(five_before - M5), cz(five_before), cz(now - M5)])
+    store.upsert_cz("oi", H4, "okx", [cz(four_before - H4), cz(four_before)])
+
+    store.prune(four_before, trade_ids_before=four_before, cz_5min_before=five_before)
+
+    # 4hour goes by the 125-day cut, 5min by its own one-day cut, whatever the kind or venue.
+    for venue in ("binance", "okx"):
+        assert list(store.cz_series("liq", H4, venue, 0)) == [four_before, five_before - H4]
+        assert list(store.cz_series("liq", M5, venue, 0)) == [five_before, now - M5]
+    assert list(store.cz_series("oi", H4, "okx", 0)) == [four_before]
 
 
 def test_hist_overrides_archive_not_reverse(tmp_path: Path):
@@ -261,7 +384,7 @@ def test_prune_drops_old_rows_and_trade_ids(tmp_path: Path):
     store.mark_archive_absent(date(2026, 10, 14))
     store.mark_archive_absent(date(2026, 10, 15))
 
-    store.prune(new, trade_ids_before=new)
+    store.prune(new, trade_ids_before=new, cz_5min_before=new)
 
     assert list(store.klines("bybit", 0)) == [new]
     assert list(store.oi("binance", 0)) == [new]
