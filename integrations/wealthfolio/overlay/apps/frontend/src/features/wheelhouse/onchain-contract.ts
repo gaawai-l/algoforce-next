@@ -8,6 +8,11 @@ export type CostBasisView = components["schemas"]["CostBasisView"];
 export type SellSideView = components["schemas"]["SellSideView"];
 export type AgeCohortsView = components["schemas"]["AgeCohortsView"];
 export type BucketCostBasis = components["schemas"]["BucketCostBasis"];
+export type CostFlowView = components["schemas"]["CostFlowView"];
+export type FlowGrid = components["schemas"]["FlowGrid"];
+export type FlowWindow = components["schemas"]["FlowWindow"];
+export type CohortColumns = components["schemas"]["CohortColumns"];
+export type AgeFlow = components["schemas"]["AgeFlow"];
 
 const time = z.string().datetime({ offset: true });
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -287,6 +292,76 @@ export const ageCohortsSchema: z.ZodType<AgeCohortsView, z.ZodTypeDef, unknown> 
         ),
       ),
     { message: "age-cohort columns differ in length" },
+  );
+
+const cohortColumns = z.object({
+  all: z.array(z.number()),
+  sth: z.array(z.number()),
+  lth: z.array(z.number()),
+});
+const fitsFloors = (columns: CohortColumns, floors: number) =>
+  columns.all.length === floors &&
+  columns.sth.length === floors &&
+  columns.lth.length === floors;
+
+// The inputs of Charts 3 and 4: every column, D's and each window's, and each age group and the
+// age floor, has one entry per floor of its grid; a column of another length would misplace every
+// value after its gap, so the payload is refused rather than drawn. The ages are on the $500 grid.
+export const costFlowSchema: z.ZodType<CostFlowView, z.ZodTypeDef, unknown> = z
+  .object({
+    data_state: dataState,
+    reasons: z.array(z.string()),
+    refreshing: z.boolean(),
+    forming_at: time.nullable(),
+    now_day: day.nullable(),
+    snapshot_at: time.nullable(),
+    computed_at: time.nullable(),
+    spot: z.number().nullable(),
+    grids: z.array(
+      z.object({
+        step: z.union([z.literal(200), z.literal(500)]),
+        floors: z.array(z.number()),
+        now: cohortColumns,
+        windows: z.array(
+          z.object({
+            window: z.enum(["1d", "7d", "30d", "90d"]),
+            then_day: day,
+            then: cohortColumns,
+          }),
+        ),
+      }),
+    ),
+    age: z
+      .object({
+        groups: z.array(z.array(z.number())),
+        band: z.array(z.number().int()),
+      })
+      .nullable(),
+    qc: z.array(z.string()),
+    brk_version: z.string().nullable(),
+    rules,
+    rules_pending: z.boolean(),
+  })
+  .refine(
+    (view) =>
+      view.grids.every(
+        (grid) =>
+          fitsFloors(grid.now, grid.floors.length) &&
+          grid.windows.every((found) => fitsFloors(found.then, grid.floors.length)),
+      ),
+    { message: "cost-flow columns differ from their floors in length" },
+  )
+  .refine(
+    (view) => {
+      if (!view.age) return true;
+      // Without a $500 grid `floors` is undefined, which no length matches.
+      const floors = view.grids.find((grid) => grid.step === 500)?.floors.length;
+      return (
+        view.age.band.length === floors &&
+        view.age.groups.every((group) => group.length === floors)
+      );
+    },
+    { message: "cost-flow ages do not match the $500 grid" },
   );
 
 // Hand-written payloads shared by contract and view tests. The cycle components and the

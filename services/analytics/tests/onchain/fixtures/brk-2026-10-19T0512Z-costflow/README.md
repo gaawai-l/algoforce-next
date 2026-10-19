@@ -133,9 +133,16 @@ for name, render in (("cost-flow-sample-0512.json", s.render_sample_0512),
   1e-12. The committed crosscheck comes from macOS 27.0.1 on arm64, with Python 3.14.6 from
   `.venv-foundation`.
 
-Task 4: `cost-flow-expected.json`, holding the page's Chart 3 sweep as its string
-(`chart3_page`), the page's Chart 4 readings (`chart4_page`) and stage A (`chart3_stage_a`), each
-unchanged.
+Task 4: `cost-flow-expected.json` holds three references, each loaded and written back unchanged.
+`cost-flow-engine.test.ts` and `cost-flow.test.ts` in that folder read it.
+
+- `chart3_page`: `$R/verification-2026-10-19/verify/sr3/sweep-expected.json`, a JSON string. It is
+  the original page's Chart 3 readings at 05:55Z, 25 blocks, on the same snapshot as S2.
+- `chart4_page`: `$R/verification-2026-10-19/verify/sr4/expected_B.json`, the page's Chart 4
+  readings at 06:04Z, 12 states.
+- `chart3_stage_a`: `expected_chart3.json` here, stage A on S1's snapshot, 23 states.
+
+It was written by this command, from the repository root:
 
 ```sh
 python3 -I -c 'import json,sys

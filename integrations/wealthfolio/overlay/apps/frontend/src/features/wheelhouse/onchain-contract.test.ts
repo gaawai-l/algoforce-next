@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import s1 from "./cost-flow-sample-0512.json";
+import s2 from "./cost-flow-sample.json";
 import {
   costBasisSample,
   costBasisViewSchema,
+  costFlowSchema,
   cycleSample,
   cycleViewSchema,
   levelsSample,
@@ -613,6 +616,63 @@ describe("on-chain cost basis contract", () => {
       ],
     });
     expect(parsed.buckets[0].lth.in_profit).toBeNull();
+  });
+});
+
+describe("on-chain cost-flow contract", () => {
+  it("accepts both cost-flow samples", () => {
+    const first = costFlowSchema.parse(s1);
+    expect(first.grids.map((grid) => grid.step)).toEqual([500, 200]);
+    expect(first.age).toBeNull();
+    const second = costFlowSchema.parse(s2);
+    expect(second.grids.map((grid) => grid.step)).toEqual([500]);
+    expect(second.age?.groups).toHaveLength(4);
+  });
+
+  // Columns line up with their grid's floors, so a column of another length would misplace every
+  // value after its gap: the payload is refused rather than drawn. The ages ride on the $500 grid.
+  it("rejects a column that does not match its floors, or ages without the $500 grid", () => {
+    const grid = s1.grids[0];
+    const month = grid.windows[2];
+    const shortThen = {
+      ...s1,
+      grids: [
+        {
+          ...grid,
+          windows: [
+            ...grid.windows.slice(0, 2),
+            { ...month, then: { ...month.then, sth: month.then.sth.slice(1) } },
+            ...grid.windows.slice(3),
+          ],
+        },
+        s1.grids[1],
+      ],
+    };
+    expect(costFlowSchema.safeParse(shortThen).success).toBe(false);
+    const fine = s1.grids[1];
+    const shortNow = {
+      ...s1,
+      grids: [grid, { ...fine, now: { ...fine.now, lth: fine.now.lth.slice(1) } }],
+    };
+    expect(costFlowSchema.safeParse(shortNow).success).toBe(false);
+
+    const age = s2.age;
+    expect(
+      costFlowSchema.safeParse({ ...s2, age: { ...age, band: age.band.slice(1) } }).success,
+    ).toBe(false);
+    expect(
+      costFlowSchema.safeParse({
+        ...s2,
+        age: { ...age, groups: [...age.groups.slice(0, 3), age.groups[3].slice(1)] },
+      }).success,
+    ).toBe(false);
+    expect(costFlowSchema.safeParse({ ...s2, grids: [] }).success).toBe(false);
+    expect(costFlowSchema.safeParse({ ...s2, grids: [], age: null }).success).toBe(true);
+    // S1's $500 grid has S2's 252 floors: S2's ages fit it whatever the grids' order, and do not
+    // fit the $200 grid alone.
+    const [g500, g200] = s1.grids;
+    expect(costFlowSchema.safeParse({ ...s1, grids: [g200, g500], age }).success).toBe(true);
+    expect(costFlowSchema.safeParse({ ...s1, grids: [g200], age }).success).toBe(false);
   });
 });
 

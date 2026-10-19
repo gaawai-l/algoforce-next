@@ -3,6 +3,7 @@ import { demarkConfigSchema, demarkResultSchema } from "./demark-contract";
 import {
   ageCohortsSchema,
   costBasisViewSchema,
+  costFlowSchema,
   cycleViewSchema,
   levelsViewSchema,
   sellerPressureSchema,
@@ -222,6 +223,8 @@ export const getSellSide = (signal?: AbortSignal) =>
   query("/onchain/sell-side", sellSideSchema, { signal });
 export const getAgeCohorts = (signal?: AbortSignal) =>
   query("/onchain/age-cohorts", ageCohortsSchema, { signal });
+export const getCostFlow = (signal?: AbortSignal) =>
+  query("/onchain/cost-flow", costFlowSchema, { signal });
 export const getPerpStates = (
   exchange: PerpStatesView["exchange"],
   window: PerpStatesView["window"],
