@@ -384,14 +384,15 @@ def test_rederive_skips_views_that_were_never_stored(
     monkeypatch.setitem(rules.IMPLEMENTED, "pressure", frozenset({"O2"}))
     path = synced(tmp_path, frozenset())
     store = OnchainStore(path)
-    for name in ("cycle", "levels", "costbasis"):
+    for name in ("cycle", "levels", "costbasis", "costflow"):
         store.clear_derived(name)
     client, seen = blocked_client()
 
     assert OnchainSync(store, client, rules=frozenset({"O2"})).rederive_if_rules_changed(RESTART)
 
     # Without a day1 payload there is no time to derive the day1 views at, so none appears.
-    assert [store.derived(name) for name in ("cycle", "levels", "costbasis")] == [None] * 3
+    day1_views = ("cycle", "levels", "costbasis", "costflow")
+    assert [store.derived(name) for name in day1_views] == [None] * 4
     pressure = store.derived("pressure")
     assert pressure is not None
     assert (json.loads(pressure[0])["rules"], pressure[1]) == (["O2"], NOW)
@@ -532,7 +533,8 @@ def test_derive_command_rederives_a_copy_without_brk(
     }
     # Each view with the rules its payload recorded, not the rules asked for.
     assert capsys.readouterr().out == (
-        "derived cycle=O1 levels=O1 costbasis=O1 pressure=O1,O3 sellside=v1 agecohorts=v1\n"
+        "derived cycle=O1 levels=O1 costbasis=O1 costflow=v1 pressure=O1,O3 sellside=v1 "
+        "agecohorts=v1\n"
     )
 
     # Without --rules, WHEELHOUSE_RULES decides.
@@ -543,7 +545,8 @@ def test_derive_command_rederives_a_copy_without_brk(
         name: [] for name in ROUTES
     }
     assert capsys.readouterr().out == (
-        "derived cycle=v1 levels=v1 costbasis=v1 pressure=v1 sellside=v1 agecohorts=v1\n"
+        "derived cycle=v1 levels=v1 costbasis=v1 costflow=v1 pressure=v1 sellside=v1 "
+        "agecohorts=v1\n"
     )
     assert requests == []
 

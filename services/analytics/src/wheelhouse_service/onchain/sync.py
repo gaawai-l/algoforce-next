@@ -3,7 +3,7 @@
 import json
 import logging
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from threading import Event, Thread
 
@@ -12,7 +12,9 @@ from ..rules import Rules, View, rules_for_view
 from .agecohorts import INPUTS as AGE_INPUTS
 from .agecohorts import age_cohorts
 from .brk import (
+    AGE_FLOOR_SERIES,
     AGE_ONLY_SERIES,
+    AGE_URPD_COHORTS,
     DAY1_SERIES,
     HOUR1_BACKFILL,
     HOUR1_SERIES,
@@ -35,9 +37,10 @@ from .costbasis import (
     cost_basis,
     line_order,
 )
+from .costflow import GRIDS, WINDOWS, StoredCostFlow, cost_flow
 from .cycle import classify
 from .levels import ModelLine, last_complete, model_lines
-from .models import closed_day, final_from
+from .models import closed_day, day_start, final_from
 from .pressure import V1_LOOKBACK, lookback, seller_pressure
 from .sellside import INPUTS, sell_side
 from .store import OnchainStore
@@ -51,6 +54,8 @@ CYCLE_SERIES = (
     "true_market_mean",
     "price_close",
 )
+# The day1 series fetched: the modules' own, then the daily range Chart 4's age floor reads.
+DAY1_FETCH = (*DAY1_SERIES, *AGE_FLOOR_SERIES)
 # Where a full fetch of each index starts. hour1 asks for its last points: from a date it would ask
 # for years of hourly data.
 BACKFILL: dict[Index, int | date] = {"day1": START, "hour1": -HOUR1_BACKFILL}
@@ -62,7 +67,7 @@ OVERLAP = 3
 IDLE_SECONDS = 30
 STOP_TIMEOUT_SECONDS = 25
 # The derived views: those from the day1 series and URPD, then the hour1 ones.
-DAY1_VIEWS: tuple[View, ...] = ("cycle", "levels", "costbasis")
+DAY1_VIEWS: tuple[View, ...] = ("cycle", "levels", "costbasis", "costflow")
 VIEWS: tuple[View, ...] = (*DAY1_VIEWS, "pressure", "sellside", "agecohorts")
 
 
@@ -194,9 +199,9 @@ class OnchainSync:
         if version != self.store.state()["brk_version"]:
             # Every series is rebuilt in one transaction; the old data stays readable until then.
             self.store.set_state(refreshing="true")
-            self._replace(DAY1_SERIES, "day1", at, missing)
+            self._replace(DAY1_FETCH, "day1", at, missing)
         else:
-            self._increment(DAY1_SERIES, "day1", at, missing)
+            self._increment(DAY1_FETCH, "day1", at, missing)
         # The series stage is done, so nothing is being rebuilt any more.
         self.store.set_state(brk_version=version, refreshing="false")
 
@@ -242,7 +247,7 @@ class OnchainSync:
         # The age cohorts read the first stage's series too: they are derived only when both stages
         # fetched, and are as of the first, like the pressure.
         self._derive_age_cohorts(hour1_missing, None if age_error else hour1_done)
-        absent = [name for name in DAY1_SERIES if name in missing]
+        absent = [name for name in DAY1_FETCH if name in missing]
         absent_hour1 = [
             name
             for name in (*HOUR1_SERIES, *SELL_SIDE_SERIES, *AGE_ONLY_SERIES)
@@ -312,9 +317,10 @@ class OnchainSync:
     def _urpd(self, at: datetime) -> Urpd | None:
         """Today's snapshot, or yesterday's while today's does not exist yet.
 
-        The rest of URPD_SET is fetched for the same day D, and so are the past snapshots the
-        cost-basis grid needs while they are missing or not final. All are stored, and the days no
-        longer needed are pruned, also when a same-day request fails the stage.
+        The rest of URPD_SET is fetched for the same day D, then D's age snapshots (`_flow_set`),
+        and so are the past snapshots the cost-basis grid needs while they are missing or not
+        final. All are stored, and the days no longer needed are pruned, also when a same-day
+        request fails the stage. Returns D as `_flow_set` leaves it.
         """
         today = at.astimezone(UTC).date()
         urpd: Urpd | None = None
@@ -329,10 +335,13 @@ class OnchainSync:
         past = [urpd.date - timedelta(days=n) for n in PAST_DAYS]
         # Under O1 the closed days are kept too: F and its grid are read from them.
         keep = {today, today - timedelta(days=1), urpd.date, *past, *self._closed_days(at)}
+        fetched: dict[tuple[str, str], Urpd | None] = {}
         try:
             for cohort, agg in URPD_SET[1:]:
                 # A failure here fails the stage, like one of `all lin500`.
-                self._save_urpd(cohort, urpd.date, agg, at)
+                fetched[(cohort, agg)] = self._save_urpd(cohort, urpd.date, agg, at)
+            # So does one fetching `all lin500` again in `_flow_set`.
+            urpd = self._flow_set(urpd, fetched, at)
         except BrkError:
             # A lasting outage of one endpoint must not keep the table growing.
             self.store.prune_urpd(keep)
@@ -369,10 +378,67 @@ class OnchainSync:
         except BrkError as exc:
             logger.warning("onchain_urpd_closed_failed code=%s", exc.code)
 
-    def _save_urpd(self, cohort: str, day: date, agg: str, at: datetime) -> None:
+    def _flow_set(
+        self, urpd: Urpd, fetched: Mapping[tuple[str, str], Urpd | None], at: datetime
+    ) -> Urpd:
+        """Fetch D's age snapshots, and the cost flow's set of D once more when it is not one
+        snapshot; return the D to use.
+
+        `fetched` holds what this round got of URPD_SET[1:], None where BRK had nothing. The cost
+        flow reads D's lin500 and lin200 grids and its age snapshots, and all must share D's close:
+        BRK may have moved on to a new block while they were fetched. A failure among the age
+        snapshots, or among those fetched again, ends them without failing the stage.
+        """
+        day = urpd.date
+        grids = [
+            (cohort, agg)
+            for agg, _ in GRIDS
+            for cohort in COHORTS
+            if (cohort, agg) != (URPD_COHORT, URPD_AGG)
+        ]
+        found: list[Urpd | None] = []
+        for cohort, agg in grids:
+            snapshot = fetched[(cohort, agg)]
+            # One BRK did not have this time: the stored one is what the cost flow would read.
+            found.append(snapshot if snapshot is not None else self.store.urpd(cohort, day, agg))
+        found += self._save_ages(day, at)
+        if all(snapshot.close == urpd.close for snapshot in found if snapshot is not None):
+            return urpd
+        # Once more, and only once: what still differs is left out when the cost flow is derived.
+        # When BRK no longer has D, the first one stays.
+        again = self.client.urpd(URPD_COHORT, day, URPD_AGG)
+        if again is not None:
+            self.store.save_urpd(again, at)
+            urpd = again
+        try:
+            for cohort, agg in grids:
+                self._save_urpd(cohort, day, agg, at)
+        except BrkError as exc:
+            logger.warning("onchain_urpd_age_failed code=%s", exc.code)
+        else:
+            self._save_ages(day, at)
+        return urpd
+
+    def _save_ages(self, day: date, at: datetime) -> list[Urpd]:
+        """Fetch and store the age snapshots of `day`; return those BRK had.
+
+        A failure ends them without failing the stage: the cost flow then names what is missing.
+        """
+        found: list[Urpd] = []
+        try:
+            for cohort in AGE_URPD_COHORTS:
+                urpd = self._save_urpd(cohort, day, URPD_AGG, at)
+                if urpd is not None:
+                    found.append(urpd)
+        except BrkError as exc:
+            logger.warning("onchain_urpd_age_failed code=%s", exc.code)
+        return found
+
+    def _save_urpd(self, cohort: str, day: date, agg: str, at: datetime) -> Urpd | None:
         urpd = self.client.urpd(cohort, day, agg)
         if urpd is not None:
             self.store.save_urpd(urpd, at)
+        return urpd
 
     def _recent_urpd(self, at: datetime) -> Urpd | None:
         """The stored snapshot, unless it is older than yesterday: that would pass for current."""
@@ -468,9 +534,25 @@ class OnchainSync:
                     self.store.clear_derived("costbasis")
                 else:
                     self.store.save_derived("costbasis", payload, at)
+        self._derive_cost_flow(urpd, at)
         self._derive_pressure(hour1_missing, hour1_at)
         self._derive_sell_side(hour1_missing, hour1_at)
         return not_final
+
+    def _derive_cost_flow(self, urpd: Urpd | None, at: datetime) -> None:
+        """Derive the inputs of Charts 3 and 4 for D = `urpd` and stamp them `at`."""
+        result = None
+        if urpd is not None:
+            try:
+                result = self._cost_flow(urpd.date)
+            except Exception:
+                # The other views and the run's state must not depend on the cost flow. Never log
+                # the exception: it may carry values. A fixed code is enough here.
+                logger.warning("onchain_derive_failed code=costflow_failed")
+        if result is None:
+            self.store.clear_derived("costflow")
+        else:
+            self.store.save_derived("costflow", result.model_dump_json(), at)
 
     def _derive_pressure(self, hour1_missing: set[str], hour1_at: datetime | None) -> None:
         """Derive the seller pressure and stamp it `hour1_at`.
@@ -602,6 +684,38 @@ class OnchainSync:
             rules=rules,
             latest_day=latest_day,
         )
+
+    def _cost_flow(self, day: date) -> StoredCostFlow | None:
+        """The inputs of Charts 3 and 4 for D = `day`, read from the store alone.
+
+        A then day's snapshot counts once that day had closed when it was fetched; `final_from`
+        only decides when it is fetched again. One fetched before GRACE_END may lack blocks BRK
+        adds late, until that refetch.
+        """
+        snapshot_at = self.store.urpd_fetched_at(URPD_COHORT, day, URPD_AGG)
+        if snapshot_at is None:
+            return None
+        snapshots: dict[tuple[str, str, date], Urpd] = {}
+        for agg, _ in GRIDS:
+            for cohort in COHORTS:
+                now = self.store.urpd(cohort, day, agg)
+                if now is not None:
+                    snapshots[(cohort, agg, day)] = now
+                for n in WINDOWS.values():
+                    then = day - timedelta(days=n)
+                    fetched_at = self.store.urpd_fetched_at(cohort, then, agg)
+                    if fetched_at is None or fetched_at < day_start(then + timedelta(days=1)):
+                        continue
+                    past = self.store.urpd(cohort, then, agg)
+                    if past is not None:
+                        snapshots[(cohort, agg, then)] = past
+        ages = {
+            cohort: urpd
+            for cohort in AGE_URPD_COHORTS
+            if (urpd := self.store.urpd(cohort, day, URPD_AGG)) is not None
+        }
+        high, low = (self.store.read_series(name, "day1") for name in AGE_FLOOR_SERIES)
+        return cost_flow(day, snapshots, ages, high, low, snapshot_at=snapshot_at)
 
     def _fail(self, at: datetime, code: str, *, retry: bool, brk: bool) -> None:
         """Record a failed run; `last_success_at` keeps meaning the last complete refresh."""

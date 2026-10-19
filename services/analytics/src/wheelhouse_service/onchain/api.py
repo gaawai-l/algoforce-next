@@ -3,7 +3,7 @@
 import json
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +29,7 @@ from .models import (
     SellerPressureView,
     SellSideView,
     day1_state,
+    day_start,
     hour1_state,
 )
 from .pressure import HOUR, SHOWN_HOURS, Pressure
@@ -86,10 +87,6 @@ class StoredLevels(Model):
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-def day_start(day: date) -> datetime:
-    return datetime.combine(day, time(), tzinfo=UTC)
 
 
 def forming_at(row: datetime, now: datetime) -> datetime | None:

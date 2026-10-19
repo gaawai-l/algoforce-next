@@ -22,6 +22,7 @@ from onchain_fixture import (
 from wheelhouse_service.onchain.agecohorts import AgeCohorts
 from wheelhouse_service.onchain.brk import (
     AGE_ONLY_SERIES,
+    AGE_URPD_COHORTS,
     DAY1_SERIES,
     HOUR1_BACKFILL,
     HOUR1_SERIES,
@@ -29,15 +30,17 @@ from wheelhouse_service.onchain.brk import (
     START,
     BrkClient,
     SeriesData,
+    Urpd,
 )
 from wheelhouse_service.onchain.costbasis import BUCKETS, MIN_PRICE, PAST_DAYS, StoredCostBasis
+from wheelhouse_service.onchain.costflow import StoredCostFlow, cost_flow
 from wheelhouse_service.onchain.cycle import Cycle
 from wheelhouse_service.onchain.levels import median_cost
 from wheelhouse_service.onchain.models import closed_day
 from wheelhouse_service.onchain.pressure import Pressure, lookback
 from wheelhouse_service.onchain.sellside import SellSide
 from wheelhouse_service.onchain.store import OnchainStore
-from wheelhouse_service.onchain.sync import URPD_SET, OnchainSync, closed_days
+from wheelhouse_service.onchain.sync import DAY1_FETCH, URPD_SET, OnchainSync, closed_days
 from wheelhouse_service.rules import Rules
 
 NOW = datetime(2026, 10, 16, 10, 40, tzinfo=UTC)
@@ -121,13 +124,17 @@ def bucket_widths(store: OnchainStore) -> list[int]:
     return [bucket.bucket for bucket in costbasis_of(store).buckets]
 
 
-def urpd_calls(calls: list[tuple[str, dict[str, str]]]) -> list[tuple[str, str, str]]:
-    """The URPD requests, in order, as (cohort, date, agg)."""
+def urpd_calls(
+    calls: list[tuple[str, dict[str, str]]], include_ages: bool = False
+) -> list[tuple[str, str, str]]:
+    """The URPD requests, in order, as (cohort, date, agg); those of the age cohorts only with
+    `include_ages`."""
     found = []
     for path, params in calls:
         if path.startswith("/api/urpd/"):
             _, _, _, cohort, day = path.split("/")
-            found.append((cohort, day, params["agg"]))
+            if include_ages or not cohort.startswith("utxos_"):
+                found.append((cohort, day, params["agg"]))
     return found
 
 
@@ -184,7 +191,7 @@ def test_first_run_backfills_and_derives(tmp_path: Path):
 
     assert calls[0][0] == "/version"
     assert all(params["start"] == START.isoformat() for params in day1_calls(calls))
-    assert requested(day1_calls(calls)) == set(DAY1_SERIES)
+    assert requested(day1_calls(calls)) == set(DAY1_FETCH)
     assert requested(hour1_calls(calls)) == set(HOUR1)
     cycle = cycle_of(store)
     assert (cycle.state, cycle.as_of) == ("breakout", date(2026, 10, 16))
@@ -239,7 +246,7 @@ def test_incremental_run_starts_three_positions_back(tmp_path: Path):
     with store.connection() as db:
         db.execute("DELETE FROM series WHERE series='sth_realized_price' AND position>6487")
         db.execute("UPDATE series SET value=NULL WHERE series='true_market_mean' AND position>6495")
-    starts = {name: store.last_position(name, "day1") - 3 for name in DAY1_SERIES}
+    starts = {name: store.last_position(name, "day1") - 3 for name in DAY1_FETCH}
     assert starts["sth_realized_price"] == 6484
     assert starts["true_market_mean"] == 6494
 
@@ -248,7 +255,7 @@ def test_incremental_run_starts_three_positions_back(tmp_path: Path):
     assert run(store, incremental, later) is True
 
     bulk = day1_calls(calls)
-    assert requested(bulk) == set(DAY1_SERIES)
+    assert requested(bulk) == set(DAY1_FETCH)
     for params in bulk:
         for name in params["series"].split(","):
             assert params["start"] == str(starts[name])
@@ -863,7 +870,8 @@ def test_past_snapshot_stored_intraday_is_refetched(tmp_path: Path):
     again, calls = brk_transport()
     assert run(store, again, later) is True
 
-    assert urpd_calls(calls) == same_day(D) + [("sth", "2026-10-15", "lin200")]
+    # The P1 fixtures' D does not share the close of its grid snapshots, so those are fetched again.
+    assert urpd_calls(calls) == same_day(D) + refetch_of(D) + [("sth", "2026-10-15", "lin200")]
     assert store.urpd_fetched_at("sth", yesterday, "lin200") == later
     assert store.urpd_fetched_at("lth", yesterday, "lin200") == final
 
@@ -1319,8 +1327,14 @@ def test_day_rollover_uses_yesterday_for_all(tmp_path: Path):
 
     assert run(store, transport, after_midnight) is True
 
-    # Only `all lin500` is asked for today; all nine snapshots are then yesterday's, D.
-    assert urpd_calls(calls) == [("all", "2026-10-17", "lin500"), *same_day(D), *past_of(D)]
+    # Only `all lin500` is asked for today; all nine snapshots are then yesterday's, D. The P1
+    # fixtures' D does not share the close of its grid snapshots, so those are fetched again.
+    assert urpd_calls(calls) == [
+        ("all", "2026-10-17", "lin500"),
+        *same_day(D),
+        *refetch_of(D),
+        *past_of(D),
+    ]
     cost = costbasis_of(store)
     assert cost.urpd_date == D
     assert bucket_widths(store) == [200, 500, 1000]
@@ -1334,6 +1348,7 @@ def test_no_urpd_sends_no_other_requests_and_clears_costbasis(tmp_path: Path):
     transport, _ = brk_transport()
     run(store, transport, NOW)
     assert store.derived("costbasis") is not None
+    assert store.derived("costflow") is not None
     stored = urpd_rows(store)
     assert len(stored) == 45
 
@@ -1343,6 +1358,7 @@ def test_no_urpd_sends_no_other_requests_and_clears_costbasis(tmp_path: Path):
 
     assert urpd_calls(calls) == [("all", "2026-10-18", "lin500"), ("all", "2026-10-17", "lin500")]
     assert store.derived("costbasis") is None
+    assert store.derived("costflow") is None
     # Without D nothing is pruned, although none of these days would be kept.
     assert urpd_rows(store) == stored
 
@@ -2186,3 +2202,421 @@ def test_o1_with_o5_fixes_the_domain_around_f_close(tmp_path: Path):
     ]
     # The 1d–1w line is C's too: the P1 fixture's 10-15 value of W.
     assert line_prices(levels)["one_day_to_week"] == 82739.99
+
+
+# Charts 3 and 4, the cost-basis flow: D's age snapshots, the daily range and the stored inputs.
+# The cost-flow sample: D = 2026-10-19, each snapshot dated, every one of D at close 82347.76.
+COSTFLOW = Path(__file__).parent / "fixtures" / "brk-2026-10-19T0512Z-costflow"
+FLOW_D = date(2026, 10, 19)
+FLOW_THEN = [FLOW_D - timedelta(days=n) for n in PAST_DAYS]
+# The close every snapshot of D shares in the golden sample.
+GOLDEN_CLOSE = 81217.6
+
+
+def write_ages(directory: Path, close: float) -> Path:
+    """Six lin500 snapshots of the age cohorts at `close`, which the fake BRK serves for any day."""
+    directory.mkdir()
+    for n, cohort in enumerate(AGE_URPD_COHORTS, start=1):
+        bucket = {
+            "price_floor": 80_000.0,
+            "supply": float(n),
+            "realized_cap": 80_000.0 * n,
+            "unrealized_pnl": 0.0,
+        }
+        snapshot = {
+            "cohort": cohort,
+            "date": D.isoformat(),
+            "aggregation": "lin500",
+            "close": close,
+            "total_supply": float(n),
+            "buckets": [bucket],
+        }
+        (directory / f"urpd_{cohort}_lin500.json").write_text(json.dumps(snapshot))
+    return directory
+
+
+def ages_of(day: date) -> list[tuple[str, str, str]]:
+    """The requests for the six age snapshots of `day`, in the order they are made."""
+    return [(cohort, day.isoformat(), "lin500") for cohort in AGE_URPD_COHORTS]
+
+
+def refetch_of(day: date) -> list[tuple[str, str, str]]:
+    """The requests made again when the closes of D's set differ: `all lin500`, then the grids'."""
+    kinds = [("all", "lin500"), ("sth", "lin500"), ("lth", "lin500")]
+    kinds += [("all", "lin200"), ("sth", "lin200"), ("lth", "lin200")]
+    return [(cohort, day.isoformat(), agg) for cohort, agg in kinds]
+
+
+def costflow_of(store: OnchainStore) -> StoredCostFlow:
+    derived = store.derived("costflow")
+    assert derived is not None
+    return StoredCostFlow.model_validate_json(derived[0])
+
+
+def windows_of(flow: StoredCostFlow) -> list[tuple[int, list[date]]]:
+    """Each grid's step and the then days of its windows."""
+    return [(grid.step, [window.then_day for window in grid.windows]) for grid in flow.grids]
+
+
+def reclosed(transport: httpx.MockTransport, close: float) -> httpx.MockTransport:
+    """Wrap `transport` so every URPD snapshot it serves closes at `close`, as after a new block."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = transport.handler(request)
+        if request.url.path.startswith("/api/urpd/") and response.status_code == 200:
+            return httpx.Response(200, json={**json.loads(response.content), "close": close})
+        return response
+
+    return httpx.MockTransport(handler)
+
+
+def test_age_snapshots_follow_the_urpd_set_of_d(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    ages = write_ages(tmp_path / "ages", GOLDEN_CLOSE)
+    transport, calls = brk_transport(urpd_dir=GOLDEN, age_dir=ages)
+
+    assert run(store, transport, NOW) is True
+
+    # Every snapshot of D shares its close, so none is fetched again.
+    assert urpd_calls(calls, include_ages=True) == [*same_day(D), *ages_of(D), *past_of(D)]
+    assert {row for row in urpd_rows(store) if row[0].startswith("utxos_")} == set(ages_of(D))
+    flow = costflow_of(store)
+    # The six snapshots and the daily range, which ends on D, give Chart 4 its rows.
+    assert flow.age is not None
+    assert (len(flow.age.groups), len(flow.age.band)) == (4, len(flow.grids[0].floors))
+    assert flow.reasons == []
+    assert store.state()["last_error"] is None
+
+
+def test_d_set_close_mismatch_refetches_once(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # The age snapshots are of another block than D.
+    ages = write_ages(tmp_path / "ages", 1.0)
+    transport, calls = brk_transport(urpd_dir=GOLDEN, age_dir=ages)
+
+    assert run(store, transport, NOW) is True
+
+    # After the ages: D, its five grid snapshots and the six ages once more, and only once.
+    assert urpd_calls(calls, include_ages=True) == [
+        *same_day(D),
+        *ages_of(D),
+        *refetch_of(D),
+        *ages_of(D),
+        *past_of(D),
+    ]
+    flow = costflow_of(store)
+    # Still another block: Chart 4 has no rows, while the grids, which agree with D, stay.
+    assert (flow.age, flow.reasons) == (None, ["age_urpd_mismatch"])
+    assert [grid.step for grid in flow.grids] == [500, 200]
+    assert flow.spot == GOLDEN_CLOSE
+    state = store.state()
+    assert (state["last_error"], strings(state["reasons"])) == (None, [])
+
+
+def test_refetched_d_that_is_gone_keeps_the_first(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # The P1 fixtures' D closes at 82154.25 and its grid snapshots at 81217.6, so D is refetched.
+    inner, calls = brk_transport()
+    heads: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = inner.handler(request)
+        if (
+            request.url.path == f"/api/urpd/all/{D.isoformat()}"
+            and request.url.params["agg"] == "lin500"
+        ):
+            heads.append(request)
+            if len(heads) == 2:
+                return httpx.Response(404, json={"error": {"type": "not_found", "code": "x"}})
+        return response
+
+    assert run(store, httpx.MockTransport(handler), NOW) is True
+
+    assert urpd_calls(calls) == [*same_day(D), *refetch_of(D), *past_of(D)]
+    assert len(heads) == 2
+    first = store.urpd("all", D, "lin500")
+    assert first is not None and first.close == 82154.25
+    state = store.state()
+    assert (state["last_error"], strings(state["reasons"])) == (None, [])
+    levels = levels_of(store)
+    assert (levels["urpd_date"], levels["onchain_close"]) == ("2026-10-16", 82154.25)
+    flow = costflow_of(store)
+    assert (flow.now_day, flow.spot) == (D, 82154.25)
+
+
+def test_age_snapshot_error_does_not_fail_the_stage(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    ages = write_ages(tmp_path / "ages", GOLDEN_CLOSE)
+    transport, calls = brk_transport(
+        urpd_dir=GOLDEN, age_dir=ages, urpd_fail={("utxos_1w_to_1m_old", "lin500")}
+    )
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, transport, NOW) is True
+
+    # The failed request ends the age snapshots; the past days are fetched as usual.
+    assert urpd_calls(calls, include_ages=True) == [*same_day(D), *ages_of(D)[:4], *past_of(D)]
+    assert caplog.text.count("onchain_urpd_age_failed code=brk_unavailable") == 1
+    state = store.state()
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == NOW
+    assert strings(state["reasons"]) == []
+    assert bucket_widths(store) == [200, 500, 1000]
+    flow = costflow_of(store)
+    assert [grid.step for grid in flow.grids] == [500, 200]
+    assert (flow.age, flow.reasons) == (None, ["age_urpd_missing"])
+
+
+def test_stale_age_snapshot_is_never_paired_with_a_new_d(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    ages = write_ages(tmp_path / "ages", GOLDEN_CLOSE)
+    first, _ = brk_transport(urpd_dir=GOLDEN, age_dir=ages)
+    assert run(store, first, NOW) is True
+    assert costflow_of(store).age is not None
+
+    # An hour on, BRK serves D one block later and has no snapshot of one age cohort.
+    later = NOW + timedelta(hours=1)
+    inner, _ = brk_transport(
+        urpd_dir=GOLDEN, age_dir=ages, urpd_missing={("utxos_under_1h_old", "lin500")}
+    )
+    assert run(store, reclosed(inner, 81300.0), later) is True
+
+    flow = costflow_of(store)
+    assert flow.spot == 81300.0
+    assert [grid.step for grid in flow.grids] == [500, 200]
+    # The stored snapshot of that cohort is of the earlier block, so Chart 4 has no rows.
+    stale = store.urpd("utxos_under_1h_old", D, "lin500")
+    assert stale is not None and stale.close == GOLDEN_CLOSE
+    assert (flow.age, flow.reasons) == (None, ["age_urpd_mismatch"])
+
+
+def test_then_snapshot_counts_once_its_day_closed(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    fetched = datetime(2026, 10, 19, 5, 12, 6, tzinfo=UTC)
+    for path in sorted(COSTFLOW.glob("urpd_*.json")):
+        store.save_urpd(Urpd.model_validate_json(path.read_text()), fetched)
+    transport, _ = brk_transport()
+    sync = sync_for(store, transport, fetched)
+    yesterday = FLOW_D - timedelta(days=1)
+
+    def refetched(at: datetime) -> StoredCostFlow:
+        """The cost flow with yesterday's three lin500 snapshots stored as fetched at `at`."""
+        for cohort in ("all", "sth", "lth"):
+            snapshot = store.urpd(cohort, yesterday, "lin500")
+            assert snapshot is not None
+            store.save_urpd(snapshot, at)
+        flow = sync._cost_flow(FLOW_D)
+        assert flow is not None
+        return flow
+
+    # 00:30: the day has closed, though it is not final before 02:00, so the 1d window counts.
+    flow = refetched(datetime(2026, 10, 19, 0, 30, tzinfo=UTC))
+    assert windows_of(flow) == [(500, FLOW_THEN), (200, FLOW_THEN)]
+    assert flow.reasons == ["age_urpd_missing"]
+    assert flow.snapshot_at == fetched
+    # From midnight on.
+    flow = refetched(datetime(2026, 10, 19, tzinfo=UTC))
+    assert windows_of(flow) == [(500, FLOW_THEN), (200, FLOW_THEN)]
+    # 23:12 the day before: still forming, so there is no 1d window on that grid.
+    flow = refetched(datetime(2026, 10, 18, 23, 12, tzinfo=UTC))
+    assert windows_of(flow) == [(500, FLOW_THEN[1:]), (200, FLOW_THEN)]
+    assert flow.reasons == [
+        "urpd_grid_partial:lin500",
+        "window_missing:1d:lin500",
+        "age_urpd_missing",
+    ]
+
+
+def test_day1_stage_fetches_the_daily_range(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, calls = brk_transport()
+
+    assert run(store, transport, NOW) is True
+
+    assert DAY1_FETCH == (*DAY1_SERIES, "price_high", "price_low")
+    assert requested(day1_calls(calls)) == set(DAY1_FETCH)
+    for name in ("price_high", "price_low"):
+        assert len(store.read_series(name, "day1")) == 5037
+
+
+def test_missing_daily_range_only_takes_chart_4_down(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # The golden sample, whose snapshots of D share one close: the P1 fixtures' do not, and
+    # without a $500 grid nothing would be said about the age groups.
+    ages = write_ages(tmp_path / "ages", GOLDEN_CLOSE)
+    transport, _ = brk_transport(missing={"price_high"}, urpd_dir=GOLDEN, age_dir=ages)
+
+    assert run(store, transport, NOW) is True
+
+    state = store.state()
+    assert strings(state["missing_series"]) == ["day1:price_high"]
+    assert strings(state["reasons"]) == ["series_missing:price_high"]
+    assert state["last_error"] is None
+    assert cycle_of(store).state == "breakout"
+    assert {line["name"] for line in levels_of(store)["lines"]} == LINES
+    assert bucket_widths(store) == [200, 500, 1000]
+    flow = costflow_of(store)
+    assert [grid.step for grid in flow.grids] == [500, 200]
+    assert (flow.age, flow.reasons) == (None, ["age_floor_missing"])
+
+
+def test_costflow_derives_the_golden_snapshots(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    at = datetime(2026, 10, 19, 5, 15, tzinfo=UTC)
+    transport, _ = brk_transport(urpd_dir=COSTFLOW)
+
+    assert run(store, transport, at) is True
+
+    flow = costflow_of(store)
+    assert (flow.now_day, flow.spot, flow.snapshot_at) == (FLOW_D, 82347.76, at)
+    assert windows_of(flow) == [(500, FLOW_THEN), (200, FLOW_THEN)]
+    assert (flow.qc, flow.reasons, flow.rules) == ([], ["age_urpd_missing"], [])
+    # Exactly what the sample's 30 snapshots give.
+    sample = [Urpd.model_validate_json(path.read_text()) for path in COSTFLOW.glob("urpd_*.json")]
+    snapshots = {(urpd.cohort, urpd.aggregation, urpd.date): urpd for urpd in sample}
+    assert flow == cost_flow(FLOW_D, snapshots, {}, [], [], snapshot_at=at)
+    derived = store.derived("costflow")
+    assert derived is not None and derived[1] == at
+
+
+def test_costflow_after_midnight_uses_yesterday_and_its_own_past_days(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    after_midnight = datetime(2026, 10, 20, 0, 30, tzinfo=UTC)
+    transport, _ = brk_transport(urpd_dir=COSTFLOW, urpd_dates={FLOW_D, *FLOW_THEN})
+
+    assert run(store, transport, after_midnight) is True
+
+    flow = costflow_of(store)
+    assert (flow.now_day, flow.spot) == (FLOW_D, 82347.76)
+    # D's own past days, not today's, each fetched after it had closed.
+    assert FLOW_THEN == [
+        date(2026, 10, 18),
+        date(2026, 10, 12),
+        date(2026, 9, 19),
+        date(2026, 7, 21),
+    ]
+    assert windows_of(flow) == [(500, FLOW_THEN), (200, FLOW_THEN)]
+    assert flow.reasons == ["age_urpd_missing"]
+
+
+def test_costflow_failure_still_derives_everything_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("costflow") is not None
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("secret value 123")
+
+    monkeypatch.setattr("wheelhouse_service.onchain.sync.cost_flow", boom)
+    second = NOW + timedelta(hours=1)
+    again, _ = brk_transport()
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, again, second) is True
+
+    # Only the cost flow is gone; every other view is derived as usual.
+    assert store.derived("costflow") is None
+    for kind in ("cycle", "levels", "costbasis", "pressure", "sellside", "agecohorts"):
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == second
+    state = store.state()
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == second
+    assert strings(state["reasons"]) == []
+    assert "code=costflow_failed" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_d_fetched_again_on_a_new_block_is_the_one_used(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # The P1 fixtures' D closes at 82154.25 and its grid snapshots at 81217.6, as when BRK moves on
+    # to a new block after D was fetched; fetched again, D is of that block too.
+    inner, calls = brk_transport()
+    heads: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = inner.handler(request)
+        if (
+            request.url.path == f"/api/urpd/all/{D.isoformat()}"
+            and request.url.params["agg"] == "lin500"
+        ):
+            heads.append(request)
+            if len(heads) == 2:
+                body = {**json.loads(response.content), "close": GOLDEN_CLOSE}
+                return httpx.Response(200, json=body)
+        return response
+
+    assert run(store, httpx.MockTransport(handler), NOW) is True
+
+    assert urpd_calls(calls) == [*same_day(D), *refetch_of(D), *past_of(D)]
+    stored = store.urpd("all", D, "lin500")
+    assert stored is not None and stored.close == GOLDEN_CLOSE
+    # The levels read the D fetched again, like the cost flow.
+    assert levels_of(store)["onchain_close"] == GOLDEN_CLOSE
+    flow = costflow_of(store)
+    assert flow.spot == GOLDEN_CLOSE
+    assert [grid.step for grid in flow.grids] == [500, 200]
+    assert flow.reasons == ["age_urpd_missing"]
+
+
+def test_a_grid_snapshot_brk_lacks_is_checked_as_stored(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    ages = write_ages(tmp_path / "ages", GOLDEN_CLOSE)
+    first, _ = brk_transport(urpd_dir=GOLDEN, age_dir=ages)
+    assert run(store, first, NOW) is True
+
+    # An hour on, D is one block later and BRK has no `sth lin200` of it: the stored one, of the
+    # earlier block, is what the cost flow would read, so the set is fetched again.
+    later = NOW + timedelta(hours=1)
+    inner, calls = brk_transport(urpd_dir=GOLDEN, age_dir=ages, urpd_missing={("sth", "lin200")})
+    assert run(store, reclosed(inner, 81300.0), later) is True
+
+    # The past days were final already, so they are not asked for.
+    assert urpd_calls(calls, include_ages=True) == [
+        *same_day(D),
+        *ages_of(D),
+        *refetch_of(D),
+        *ages_of(D),
+    ]
+    flow = costflow_of(store)
+    assert [grid.step for grid in flow.grids] == [500]
+    assert flow.reasons == ["urpd_mismatch:sth:lin200"]
+    assert flow.age is not None
+
+
+def test_a_failed_refetch_does_not_fail_the_stage(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # The P1 fixtures' D does not share the close of its grid snapshots, so the set is fetched
+    # again, and the second request for `lth lin500` fails.
+    inner, calls = brk_transport()
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = inner.handler(request)
+        if (
+            request.url.path == f"/api/urpd/lth/{D.isoformat()}"
+            and request.url.params["agg"] == "lin500"
+        ):
+            seen.append(request)
+            if len(seen) == 2:
+                return httpx.Response(500)
+        return response
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, httpx.MockTransport(handler), NOW) is True
+
+    # The failure ends what is fetched again; the past days are fetched as usual.
+    assert urpd_calls(calls, include_ages=True) == [
+        *same_day(D),
+        *ages_of(D),
+        *refetch_of(D)[:3],
+        *past_of(D),
+    ]
+    assert caplog.text.count("onchain_urpd_age_failed code=brk_unavailable") == 1
+    state = store.state()
+    assert (state["last_error"], strings(state["reasons"])) == (None, [])
+    assert store.derived("costflow") is not None

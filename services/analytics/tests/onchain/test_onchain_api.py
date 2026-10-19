@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from onchain_fixture import GOLDEN_DAYS, brk_transport, seed_golden
 
 from wheelhouse_service.http import create_app
+from wheelhouse_service.onchain import api, models
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
 from wheelhouse_service.onchain.costbasis import StoredCostBasis
@@ -371,6 +372,12 @@ def test_day1_state_midnight_grace(now: datetime, last: date | None, expected: s
 )
 def test_closed_day_is_yesterday_from_the_end_of_the_grace(at: datetime, expected: date):
     assert closed_day(at) == expected
+
+
+def test_day_start_lives_in_models():
+    assert models.day_start(date(2026, 10, 19)) == datetime(2026, 10, 19, tzinfo=UTC)
+    # The routes read the one the worker uses.
+    assert api.day_start is models.day_start
 
 
 O1: Rules = frozenset({"O1"})

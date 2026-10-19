@@ -25,6 +25,7 @@ data). Replayed by `../../onchain_fixture.py`; do not edit the JSON by hand.
 | `day1_utxos_1d_to_1w_old_realized_price.json` | `utxos_1d_to_1w_old_realized_price` | 4217680034 | 2026-10-16T10:02:08Z | sample copy |
 | `day1_realized_price.json` | `realized_price` | 4126600474 | 2026-10-16T10:19:46Z | sample copy |
 | `day1_lth_realized_price.json` | `lth_realized_price` | 4126600472 | 2026-10-16T13:39:43Z | fetched 2026-10-16 |
+| `day1_price_high.json`, `day1_price_low.json` | `price_high,price_low`, one request | 115 | 2026-10-19T05:13:46Z | slice of a sample (below) |
 | `hour1_price_close.json` | `price_close` hour1, 2,600 points | 89 | 2026-10-16T10:01:53Z | sample copy |
 | `hour1_sth_realized_profit_cumulative.json` | `sth_realized_profit_cumulative` | 4091783938 | 2026-10-16T10:01:54Z | sample copy |
 | `hour1_sth_realized_loss_cumulative.json` | `sth_realized_loss_cumulative` | 4091783938 | 2026-10-16T10:01:55Z | sample copy |
@@ -54,6 +55,23 @@ data). Replayed by `../../onchain_fixture.py`; do not edit the JSON by hand.
   `GET /api/series/bulk?series=lth_realized_price&index=day1&start=2013-01-01&end=2026-10-17`.
   The one-element array that endpoint returns was unwrapped to its single object (outer brackets
   removed, bytes otherwise unchanged) to match the sample copies.
+- `day1_price_high.json` and `day1_price_low.json` are positions 1461-6497 (`start` 1461, `end`
+  6498) of the two elements of `verification-2026-10-19/verify/sr4/brk/hilo5600.json` in the same
+  samples (element 0 `price_high`, element 1 `price_low`; `start` 901, captured
+  2026-10-19T05:13:46Z), so they end on 2026-10-16 like the other day1 files, a day that had
+  closed by then. Only `start`, `end` and `data` changed; the values equal the same positions of
+  `../brk-2026-10-19T0512Z-costflow/day1_price_{high,low}.json`. Written from the repository
+  root, with `R` the samples directory:
+
+  ```sh
+  python3 -I -c 'import json,sys
+  h=json.load(open(sys.argv[1]))
+  for e,name in zip(h,("price_high","price_low"),strict=True):
+      s=e["start"]
+      out={**e,"start":1461,"end":6498,"data":e["data"][1461-s:6498-s]}
+      open(f"{sys.argv[2]}/day1_{name}.json","w").write(json.dumps(out,separators=(",",":")))' \
+    "$R/verification-2026-10-19/verify/sr4/brk/hilo5600.json" services/analytics/tests/onchain/fixtures/brk-2026-10-16
+  ```
 - `urpd_all_lin500.json` was fetched on 2026-10-16 with `GET /api/urpd/all/2026-10-16?agg=lin500`,
   unchanged (252 buckets, `price_floor` 0 to 125,500 in steps of 500).
 - The other 8 `urpd_*.json` are byte-for-byte copies of the same-named files in

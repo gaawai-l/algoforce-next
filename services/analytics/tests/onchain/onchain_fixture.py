@@ -125,12 +125,14 @@ def brk_transport(
     urpd_dir: Path | None = None,
     urpd_missing: Set[tuple[str, str]] = frozenset(),
     urpd_fail: Set[tuple[str, str]] = frozenset(),
+    age_dir: Path | None = None,
 ) -> tuple[httpx.MockTransport, Calls]:
     """A fake BRK serving the fixtures; `urpd_dates=None` means every date has a snapshot.
 
     Series requests for an index in `fail_index` always get a 503. URPD snapshots come from
-    `urpd_dir` (the P1 fixtures by default); a (cohort, agg) in `urpd_missing` gets a 404 for every
-    date, and one in `urpd_fail` a 500.
+    `urpd_dir` (the P1 fixtures by default), those of the age cohorts (`utxos_*`) from `age_dir`,
+    and none at all without it; a (cohort, agg) in `urpd_missing` gets a 404 for every date, and
+    one in `urpd_fail` a 500.
     """
     calls = Calls()
 
@@ -155,6 +157,10 @@ def brk_transport(
                 return _error(404, "not_found")
             if urpd_dates is not None and date.fromisoformat(day) not in urpd_dates:
                 return _error(404, "not_found")
+            if cohort.startswith("utxos_"):
+                if age_dir is None:
+                    return _error(404, "not_found")
+                return _urpd(age_dir, cohort, day, agg)
             return _urpd(urpd_dir or FIXTURES, cohort, day, agg)
         return _error(404, "not_found")
 

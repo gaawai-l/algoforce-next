@@ -4,7 +4,9 @@ from typing import Literal, get_args
 
 Rule = Literal["O1", "O2", "O3", "O4", "O5", "O6"]
 Rules = frozenset[Rule]
-View = Literal["cycle", "levels", "costbasis", "pressure", "sellside", "agecohorts", "perps"]
+View = Literal[
+    "cycle", "levels", "costbasis", "costflow", "pressure", "sellside", "agecohorts", "perps"
+]
 
 ALL_RULES: Rules = frozenset(get_args(Rule))
 # The rules implemented for each view so far. A rule only reaches a payload, and its label, once it
