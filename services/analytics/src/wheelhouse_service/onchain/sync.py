@@ -9,7 +9,10 @@ from threading import Event, Thread
 
 from ..market import timestamp
 from ..rules import Rules, View, rules_for_view
+from .agecohorts import INPUTS as AGE_INPUTS
+from .agecohorts import age_cohorts
 from .brk import (
+    AGE_ONLY_SERIES,
     DAY1_SERIES,
     HOUR1_BACKFILL,
     HOUR1_SERIES,
@@ -60,7 +63,7 @@ IDLE_SECONDS = 30
 STOP_TIMEOUT_SECONDS = 25
 # The derived views: those from the day1 series and URPD, then the hour1 ones.
 DAY1_VIEWS: tuple[View, ...] = ("cycle", "levels", "costbasis")
-VIEWS: tuple[View, ...] = (*DAY1_VIEWS, "pressure", "sellside")
+VIEWS: tuple[View, ...] = (*DAY1_VIEWS, "pressure", "sellside", "agecohorts")
 
 
 def next_slot(at: datetime) -> datetime:
@@ -109,7 +112,7 @@ class OnchainSync:
             self._fail(clock(), "sync_failed", retry=False, brk=False)
         else:
             if stage_error is not None:
-                # Only the hour1 or URPD stage failed, so the shared reasons (and with them the
+                # Only an hour1 or the URPD stage failed, so the shared reasons (and with them the
                 # cycle view) stay clean; `last_error` still records it.
                 self._fail(clock(), stage_error.code, retry=stage_error.retryable, brk=False)
             else:
@@ -162,8 +165,8 @@ class OnchainSync:
         """Derive every stored view again under `self.rules`, reading only the store.
 
         Each view keeps the time it was computed: the day1 ones the latest of theirs, which also
-        gives their closed day, the seller pressure its own. A view group with nothing stored is
-        left alone.
+        gives their closed day, the seller pressure its own and so do the age cohorts. A view group
+        with nothing stored is left alone.
         """
         stamps = [
             derived[1] for view in DAY1_VIEWS if (derived := self.store.derived(view)) is not None
@@ -178,9 +181,11 @@ class OnchainSync:
         else:
             self._derive_pressure(hour1_missing, hour1_at)
             self._derive_sell_side(hour1_missing, hour1_at)
+        ages = self.store.derived("agecohorts")
+        self._derive_age_cohorts(hour1_missing, ages[1] if ages else None)
 
     def _refresh(self, at: datetime, clock: Callable[[], datetime]) -> BrkError | None:
-        """Run one refresh; return the error of the hour1 or URPD stage when only those failed."""
+        """Run one refresh; return the error of an hour1 or URPD stage when only those failed."""
         # The closed day is that of the round's start, so a round that crosses GRACE_END does not
         # take a day BRK could still revise for closed.
         closed = closed_day(at)
@@ -208,7 +213,18 @@ class OnchainSync:
         except BrkError as exc:
             hour1_error = exc
             # What a failed request could not tell stands as it was, and so does the pressure.
-            hour1_missing = self._stored_hour1_missing()
+            hour1_missing = self._stored_hour1_missing() - set(AGE_ONLY_SERIES)
+
+        # The age cohorts' own series take several requests more, so they have a stage of their
+        # own: when it fails, only the age-cohort chart stays as it was.
+        age_missing: set[str] = set()
+        age_error: BrkError | None = None
+        try:
+            self._increment(AGE_ONLY_SERIES, "hour1", at, age_missing)
+        except BrkError as exc:
+            age_error = exc
+            age_missing = self._stored_hour1_missing() & set(AGE_ONLY_SERIES)
+        hour1_missing |= age_missing
 
         urpd_error: BrkError | None = None
         try:
@@ -223,9 +239,14 @@ class OnchainSync:
 
         done = clock()
         not_final = self._derive(urpd, done, hour1_missing, hour1_done, closed=closed)
+        # The age cohorts read the first stage's series too: they are derived only when both stages
+        # fetched, and are as of the first, like the pressure.
+        self._derive_age_cohorts(hour1_missing, None if age_error else hour1_done)
         absent = [name for name in DAY1_SERIES if name in missing]
         absent_hour1 = [
-            name for name in (*HOUR1_SERIES, *SELL_SIDE_SERIES) if name in hour1_missing
+            name
+            for name in (*HOUR1_SERIES, *SELL_SIDE_SERIES, *AGE_ONLY_SERIES)
+            if name in hour1_missing
         ]
         # `price_close` is in both indexes, so day1 reasons keep their form and hour1 ones add it.
         reasons = [f"series_missing:{name}" for name in absent]
@@ -240,7 +261,7 @@ class OnchainSync:
             ),
             reasons=json.dumps(reasons),
         )
-        errors = [error for error in (hour1_error, urpd_error) if error is not None]
+        errors = [error for error in (hour1_error, age_error, urpd_error) if error is not None]
         if errors:
             # Retrying soon is worth it when any one of the failed stages can be retried.
             return next((error for error in errors if error.retryable), errors[0])
@@ -501,6 +522,33 @@ class OnchainSync:
             self.store.clear_derived("sellside")
         else:
             self.store.save_derived("sellside", result.model_dump_json(), hour1_at)
+
+    def _derive_age_cohorts(self, hour1_missing: set[str], at: datetime | None) -> None:
+        """Derive the age-cohort bands and stamp them `at`.
+
+        With `at` None the stored bands are kept as they are, unless one of their series is known
+        to be missing: an absent series is not a zero, so there are then no bands at all.
+        """
+        missing = hour1_missing.intersection(AGE_INPUTS)
+        if at is None and not missing:
+            return
+        result = None
+        if not missing:
+            try:
+                result = age_cohorts(
+                    {
+                        name: self.store.read_series(name, "hour1", tail=V1_LOOKBACK + 1)
+                        for name in AGE_INPUTS
+                    }
+                )
+            except Exception:
+                # The other views and the run's state must not depend on the age cohorts. Never
+                # log the exception: it may carry values. A fixed code is enough here.
+                logger.warning("onchain_derive_failed code=agecohorts_failed")
+        if result is None or at is None:
+            self.store.clear_derived("agecohorts")
+        else:
+            self.store.save_derived("agecohorts", result.model_dump_json(), at)
 
     def _cost_basis(
         self, day: date, lines_as_of: date, lines: list[ModelLine], *, latest_day: date | None

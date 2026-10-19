@@ -6,6 +6,7 @@ export type LevelsView = components["schemas"]["LevelsView"];
 export type SellerPressureView = components["schemas"]["SellerPressureView"];
 export type CostBasisView = components["schemas"]["CostBasisView"];
 export type SellSideView = components["schemas"]["SellSideView"];
+export type AgeCohortsView = components["schemas"]["AgeCohortsView"];
 export type BucketCostBasis = components["schemas"]["BucketCostBasis"];
 
 const time = z.string().datetime({ offset: true });
@@ -251,6 +252,41 @@ export const sellSideSchema: z.ZodType<SellSideView, z.ZodTypeDef, unknown> = z
         Object.values(legs).every((column) => column.length === view.at.length),
       ),
     { message: "sell-side columns differ in length" },
+  );
+
+const ageBands = z.object({
+  profit: z.array(z.array(z.number())),
+  loss: z.array(z.array(z.number())),
+});
+
+// Twelve bands a side, each a column lined up with `at`; an unavailable payload has no bands.
+export const ageCohortsSchema: z.ZodType<AgeCohortsView, z.ZodTypeDef, unknown> = z
+  .object({
+    data_state: pressureDataState,
+    reasons: z.array(z.string()),
+    refreshing: z.boolean(),
+    forming_at: time.nullable(),
+    last_at: time.nullable(),
+    at: z.array(time),
+    price: z.array(z.number()),
+    pnl: ageBands,
+    volb: ageBands,
+    volu: ageBands,
+    brk_version: z.string().nullable(),
+    rules,
+    rules_pending: z.boolean(),
+  })
+  .refine(
+    (view) =>
+      view.price.length === view.at.length &&
+      [view.pnl, view.volb, view.volu].every((bands) =>
+        [bands.profit, bands.loss].every(
+          (side) =>
+            side.length === (view.at.length ? 12 : 0) &&
+            side.every((column) => column.length === view.at.length),
+        ),
+      ),
+    { message: "age-cohort columns differ in length" },
   );
 
 // Hand-written payloads shared by contract and view tests. The cycle components and the

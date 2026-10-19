@@ -71,6 +71,15 @@ data). Replayed by `../../onchain_fixture.py`; do not edit the JSON by hand.
   11 `null`s. In the same minute `utxos_under_1h_old_realized_loss_cumulative` and
   `lth_realized_loss_cumulative` were fetched again over that window and matched the 10-16 files
   value for value and in `version`, so BRK had not revised that window since the capture.
+- The 126 hour1 series only the age-cohort chart reads (`AGE_ONLY_SERIES` in `brk.py`: the six
+  cumulatives of each UTXO age cohort from 1d-1w up, which the files above do not already have)
+  were fetched on 2026-10-19 15:1xZ with
+  `GET /api/series/bulk?series=<names>&index=hour1&start=155913&end=155938`, four requests, each
+  item saved unchanged. They hold only the **last 25 hours** (positions 155913-155937, no `null`s),
+  to keep the sample small: the sync derives the age cohorts from those hours alone. In the same
+  minute `utxos_under_1h_old_realized_profit_cumulative`,
+  `sth_transfer_volume_in_loss_cumulative_usd` and `price_close` were fetched again over that
+  window and matched the files here value for value and in `version`.
 
 ## How the fake BRK replays them
 

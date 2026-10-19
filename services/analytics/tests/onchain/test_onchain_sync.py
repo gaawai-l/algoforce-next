@@ -19,7 +19,9 @@ from onchain_fixture import (
     seed_golden,
 )
 
+from wheelhouse_service.onchain.agecohorts import AgeCohorts
 from wheelhouse_service.onchain.brk import (
+    AGE_ONLY_SERIES,
     DAY1_SERIES,
     HOUR1_BACKFILL,
     HOUR1_SERIES,
@@ -43,8 +45,9 @@ LINES = {"true_mean", "short_term", "average", "long_term", "median"}
 # The cost-basis golden sample: unlike the P1 fixtures, it has its own snapshot for each past day.
 GOLDEN = Path(__file__).parent / "fixtures" / "brk-2026-10-16T1829Z"
 D = date(2026, 10, 16)
-# Every hour1 series the sync fetches: the seller pressure's, then those only the sell side needs.
-HOUR1 = (*HOUR1_SERIES, *SELL_SIDE_SERIES)
+# Every hour1 series the sync fetches: the seller pressure's, then those only the sell side needs,
+# then, in a stage of their own, those only the age cohorts need.
+HOUR1 = (*HOUR1_SERIES, *SELL_SIDE_SERIES, *AGE_ONLY_SERIES)
 
 
 def instant(value: str | None) -> datetime:
@@ -537,8 +540,9 @@ def test_first_run_backfills_hour1_from_minus_3000(tmp_path: Path):
     hour1 = hour1_calls(calls)
     assert all(params["start"] == str(-HOUR1_BACKFILL) for params in hour1)
     assert requested(hour1) == set(HOUR1)
-    # 29 series of 3,000 points are over the weight cap in one request: 6 fit in each.
-    assert len(hour1) == 5
+    # 3,000 points per series is over the weight cap past 6 series a request: the 29 series of the
+    # first stage take 5 requests, the 126 of the age cohorts' stage 21.
+    assert len(hour1) == 5 + 21
     assert [store.last_position(name, "hour1") for name in HOUR1_SERIES] == [155937] * 11
     pressure = pressure_of(store)
     assert pressure.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
@@ -1107,6 +1111,188 @@ def test_a_missing_sell_side_series_keeps_the_pressure(tmp_path: Path):
     assert strings(state["reasons"]) == [f"series_missing:hour1:{gap}"]
     assert store.derived("sellside") is None
     assert pressure_of(store).last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
+
+
+def bulk_names(request: httpx.Request) -> set[str]:
+    """The series a bulk request asks for; none for any other request."""
+    if request.url.path != "/api/series/bulk":
+        return set()
+    return set(request.url.params["series"].split(","))
+
+
+def failing_for(names: Set[str], **options: Any) -> httpx.MockTransport:
+    """The fixture BRK, except that an hour1 bulk request for any of `names` gets a 503."""
+    inner, _ = brk_transport(**options)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if bulk_names(request) & names and request.url.params["index"] == "hour1":
+            return httpx.Response(503)
+        return inner.handler(request)
+
+    return httpx.MockTransport(handler)
+
+
+def test_age_cohorts_are_stamped_as_of_the_first_hour1_stage(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport()
+    start = datetime(2026, 10, 16, 9, 12, tzinfo=UTC)
+    hour1_done = start + timedelta(minutes=1)
+    age_done = start + timedelta(minutes=2)
+    ticks = [start]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        names = bulk_names(request)
+        if names and request.url.params["index"] == "hour1":
+            ticks.append(age_done if names <= set(AGE_ONLY_SERIES) else hour1_done)
+        return inner.handler(request)
+
+    sync = sync_for(store, httpx.MockTransport(handler), start)
+    assert sync._refresh(start, lambda: ticks[-1]) is None
+
+    # They read that stage's series too, so a row it fetched still forming stays marked so.
+    pressure, ages = store.derived("pressure"), store.derived("agecohorts")
+    assert pressure is not None and pressure[1] == hour1_done
+    assert ages is not None and ages[1] == hour1_done
+    result = AgeCohorts.model_validate_json(ages[0])
+    # The fixture holds the age-only series for 25 hours, and 24 of them have an hour before them.
+    assert len(result.at) == 24
+    assert result.at[-1] == datetime(2026, 10, 16, 9, tzinfo=UTC)
+    assert result.rules == []
+
+
+def test_a_failed_age_stage_keeps_the_other_hour1_views_current(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    before = store.derived("agecohorts")
+    assert before is not None
+
+    second = NOW + timedelta(hours=1)
+    assert run(store, failing_for(set(AGE_ONLY_SERIES)), second) is True
+
+    # The age cohorts stay as they were, with the time they were computed.
+    assert store.derived("agecohorts") == before
+    for kind in ("pressure", "sellside", "cycle", "levels", "costbasis"):
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == second
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["last_success_at"]) == NOW
+    assert instant(state["next_due"]) == second + timedelta(minutes=5)
+    assert strings(state["reasons"]) == []
+
+
+def test_a_failed_first_hour1_stage_keeps_the_age_cohorts_as_they_were(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    before = {kind: store.derived(kind) for kind in ("pressure", "sellside", "agecohorts")}
+
+    second = NOW + timedelta(hours=1)
+    assert run(store, failing_for({*HOUR1_SERIES, *SELL_SIDE_SERIES}), second) is True
+
+    # The age stage fetched, but the bands also read the first stage's series, which did not.
+    assert {kind: store.derived(kind) for kind in before} == before
+    assert store.state()["last_error"] == "brk_unavailable"
+
+
+def test_each_hour1_stage_keeps_its_own_missing_series(tmp_path: Path):
+    age_gap = "utxos_3y_to_4y_old_realized_profit_cumulative"
+    side_gap = "lth_transfer_volume_in_loss_cumulative_usd"
+    later = NOW + timedelta(hours=1)
+
+    # The first stage fails: what it last found missing stands, the age stage's is found again.
+    store = OnchainStore(tmp_path / "first.sqlite")
+    partial, _ = brk_transport(missing={age_gap, side_gap})
+    run(store, partial, NOW)
+    assert strings(store.state()["missing_series"]) == [f"hour1:{side_gap}", f"hour1:{age_gap}"]
+    run(store, failing_for({*HOUR1_SERIES, *SELL_SIDE_SERIES}), later)
+    assert strings(store.state()["missing_series"]) == [f"hour1:{side_gap}"]
+
+    # The age stage fails: what it last found missing stands, the first stage's is found again.
+    store = OnchainStore(tmp_path / "age.sqlite")
+    run(store, partial, NOW)
+    run(store, failing_for(set(AGE_ONLY_SERIES)), later)
+    assert strings(store.state()["missing_series"]) == [f"hour1:{age_gap}"]
+    assert strings(store.state()["reasons"]) == [f"series_missing:hour1:{age_gap}"]
+
+
+def test_a_missing_shared_series_clears_the_age_cohorts_even_when_their_stage_failed(
+    tmp_path: Path,
+):
+    gap = "utxos_1h_to_1d_old_realized_loss_cumulative"
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("agecohorts") is not None
+
+    second = NOW + timedelta(hours=1)
+    assert run(store, failing_for(set(AGE_ONLY_SERIES), missing={gap}), second) is True
+
+    # An absent series is not a zero: the stored bands go rather than stand in for it.
+    assert store.derived("agecohorts") is None
+    assert store.derived("sellside") is None
+    assert store.derived("pressure") is not None
+
+
+def test_derive_from_store_keeps_the_age_cohorts_stamp(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    sync = sync_for(store, transport, NOW)
+    sync.run_once(now=NOW)
+    before = store.derived("agecohorts")
+    assert before is not None
+
+    sync.derive_from_store()
+    assert store.derived("agecohorts") == before
+
+    # With nothing stored there is no time to stamp them with, so none are derived.
+    store.clear_derived("agecohorts")
+    sync.derive_from_store()
+    assert store.derived("agecohorts") is None
+
+
+def test_a_missing_age_series_keeps_the_other_hour1_views(tmp_path: Path):
+    gap = "utxos_3y_to_4y_old_transfer_volume_in_loss_cumulative_usd"
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={gap})
+    assert run(store, partial, NOW) is True
+
+    state = store.state()
+    assert strings(state["missing_series"]) == [f"hour1:{gap}"]
+    assert strings(state["reasons"]) == [f"series_missing:hour1:{gap}"]
+    assert state["last_error"] is None
+    assert store.derived("agecohorts") is None
+    assert store.derived("sellside") is not None
+    assert pressure_of(store).last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
+
+
+def test_age_cohorts_failure_still_derives_everything_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("agecohorts") is not None
+
+    def boom(*args: object) -> None:
+        raise RuntimeError("secret value 123")
+
+    monkeypatch.setattr("wheelhouse_service.onchain.sync.age_cohorts", boom)
+    second = NOW + timedelta(hours=1)
+    again, _ = brk_transport()
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, again, second) is True
+
+    assert store.derived("agecohorts") is None
+    for kind in ("cycle", "levels", "costbasis", "pressure", "sellside"):
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == second
+    state = store.state()
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == second
+    assert "code=agecohorts_failed" in caplog.text
+    assert "secret" not in caplog.text
 
 
 def test_hour1_failure_still_derives_costbasis(tmp_path: Path):
@@ -1858,11 +2044,12 @@ def test_o2_reaches_the_derived_pressure(tmp_path: Path, monkeypatch: pytest.Mon
     o2_rules: Rules = frozenset({"O2"})
     (v1, v1_lengths), (o2, o2_lengths) = derived(frozenset()), derived(o2_rules)
 
-    # The pressure reads first; the sell side then reads its 25 series over the v1 lookback.
+    # The pressure reads first; the sell side then reads its 25 series and the age cohorts their
+    # 139, both over the v1 lookback.
     pressure_v1, pressure_o2 = v1_lengths[: len(HOUR1_SERIES)], o2_lengths[: len(HOUR1_SERIES)]
     assert pressure_v1 == [lookback(frozenset()) + 1] * len(HOUR1_SERIES) == [2601] * 11
     assert pressure_o2 == [lookback(o2_rules) + 1] * len(HOUR1_SERIES) == [2882] * 11
-    assert len(v1_lengths) == len(o2_lengths) == 11 + 25
+    assert len(v1_lengths) == len(o2_lengths) == 11 + 25 + 139
     assert (v1.rules, o2.rules) == ([], ["O2"])
     assert v1.last_at == o2.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
     # Each point carries its own thresholds and level under O2 only.

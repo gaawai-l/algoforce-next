@@ -1204,6 +1204,27 @@
         }
       }
     },
+    "/api/wheelhouse/v1/onchain/age-cohorts": {
+      "get": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Age Cohorts",
+        "operationId": "age_cohorts_api_wheelhouse_v1_onchain_age_cohorts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgeCohortsView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/perps/states": {
       "get": {
         "tags": [
@@ -1291,6 +1312,159 @@
   },
   "components": {
     "schemas": {
+      "AgeBands": {
+        "properties": {
+          "profit": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Profit"
+          },
+          "loss": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Loss"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profit",
+          "loss"
+        ],
+        "title": "AgeBands",
+        "description": "One measure's twelve bands, youngest first, each one value per kept hour."
+      },
+      "AgeCohortsView": {
+        "properties": {
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "refreshing": {
+            "type": "boolean",
+            "title": "Refreshing"
+          },
+          "forming_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forming At"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last At"
+          },
+          "at": {
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "type": "array",
+            "title": "At"
+          },
+          "price": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Price"
+          },
+          "pnl": {
+            "$ref": "#/components/schemas/AgeBands"
+          },
+          "volb": {
+            "$ref": "#/components/schemas/AgeBands"
+          },
+          "volu": {
+            "$ref": "#/components/schemas/AgeBands"
+          },
+          "brk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brk Version"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data_state",
+          "reasons",
+          "refreshing",
+          "forming_at",
+          "last_at",
+          "at",
+          "price",
+          "pnl",
+          "volb",
+          "volu",
+          "brk_version",
+          "rules",
+          "rules_pending"
+        ],
+        "title": "AgeCohortsView"
+      },
       "Analysis": {
         "properties": {
           "snapshot_id": {

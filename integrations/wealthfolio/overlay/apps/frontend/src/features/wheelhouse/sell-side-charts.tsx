@@ -318,7 +318,7 @@ function Plot({
   );
 }
 
-function Segments<T extends string | number>({
+export function Segments<T extends string | number>({
   label,
   options,
   value,

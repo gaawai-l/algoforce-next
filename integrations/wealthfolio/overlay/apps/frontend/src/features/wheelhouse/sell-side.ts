@@ -169,14 +169,58 @@ export const fmtBtc = (value: number) =>
 export const fmtVal = (value: number, measure: Measure) =>
   measure === "volb" ? fmtBtc(value) : fmtUsd(value);
 
-const PREFIXES = ["", "k", "M", "B", "T"];
-// d3.format("~s") with G written as B: an SI prefix, trailing zeros dropped.
+// d3-format 3's formatDecimalParts: the significant digits of `x` to `p` places, and its exponent.
+function decimalParts(x: number, p: number): [string, number] {
+  const text = p ? x.toExponential(p - 1) : x.toExponential();
+  const e = text.indexOf("e");
+  const coefficient = text.slice(0, e);
+  return [
+    coefficient.length > 1 ? coefficient[0] + coefficient.slice(2) : coefficient,
+    Number(text.slice(e + 1)),
+  ];
+}
+
+// d3-format 3's formatTrim: insignificant trailing zeros dropped, and the point with them.
+function trimZeros(s: string) {
+  let i0 = -1;
+  let i1 = -1;
+  for (let i = 1; i < s.length; i += 1) {
+    if (s[i] === ".") {
+      i0 = i;
+      i1 = i;
+    } else if (s[i] === "0") {
+      if (i0 === 0) i0 = i;
+      i1 = i;
+    } else {
+      if (!Number(s[i])) break;
+      if (i0 > 0) i0 = 0;
+    }
+  }
+  return i0 > 0 ? s.slice(0, i0) + s.slice(i1 + 1) : s;
+}
+
+const PREFIXES = [
+  ..."yzafpnµm",
+  "",
+  ..."kMBTPEZY",
+];
+// d3.format("~s") with G written as B, as the original prints it: six significant digits, an SI
+// prefix, trailing zeros dropped (d3-format 3's formatPrefixAuto).
 export function si(value: number) {
-  if (value === 0) return "0";
   const abs = Math.abs(value);
-  const tier = Math.max(0, Math.min(PREFIXES.length - 1, Math.floor(Math.log10(abs) / 3)));
-  const scaled = Number((abs / 1000 ** tier).toPrecision(6));
-  return `${value < 0 ? "−" : ""}${scaled}${PREFIXES[tier]}`;
+  const [coefficient, exponent] = decimalParts(abs, 6);
+  const tier = Math.max(-8, Math.min(8, Math.floor(exponent / 3)));
+  const i = exponent - tier * 3 + 1;
+  const n = coefficient.length;
+  const digits =
+    i === n
+      ? coefficient
+      : i > n
+        ? coefficient + "0".repeat(i - n)
+        : i > 0
+          ? `${coefficient.slice(0, i)}.${coefficient.slice(i)}`
+          : `0.${"0".repeat(-i)}${decimalParts(abs, Math.max(0, 6 + i - 1))[0]}`;
+  return `${value < 0 ? "−" : ""}${trimZeros(digits)}${PREFIXES[8 + tier]}`;
 }
 // An axis label: dollars carry a $, coins none, as on the original.
 export const axisValue = (value: number, measure: Measure) =>

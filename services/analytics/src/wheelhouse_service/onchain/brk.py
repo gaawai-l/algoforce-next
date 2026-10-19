@@ -15,6 +15,9 @@ BASE_URL = "https://bitview.space"
 TIMEOUT = 20.0
 # A bulk request is rejected above 320,000 weight (about 16 per point), so chunks stay below this.
 MAX_POINTS = 18_000
+# BRK also refuses a `series` parameter over about 2,048 characters once decoded: on 2026-10-19 a
+# list of 1,997 passed and one of 2,053 did not.
+MAX_SERIES_CHARS = 2_000
 START = date(2013, 1, 1)
 # Position 0 of both day1 and hour1.
 EPOCH = datetime(2009, 1, 1, tzinfo=UTC)
@@ -62,6 +65,48 @@ SELL_SIDE_SERIES = (
     "utxos_1h_to_1d_old_transfer_volume_in_loss_cumulative",
     "utxos_1h_to_1d_old_transfer_volume_in_profit_cumulative_usd",
     "utxos_1h_to_1d_old_transfer_volume_in_loss_cumulative_usd",
+)
+# The age-cohort chart reads every UTXO age cohort, in the original page's order, with the same six
+# cumulatives each: realized profit and loss, and the spent volume in profit and at a loss in BTC
+# and in USD.
+AGE_COHORTS = (
+    "utxos_under_1h_old",
+    "utxos_1h_to_1d_old",
+    "utxos_1d_to_1w_old",
+    "utxos_1w_to_1m_old",
+    "utxos_1m_to_2m_old",
+    "utxos_2m_to_3m_old",
+    "utxos_3m_to_4m_old",
+    "utxos_4m_to_5m_old",
+    "utxos_5m_to_6m_old",
+    "utxos_6m_to_9m_old",
+    "utxos_9m_to_1y_old",
+    "utxos_1y_to_18m_old",
+    "utxos_18m_to_2y_old",
+    "utxos_2y_to_3y_old",
+    "utxos_3y_to_4y_old",
+    "utxos_4y_to_5y_old",
+    "utxos_5y_to_6y_old",
+    "utxos_6y_to_7y_old",
+    "utxos_7y_to_8y_old",
+    "utxos_8y_to_10y_old",
+    "utxos_10y_to_12y_old",
+    "utxos_12y_to_15y_old",
+    "utxos_over_15y_old",
+)
+AGE_SUFFIXES = (
+    "_realized_profit_cumulative",
+    "_realized_loss_cumulative",
+    "_transfer_volume_in_profit_cumulative",
+    "_transfer_volume_in_loss_cumulative",
+    "_transfer_volume_in_profit_cumulative_usd",
+    "_transfer_volume_in_loss_cumulative_usd",
+)
+AGE_SERIES = tuple(f"{cohort}{suffix}" for cohort in AGE_COHORTS for suffix in AGE_SUFFIXES)
+# The ones the other hour1 series do not already bring. They are fetched in a stage of their own,
+# so that their requests failing never holds up the seller pressure or the sell side.
+AGE_ONLY_SERIES = tuple(
+    name for name in AGE_SERIES if name not in {*HOUR1_SERIES, *SELL_SIDE_SERIES}
 )
 # First fill and full refetch of hour1 ask for the last N points (`start=-N`), never for `START`.
 HOUR1_BACKFILL = 3000
@@ -157,6 +202,21 @@ def _failure(response: httpx.Response) -> BrkError:
     return BrkError("brk_bad_request", False)
 
 
+def _chunks(names: Sequence[str], size: int) -> list[list[str]]:
+    """`names` in order, at most `size` to a chunk and MAX_SERIES_CHARS once joined by commas."""
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    for name in names:
+        joined = ",".join([*current, name])
+        if current and (len(current) == size or len(joined) > MAX_SERIES_CHARS):
+            chunks.append(current)
+            current = []
+        current.append(name)
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _json(response: httpx.Response) -> Any:
     try:
         return response.json()
@@ -182,7 +242,8 @@ class BrkClient:
         return body
 
     def series(self, names: Sequence[str], index: Index, start: int | date) -> SeriesBatch:
-        """Fetch `names` from `start` through the latest position, in chunks under MAX_POINTS.
+        """Fetch `names` from `start` through the latest position, in chunks under MAX_POINTS and
+        MAX_SERIES_CHARS.
 
         A negative `start` asks BRK for the last `-start` points; each response still carries the
         absolute position of its first point.
@@ -190,8 +251,8 @@ class BrkClient:
         size = max(1, MAX_POINTS // max(1, self._points(index, start)))
         found: dict[str, SeriesData] = {}
         missing: list[str] = []
-        for offset in range(0, len(names), size):
-            self._collect(names[offset : offset + size], index, start, found, missing)
+        for chunk in _chunks(names, size):
+            self._collect(chunk, index, start, found, missing)
         return SeriesBatch(found=found, missing=missing)
 
     def urpd(self, cohort: str, day: date, agg: str = "lin500") -> Urpd | None:

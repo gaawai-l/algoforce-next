@@ -1670,6 +1670,79 @@
   }
 }
 
+/* Chart 2: the original's age ramp (state-report's dark theme), light for young coins and dark
+   for old, so the order survives greyscale. Profit and loss are told apart by side, not colour. */
+.wh-agec {
+  --wh-age6-0: #ffcd7d;
+  --wh-age6-1: #ffbc7f;
+  --wh-age6-2: #d7aa80;
+  --wh-age6-3: #a29980;
+  --wh-age6-4: #678680;
+  --wh-age6-5: #00747e;
+  --wh-age12-0: #ffcd7d;
+  --wh-age12-1: #ffc57e;
+  --wh-age12-2: #ffbd7f;
+  --wh-age12-3: #f8b580;
+  --wh-age12-4: #e1ad80;
+  --wh-age12-5: #c9a580;
+  --wh-age12-6: #b09d80;
+  --wh-age12-7: #989580;
+  --wh-age12-8: #7e8d80;
+  --wh-age12-9: #628580;
+  --wh-age12-10: #407c7f;
+  --wh-age12-11: #00747e;
+}
+.wh-age-wrap {
+  position: relative;
+}
+.wh-age-zero {
+  stroke: var(--wh-muted);
+  stroke-width: 1;
+}
+.wh-age-tip {
+  position: absolute;
+  top: 16px;
+  z-index: 2;
+  max-width: min(300px, calc(100% - 8px));
+  padding: 6px 8px;
+  border: 1px solid var(--wh-edge);
+  border-radius: 4px;
+  background: rgba(5, 10, 14, 0.94);
+  color: var(--wh-muted);
+  font:
+    11px/1.5 "JetBrains Mono",
+    monospace;
+  pointer-events: none;
+}
+.wh-age-tip-title {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.wh-age-tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wh-age-tip-row span:last-child {
+  color: #e5edf6;
+  white-space: nowrap;
+}
+.wh-market .wh-age-solo {
+  min-height: 28px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.wh-market .wh-age-solo input {
+  height: 16px;
+  padding: 0;
+}
+@media (max-width: 600px) {
+  .wh-market .wh-age-solo {
+    min-height: 44px;
+  }
+}
+
 /* Perp states: notices, the parameters, Table 1 and Charts 1–4, each with its notes. */
 .wh-perp {
   --wh-moss: #7fc98a;

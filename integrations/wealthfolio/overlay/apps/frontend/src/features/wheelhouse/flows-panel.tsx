@@ -1,4 +1,5 @@
 import { useSearchParams } from "react-router-dom";
+import { AgeCohortChart } from "./age-cohort-chart";
 import type { Stream } from "./client";
 import { useWheelhouseText } from "./i18n";
 import { PerpStates } from "./perp-states";
@@ -50,7 +51,10 @@ export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
       {flow === "seller" ? (
         <SellerCharts />
       ) : flow === "sellside" ? (
-        <SellSideCharts />
+        <>
+          <SellSideCharts />
+          <AgeCohortChart />
+        </>
       ) : (
         <PerpStates />
       )}

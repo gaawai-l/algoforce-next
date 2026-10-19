@@ -124,12 +124,6 @@ def test_inputs_are_the_pressure_series_it_needs_and_the_sell_side_series():
     assert not set(SELL_SIDE_SERIES) & set(HOUR1_SERIES)
 
 
-def test_one_incremental_request_stays_well_under_the_url_limit():
-    # An incremental refresh asks for every hour1 series in one request. BRK refused a `series`
-    # parameter of 2,083 characters on 2026-10-19 and took one of 2,048.
-    assert len(",".join((*HOUR1_SERIES, *SELL_SIDE_SERIES))) < 1_500
-
-
 def test_matches_the_original_page_data_row_for_row():
     """The page's DATA, re-computed from the same fetch by a port that matched it cell for cell."""
     expected = json.loads((GOLDEN / "expected_sell_side.json").read_text())

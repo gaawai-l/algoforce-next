@@ -32,6 +32,9 @@ EPOCH = date(2009, 1, 1)
 # Observed on the live API: a bulk request over 320,000 weight is rejected, ~16 weight per point.
 WEIGHT_CAP = 320_000
 WEIGHT_PER_POINT = 16
+# Observed on 2026-10-19: a decoded `series` parameter of 1,997 characters passed and one of 2,053
+# was refused with HTTP 400 ("series: Given parameter is too long").
+SERIES_CHARS_CAP = 2_048
 
 
 def _raw(filename: str) -> dict[str, Any]:
@@ -82,6 +85,8 @@ def _position(start: str) -> int:
 
 
 def _bulk(params: dict[str, str], missing: Set[str]) -> httpx.Response:
+    if len(params["series"]) > SERIES_CHARS_CAP:
+        return _error(400, "bad_request", "invalid_request")
     names = params["series"].split(",")
     if not missing.isdisjoint(names):
         return _error(404, "series_not_found")

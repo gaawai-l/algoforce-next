@@ -481,6 +481,7 @@ def test_capability_and_get_only_schema(tmp_path: Path):
         f"{PREFIX}/levels",
         f"{PREFIX}/seller-pressure",
         f"{PREFIX}/sell-side",
+        f"{PREFIX}/age-cohorts",
         f"{PREFIX}/cost-basis",
     }
     assert all(methods == {"get"} for methods in onchain.values())
@@ -1200,3 +1201,69 @@ def test_a_seller_pressure_series_gap_leaves_the_sell_side_alone(tmp_path: Path)
     assert sell_side["data_state"] == "fresh"
     assert sell_side["reasons"] == []
     assert datetime.fromisoformat(sell_side["last_at"]) == LAST_ROW
+
+
+def test_age_cohorts_unavailable_with_200_and_no_zero(tmp_path: Path):
+    with TestClient(router_app(tmp_path / "m.sqlite")) as http:
+        response = http.get(f"{PREFIX}/age-cohorts")
+    view = response.json()
+
+    assert response.status_code == 200
+    assert view["data_state"] == "unavailable"
+    assert view["reasons"] == ["brk_unavailable"]
+    assert (view["forming_at"], view["last_at"]) == (None, None)
+    # Missing data is empty columns, never zero-filled ones.
+    assert view["at"] == view["price"] == []
+    for measure in ("pnl", "volb", "volu"):
+        assert view[measure] == {"profit": [], "loss": []}
+    assert (view["rules"], view["rules_pending"]) == ([], False)
+
+
+def test_age_cohorts_view_after_sync(tmp_path: Path):
+    path = synced(tmp_path, at=HOUR1_SYNC)
+    with TestClient(router_app(path, datetime(2026, 10, 16, 9, 30, tzinfo=UTC))) as http:
+        view = http.get(f"{PREFIX}/age-cohorts").json()
+
+    assert view["data_state"] == "fresh"
+    assert view["reasons"] == []
+    assert datetime.fromisoformat(view["forming_at"]) == LAST_ROW
+    assert datetime.fromisoformat(view["last_at"]) == LAST_ROW
+    # The fixture has the age-only series for 25 hours; every column is lined up with `at`.
+    count = len(view["at"])
+    assert count == 24
+    assert len(view["price"]) == count
+    for measure in ("pnl", "volb", "volu"):
+        for side in ("profit", "loss"):
+            assert len(view[measure][side]) == 12
+            assert {len(band) for band in view[measure][side]} == {count}
+    assert view["rules"] == []
+    assert view["brk_version"] == "0.12.2"
+
+
+def test_an_age_series_gap_leaves_the_sell_side_alone(tmp_path: Path):
+    gap = "utxos_7y_to_8y_old_realized_profit_cumulative"
+    path = synced(tmp_path, at=HOUR1_SYNC, missing={gap})
+    with TestClient(router_app(path, datetime(2026, 10, 16, 9, 30, tzinfo=UTC))) as http:
+        ages = http.get(f"{PREFIX}/age-cohorts").json()
+        sell_side = http.get(f"{PREFIX}/sell-side").json()
+        pressure = http.get(f"{PREFIX}/seller-pressure").json()
+        _, _, hour1 = http.get(f"{PREFIX}/status").json()["datasets"]
+
+    assert ages["data_state"] == "unavailable"
+    assert ages["reasons"] == [f"series_missing:hour1:{gap}"]
+    assert ages["at"] == []
+    assert (sell_side["data_state"], sell_side["reasons"]) == ("fresh", [])
+    assert (pressure["data_state"], pressure["reasons"]) == ("fresh", [])
+    assert hour1["reasons"] == []
+
+
+def test_a_shared_series_gap_shows_on_the_age_cohorts_too(tmp_path: Path):
+    gap = "utxos_1h_to_1d_old_transfer_volume_in_profit_cumulative_usd"
+    path = synced(tmp_path, at=HOUR1_SYNC, missing={gap})
+    with TestClient(router_app(path, datetime(2026, 10, 16, 9, 30, tzinfo=UTC))) as http:
+        ages = http.get(f"{PREFIX}/age-cohorts").json()
+        sell_side = http.get(f"{PREFIX}/sell-side").json()
+
+    for view in (ages, sell_side):
+        assert view["data_state"] == "unavailable"
+        assert view["reasons"] == [f"series_missing:hour1:{gap}"]

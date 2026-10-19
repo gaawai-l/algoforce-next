@@ -7,6 +7,7 @@ from pydantic import AwareDatetime
 
 from ..market import Model
 from ..rules import Rule
+from .agecohorts import AgeBands
 from .costbasis import BucketCostBasis
 from .cycle import Component, CycleState, Episode
 from .levels import ModelLine
@@ -177,6 +178,25 @@ class SellSideView(Model):
     volu: SellSideLegs
     xgap: int | None
     qc: list[Literal["intraday_legs"]]
+    brk_version: str | None
+    rules: list[Rule]
+    rules_pending: bool
+
+
+class AgeCohortsView(Model):
+    data_state: HourState
+    reasons: list[str]
+    refreshing: bool
+    # The time of the in-progress row, when the last row was still open when it was computed.
+    forming_at: AwareDatetime | None
+    last_at: AwareDatetime | None
+    # One entry per kept hour, oldest first; each band below is lined up with it. Empty when there
+    # is no data: an absent hour is never sent as a zero.
+    at: list[AwareDatetime]
+    price: list[float]
+    pnl: AgeBands
+    volb: AgeBands
+    volu: AgeBands
     brk_version: str | None
     rules: list[Rule]
     rules_pending: bool

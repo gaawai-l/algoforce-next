@@ -6,9 +6,11 @@ import pytest
 from onchain_fixture import FIXTURES, brk_transport, load_series
 
 from wheelhouse_service.onchain.brk import (
+    AGE_SERIES,
     DAY1_SERIES,
     HOUR1_BACKFILL,
     HOUR1_SERIES,
+    MAX_SERIES_CHARS,
     START,
     BrkClient,
     BrkError,
@@ -88,6 +90,21 @@ def test_chunk_size_follows_the_point_estimate():
     client, requested = hour1_client()
     client.series(DAY1_SERIES, "hour1", START)
     assert requested == [[name] for name in DAY1_SERIES]
+
+
+def test_chunks_also_stay_under_the_series_length_limit():
+    client, requested = hour1_client()
+    # Incremental: 9 points a series would allow 2,000 names a request, so the length decides.
+    client.series(AGE_SERIES, "hour1", 155_930)
+
+    assert [name for chunk in requested for name in chunk] == list(AGE_SERIES)
+    assert len(requested) == 4
+    assert all(len(",".join(chunk)) <= MAX_SERIES_CHARS for chunk in requested)
+    # Each chunk is as long as it can be: the next name would have taken it over the limit.
+    assert all(
+        len(",".join([*chunk, after[0]])) > MAX_SERIES_CHARS
+        for chunk, after in zip(requested, requested[1:], strict=False)
+    )
 
 
 def test_hour1_series_are_the_eleven_planned_names():

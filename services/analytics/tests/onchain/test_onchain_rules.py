@@ -532,7 +532,7 @@ def test_derive_command_rederives_a_copy_without_brk(
     }
     # Each view with the rules its payload recorded, not the rules asked for.
     assert capsys.readouterr().out == (
-        "derived cycle=O1 levels=O1 costbasis=O1 pressure=O1,O3 sellside=v1\n"
+        "derived cycle=O1 levels=O1 costbasis=O1 pressure=O1,O3 sellside=v1 agecohorts=v1\n"
     )
 
     # Without --rules, WHEELHOUSE_RULES decides.
@@ -543,7 +543,7 @@ def test_derive_command_rederives_a_copy_without_brk(
         name: [] for name in ROUTES
     }
     assert capsys.readouterr().out == (
-        "derived cycle=v1 levels=v1 costbasis=v1 pressure=v1 sellside=v1\n"
+        "derived cycle=v1 levels=v1 costbasis=v1 pressure=v1 sellside=v1 agecohorts=v1\n"
     )
     assert requests == []
 

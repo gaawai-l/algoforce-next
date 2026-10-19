@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { demarkConfigSchema, demarkResultSchema } from "./demark-contract";
 import {
+  ageCohortsSchema,
   costBasisViewSchema,
   cycleViewSchema,
   levelsViewSchema,
@@ -219,6 +220,8 @@ export const getCostBasis = (signal?: AbortSignal) =>
   query("/onchain/cost-basis", costBasisViewSchema, { signal });
 export const getSellSide = (signal?: AbortSignal) =>
   query("/onchain/sell-side", sellSideSchema, { signal });
+export const getAgeCohorts = (signal?: AbortSignal) =>
+  query("/onchain/age-cohorts", ageCohortsSchema, { signal });
 export const getPerpStates = (
   exchange: PerpStatesView["exchange"],
   window: PerpStatesView["window"],

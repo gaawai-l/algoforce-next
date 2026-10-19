@@ -3,7 +3,12 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { FlowsPanel } from "./flows-panel";
-import { pressureSample, sellSideSchema } from "./onchain-contract";
+import ageCohortsRaw from "./age-cohorts-sample.json";
+import {
+  ageCohortsSchema,
+  pressureSample,
+  sellSideSchema,
+} from "./onchain-contract";
 import sellSideRaw from "./sell-side-sample.json";
 import { perpStatesSample } from "./perps-contract";
 import type { Stream } from "./client";
@@ -11,6 +16,7 @@ import type { Stream } from "./client";
 const mocks = vi.hoisted(() => ({
   pressure: vi.fn(),
   sellSide: vi.fn(),
+  ageCohorts: vi.fn(),
   perpStates: vi.fn(),
   perpStatus: vi.fn(),
 }));
@@ -18,6 +24,7 @@ vi.mock("./client", async (original) => ({
   ...(await original<typeof import("./client")>()),
   getSellerPressure: mocks.pressure,
   getSellSide: mocks.sellSide,
+  getAgeCohorts: mocks.ageCohorts,
   getPerpStates: mocks.perpStates,
   getPerpStatus: mocks.perpStatus,
 }));
@@ -94,8 +101,13 @@ it("shows the perp states view for flow=perp and does not query seller pressure"
 
 it("shows the sell side for flow=sellside and queries nothing else", async () => {
   mocks.sellSide.mockResolvedValue(sellSideSchema.parse(sellSideRaw));
+  mocks.ageCohorts.mockResolvedValue(ageCohortsSchema.parse(ageCohortsRaw));
   show("?flow=sellside");
   expect(await screen.findByText(sellSideA)).toBeTruthy();
+  // Chart 2 follows Charts 1A and 1B.
+  expect(
+    await screen.findByText("Chart 2 — Sell Side Breakdown by All Age Cohorts"),
+  ).toBeTruthy();
   expect(mocks.pressure).not.toHaveBeenCalled();
   expect(mocks.perpStates).not.toHaveBeenCalled();
   expect(
@@ -149,6 +161,7 @@ it.each(["ETHUSDT", "MUUSDT"] as const)(
     expect(container.textContent ?? "").not.toMatch(/\d/);
     expect(mocks.pressure).not.toHaveBeenCalled();
     expect(mocks.sellSide).not.toHaveBeenCalled();
+    expect(mocks.ageCohorts).not.toHaveBeenCalled();
     expect(mocks.perpStates).not.toHaveBeenCalled();
     expect(mocks.perpStatus).not.toHaveBeenCalled();
   },

@@ -514,6 +514,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/onchain/age-cohorts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Age Cohorts */
+        get: operations["age_cohorts_api_wheelhouse_v1_onchain_age_cohorts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/perps/states": {
         parameters: {
             query?: never;
@@ -552,6 +569,45 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AgeBands
+         * @description One measure's twelve bands, youngest first, each one value per kept hour.
+         */
+        AgeBands: {
+            /** Profit */
+            profit: number[][];
+            /** Loss */
+            loss: number[][];
+        };
+        /** AgeCohortsView */
+        AgeCohortsView: {
+            /**
+             * Data State
+             * @enum {string}
+             */
+            data_state: "fresh" | "delayed" | "stale" | "unavailable";
+            /** Reasons */
+            reasons: string[];
+            /** Refreshing */
+            refreshing: boolean;
+            /** Forming At */
+            forming_at: string | null;
+            /** Last At */
+            last_at: string | null;
+            /** At */
+            at: string[];
+            /** Price */
+            price: number[];
+            pnl: components["schemas"]["AgeBands"];
+            volb: components["schemas"]["AgeBands"];
+            volu: components["schemas"]["AgeBands"];
+            /** Brk Version */
+            brk_version: string | null;
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
+        };
         /** Analysis */
         Analysis: {
             /** Snapshot Id */
@@ -3713,6 +3769,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SellSideView"];
+                };
+            };
+        };
+    };
+    age_cohorts_api_wheelhouse_v1_onchain_age_cohorts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgeCohortsView"];
                 };
             };
         };

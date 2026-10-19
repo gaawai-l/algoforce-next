@@ -12,11 +12,14 @@ from pydantic import AwareDatetime
 
 from ..market import Model
 from ..rules import Rule, Rules, View, rules_for_view
+from .agecohorts import INPUTS as AGE_INPUTS
+from .agecohorts import AgeBands, AgeCohorts
 from .brk import DAY1_SERIES, HOUR1_SERIES, BrkClient
 from .costbasis import StoredCostBasis
 from .cycle import Cycle
 from .levels import ModelLine, line_series
 from .models import (
+    AgeCohortsView,
     CostBasisView,
     CycleView,
     DatasetStatus,
@@ -38,6 +41,7 @@ DAY1_REASONS = (*(f"series_missing:{name}" for name in DAY1_SERIES), "brk_unavai
 URPD_REASONS = ("urpd_missing", "urpd_not_final", "brk_unavailable")
 PRESSURE_REASONS = (*(f"series_missing:hour1:{name}" for name in HOUR1_SERIES), "brk_unavailable")
 SELL_SIDE_REASONS = (*(f"series_missing:hour1:{name}" for name in INPUTS), "brk_unavailable")
+AGE_REASONS = (*(f"series_missing:hour1:{name}" for name in AGE_INPUTS), "brk_unavailable")
 CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unavailable")
 
 
@@ -166,6 +170,12 @@ def create_router(
     def stored_sell_side() -> tuple[SellSide, datetime] | None:
         derived = db().derived("sellside")
         return None if derived is None else (SellSide.model_validate_json(derived[0]), derived[1])
+
+    def stored_age_cohorts() -> tuple[AgeCohorts, datetime] | None:
+        derived = db().derived("agecohorts")
+        if derived is None:
+            return None
+        return AgeCohorts.model_validate_json(derived[0]), derived[1]
 
     @router.get("/status", response_model=OnchainStatus)
     def status() -> OnchainStatus:
@@ -453,6 +463,47 @@ def create_router(
             brk_version=state["brk_version"],
             rules=result.rules,
             rules_pending=pending("sellside", result.rules),
+        )
+
+    @router.get("/age-cohorts", response_model=AgeCohortsView)
+    def age_cohorts() -> AgeCohortsView:
+        now = clock()
+        state = db().state()
+        reasons = only(stored_reasons(state), AGE_REASONS)
+        refreshing = state["refreshing"] == "true"
+        stored = stored_age_cohorts()
+        if stored is None:
+            empty = AgeBands(profit=[], loss=[])
+            return AgeCohortsView(
+                data_state="unavailable",
+                reasons=reasons or ["brk_unavailable"],
+                refreshing=refreshing,
+                forming_at=None,
+                last_at=None,
+                at=[],
+                price=[],
+                pnl=empty,
+                volb=empty,
+                volu=empty,
+                brk_version=state["brk_version"],
+                rules=[],
+                rules_pending=False,
+            )
+        result, computed_at = stored
+        return AgeCohortsView(
+            data_state=hour1_state(result.latest_at, now),
+            reasons=reasons,
+            refreshing=refreshing,
+            forming_at=result.last_at if computed_at < result.last_at + HOUR else None,
+            last_at=result.last_at,
+            at=result.at,
+            price=result.price,
+            pnl=result.pnl,
+            volb=result.volb,
+            volu=result.volu,
+            brk_version=state["brk_version"],
+            rules=result.rules,
+            rules_pending=pending("agecohorts", result.rules),
         )
 
     return router
