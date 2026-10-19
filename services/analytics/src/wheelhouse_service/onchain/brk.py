@@ -94,6 +94,9 @@ AGE_COHORTS = (
     "utxos_12y_to_15y_old",
     "utxos_over_15y_old",
 )
+# The six cohorts under three months old: the cost-basis flow's young age groups read their URPD
+# snapshots of D.
+AGE_URPD_COHORTS: tuple[str, ...] = AGE_COHORTS[:6]
 AGE_SUFFIXES = (
     "_realized_profit_cumulative",
     "_realized_loss_cumulative",
