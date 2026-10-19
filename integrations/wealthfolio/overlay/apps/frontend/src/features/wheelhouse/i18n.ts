@@ -376,6 +376,8 @@ const en = {
     "No {{window}} comparison at {{bucket}}: a snapshot it needs is missing",
   "cycle.reason.urpdMismatch":
     "The {{cohort}} {{bucket}} snapshot is from another block; not used",
+  "cycle.reason.urpdMismatchAll":
+    "The all-holder {{bucket}} snapshot is from another block; not used",
   "cycle.title": "Cycle",
   "cycle.loading": "Loading cycle…",
   "cycle.stateLabel": "State",
@@ -1166,6 +1168,7 @@ const zh: Record<MessageKey, string> = {
   "cycle.reason.urpd_not_final": "最近一个已收盘日的成本分布快照尚未定稿",
   "cycle.reason.windowMissing": "{{bucket}} 桶宽下无法比较 {{window}}：缺少所需的快照",
   "cycle.reason.urpdMismatch": "{{cohort}} 的 {{bucket}} 快照来自另一个区块，未使用",
+  "cycle.reason.urpdMismatchAll": "全体持有者的 {{bucket}} 快照来自另一个区块，未使用",
   "cycle.title": "周期",
   "cycle.loading": "正在加载周期…",
   "cycle.stateLabel": "状态",

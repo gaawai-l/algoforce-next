@@ -643,6 +643,17 @@ describe("cost-flow chart 3 readings", () => {
     );
   });
 
+  // "all" is the whole supply and reads as a phrase of its own, as for a missing snapshot (the
+  // controller's wording for cycle.reason.urpdMismatchAll).
+  it("names the all-holder snapshot mismatch", () => {
+    expect(reasonText(en, "urpd_mismatch:all:lin200")).toBe(
+      "The all-holder $200 snapshot is from another block; not used",
+    );
+    expect(reasonText(zh, "urpd_mismatch:all:lin500")).toBe(
+      "全体持有者的 $500 快照来自另一个区块，未使用",
+    );
+  });
+
   // The page's spot comparison (A:1812-1817): one decimal, below or above; no spot reads "—".
   it("compares a level with spot as the page does", () => {
     // page-recorded: 30d All K1 at $41,750 and K4 at $83,750 against spot 82,361.33.

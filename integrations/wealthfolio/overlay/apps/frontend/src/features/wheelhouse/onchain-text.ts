@@ -46,10 +46,12 @@ export function reasonText(text: TextFn, reason: string) {
     });
   const mismatch = /^urpd_mismatch:([^:]+):([^:]+)$/.exec(reason);
   if (mismatch)
-    return text("cycle.reason.urpdMismatch", {
-      cohort: mismatch[1].toUpperCase(),
-      bucket: aggBucket(mismatch[2]),
-    });
+    return mismatch[1] === "all"
+      ? text("cycle.reason.urpdMismatchAll", { bucket: aggBucket(mismatch[2]) })
+      : text("cycle.reason.urpdMismatch", {
+          cohort: mismatch[1].toUpperCase(),
+          bucket: aggBucket(mismatch[2]),
+        });
   const key = `cycle.reason.${reason}`;
   return Object.prototype.hasOwnProperty.call(messages.en, key)
     ? text(key as MessageKey)
