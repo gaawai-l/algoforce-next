@@ -22,10 +22,10 @@
 三个页面共 **16 张图、2 张表**，另有 Analyst Take（人工撰写的文字）、alpha-vol 两页页头的周期状态，以及 onchain-seller 的 Supplementary 标签页（见下）。
 
 目前本地做了：
-- **10 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的图 1A、1B 和图 7（刻度轨版本）；
+- **10 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的图 1A、1B 和图 7（刻度轨版本）。perp-squeeze 的图 1、图 2、图 4 缺的数据已用 Coinalyze 补上（2026-10-19，P6）；
 - **页头周期**（cycle badge），对应 onchain-seller、perp-squeeze 的页头；
 - **1 张表**：state-report 的表 2；
-- **perp-squeeze 的表 1**：已实现，但因为缺清算数据显示不出来。
+- **perp-squeeze 的表 1**：已实现，缺的清算和买卖差已由 Coinalyze 补上（P6），首轮取数后就有约 90 天历史。
 
 ## state-report（数据：BRK）
 
@@ -57,14 +57,14 @@
 
 | 图表 | 缺数据？ | 本地现状 |
 |---|---|---|
-| Parameters（Exchange：All venues / Binance / Bybit / Hyperliquid；State window；Show） | 缺 Hyperliquid，以及多家交易所汇总的 All venues | 只有 Binance、Bybit 和两家相加 |
-| 表 1 Perp States | **缺历史清算**，以及 Bybit 的主动买卖差 | 已实现；要 ≥42 个完整覆盖的 4h 块（8h 为 21 块）才显示，2026-10-19 时为 0 个（服务每次重启都会切碎覆盖） |
-| 图 1 Long/Short Squeezes & Unwinds | 同上 | 同上 |
-| 图 2 New Long/Short, Spot-led | 同上 | 同上 |
-| 图 3 Price vs OI | 不缺 | 已做；Bybit OI 取的单边字段，只有原站口径的一半，且只含 BTCUSDT |
-| 图 4 Volume Delta & Liquidations | 清算缺；Bybit 买卖差缺 | 已做。缺的部分画成斜线（未覆盖），不画成 0；2026-10-19 时 All/Bybit 视图全是斜线，Binance 视图只有 delta 柱 |
+| Parameters（Exchange：All venues / Binance / Bybit / Hyperliquid；State window；Show） | 原来缺 Hyperliquid，以及多家交易所汇总的 All venues | **已补**（P6）：四个视图都有。All venues = Binance + Bybit + OKX；Hyperliquid 的清算按 All 估算，界面标注 estimated |
+| 表 1 Perp States | 原来缺历史清算，以及 Bybit 的主动买卖差 | **已补**（P6）：清算和买卖差改读 Coinalyze，首轮取数后就有约 90 天历史；起步门槛（≥42 个覆盖的 4h 块，8h 为 21 块）不变 |
+| 图 1 Long/Short Squeezes & Unwinds | 同上 | **已补**（同上） |
+| 图 2 New Long/Short, Spot-led | 同上 | **已补**（同上） |
+| 图 3 Price vs OI | 不缺 | 已做；Bybit OI 取的单边字段，只有原站口径的一半，且只含 BTCUSDT。All 视图另含 OKX 的 OI（Coinalyze） |
+| 图 4 Volume Delta & Liquidations | 原来清算缺；Bybit 买卖差缺 | **已补**（P6）：清算带来自 Coinalyze（Hyperliquid 为估算，带 estimated 标注）。Coinalyze 自身断档的窗口画成斜线（未覆盖），不画成 0 |
 
-缺的数据改由 Coinalyze 补，方案见 [PROPOSAL-COINALYZE.md](../btc-perp-states/PROPOSAL-COINALYZE.md)。
+缺的数据已由 Coinalyze 补上，方案见 [PROPOSAL-COINALYZE.md](../btc-perp-states/PROPOSAL-COINALYZE.md)，规则见 [SPEC.md](../btc-perp-states/SPEC.md) 的 v4 一节，核验见 [P6-VERIFICATION.md](../btc-perp-states/P6-VERIFICATION.md)。数值与原站不再逐数相同（数据源不同），只做定性对照。
 
 ## 本地显示问题（2026-10-18 观察）
 

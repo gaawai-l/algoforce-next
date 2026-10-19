@@ -45,6 +45,7 @@ services:
     environment:
       WHEELHOUSE_DATA_DIR: /data
       WHEELHOUSE_DEPLOYMENT: test
+      WHEELHOUSE_COINALYZE_KEY: ${WHEELHOUSE_COINALYZE_KEY:-}
     volumes:
       - analytics-test:/data
     expose:

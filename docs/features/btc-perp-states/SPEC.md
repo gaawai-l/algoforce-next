@@ -1,6 +1,8 @@
 # BTC 永续状态（Perp states）Spec
 
-日期：2026-10-17。状态：**v3，按用户授权自主定稿**。用户指令为"全部做完，不要等我说"，数据源已选定方案 C（完全免费）。经过两轮独立评审（opus 评 v1，sonnet 评 v2），修订记录见 §8。
+日期：2026-10-17；2026-10-19 起为 **v4（P6）**。状态：**v4**。v3 按用户授权自主定稿（用户指令为"全部做完，不要等我说"，数据源选定方案 C，完全免费），经过两轮独立评审（opus 评 v1，sonnet 评 v2）。
+
+v4 把清算和买卖量改读 Coinalyze，并加入 Hyperliquid 视图：见 §7 之后的 "v4（P6）" 一节。被替代的条目在原章节首行有提示，其余仍是 v3.2 的原文。修订记录见 §8。
 
 本文是主 spec [btc-onchain-perp/SPEC.md](../btc-onchain-perp/SPEC.md) 中 P4 的独立 spec（§3.4、§7）。
 
@@ -15,8 +17,11 @@
 | 原站源码 `.local/research-samples/alpha-dashboards-2026-10-16/perp-squeeze/raw/script_2_app.js`；笔记 `NOTES.md` | 规则细节 |
 | 复算脚本 `.local/research-samples/alpha-dashboards-2026-10-16/perp-squeeze/tools/perp_parity.py` | 在原站样本上复现了页面：543 块排名，180 块显示；各状态计数为 LS 14、SS 8、LU 3、SU 8、NL 5、NS 6、spot 21、chop 115；表 1 的 Prob. 和 Max move 也一致 |
 | 探测原始文件 `.local/research-samples/perp-free-data-2026-10-17/` | 已从会话临时目录保存 |
+| [方案：改用 Coinalyze](PROPOSAL-COINALYZE.md) v3.1 | v4 的依据，含 2026-10-19 的 V1 实测 |
 
 ## 0. 决定汇总
+
+> v4 改写了 P4-D1、D4、D5、D7、D10、D11：见 §7 之后 v4（P6）一节的 §0。
 
 | # | 决定 | 结论 | 理由 |
 |---|---|---|---|
@@ -33,6 +38,8 @@
 | P4-D11 | 权威采集端 | 以长期在线的 Coolify test 环境为准。本机开发的采集只用于开发，覆盖不完整 | 采集器需要连续运行 |
 
 ## 1. 目标与范围
+
+> v4 改了成功标准 #1（16 种组合）和 #3，"不做"中删去 Hyperliquid：见 v4 一节的 §1。
 
 **目标**：在 Flows → Perp states 中，照原站 perp-squeeze 的 v1 规则，用免费数据给出：
 - Parameters；
@@ -56,6 +63,8 @@
 - 与原站 Glassnode 数值的直接对照（数据源不同）。
 
 ## 2. 架构
+
+> v4 在文件表加了 `coinalyze.py`、`grid.py`，存储表加了 `cz_series`，并加了采集器开关：见 v4 一节的 §2。
 
 沿用 onchain 的模式：独立子包、独立 SQLite（WAL 模式）、独立 worker；读接口只读本地库。
 
@@ -96,6 +105,8 @@
 
 ### 3.1 10m 网格
 
+> v4 改了清算和 Bybit 买卖差的来源，OKX 并入 All，另有 Hyperliquid：取值表见 v4 一节的 §3.1，网格放置见 §3.3。其余仍有效。
+
 桶 `t` 覆盖 `[t, t+10m)`，`t` 是 600 的整数倍。网格**补满**：每个桶都有一行，没有数据的写 null。块边界对齐 UTC epoch。
 
 | 量 | 取法 | 说明 |
@@ -135,6 +146,8 @@
 
 ### 3.2 采集覆盖（评审 C2）
 
+> v4：采集器默认关闭，只用于对照，不参与网格；本节只描述采集器本身。Coinalyze 的取数见 v4 一节的 §3.2。
+
 - **两条并行连接**：每个流保持两条连接，建立时间错开至少 1 分钟。流的覆盖取两条连接覆盖区间的并集，事件按上文合并。这样一次断线或换连接不会造成空洞；只有两条同时断开（例如服务重启）才会出现空洞。
 - **覆盖区间**（每条连接）：
   - 起点：Bybit 为订阅确认；Binance 的路径式订阅没有确认，以握手完成为起点；
@@ -147,6 +160,8 @@
 - **事务**：采集器在内存中缓冲，每 1 秒批量提交一次。REST 回填按 1 天一个事务分块写入，避免长事务挡住采集器。
 
 ### 3.3 块与特征（原站）
+
+> v4 改了"覆盖"的判定：见 v4 一节的 §3.3。
 
 - **block**：4h 或 8h，即 W = 24 或 48 个桶，从 UTC epoch 对齐的边界开始。
 - **最后一块**：桶数 ≥ `W/2 + 1`（4h 为 13，8h 为 25）才保留并参与判定，标为 forming；不足的丢弃。这与原站的 `j − i < W/2` 相同。
@@ -216,6 +231,8 @@
 
 ### 3.6 QC（原站的规则，照样显示；与原站的差异已写明）
 
+> v4 另加了 Coinalyze OI 的按窗口检查：见 v4 一节的 §3.3。
+
 对每个交易所视图所需的每条 REST 序列，在参考窗口内检查：
 - 网格步长 600 秒，按构造必然满足；
 - 最大空洞 ≤ 1800 秒：连续 null 桶的个数 × 600 秒，网格末尾的空洞也计入；
@@ -228,6 +245,8 @@
 不满足的项目显示在页头的 QC 行中，不隐藏。采集器的未覆盖不计入 QC，单独显示在覆盖说明中。
 
 ### 3.7 新鲜度与状态
+
+> v4 去掉了 `collector_down` 和 `collectors[]`，原因码加了 `coinalyze_units`：见 v4 一节的 §3.7。
 
 新鲜度和采集器状态在**处理请求时**按当前时刻计算。collecting 状态（Collecting 横幅、原因码 `collecting:<days>`）和视图的 `covered_days` 则来自载荷：它们在派生时按当时的覆盖算出，随每轮派生更新，不在请求时重算。覆盖说明里各采集流的天数（`collectors[].covered_days`）按请求时刻从覆盖记录计算。
 
@@ -246,6 +265,8 @@
 - **失败**：保留旧数据，状态随时间自然降级；日志只记来源、错误码和耗时。
 
 ### 3.8 REST 礼仪（评审 I9）
+
+> v4 加了 `api.coinalyze.net` 的退避和每进程每分钟 20 次的限速：见 v4 一节的 §3.8。
 
 市场页已经从同一 IP 请求 `fapi.binance.com` 和 `api.bybit.com`，perps 不能让这个 IP 被封。
 - 同一时刻只有一个请求在途；
@@ -270,6 +291,8 @@
 
 ## 4. 接口与载荷
 
+> v4：载荷改为 8 份，status 增加 `markets` 和新形状的 `direction_check`：见 v4 一节的 §4。
+
 - **`GET /perps/states?exchange=all|binance|bybit&window=4h|8h`**
   - 返回预先算好的载荷：每个 (exchange, window) 一份，共 6 份；
   - 每份同时包含 Show = 7d 和 30d 两种表 1；
@@ -289,6 +312,8 @@
   - 方向核对的结果 `direction: pending | ok | inverted`，以及统计值（§6）。
 
 ## 5. 界面
+
+> v4 改了页头、来源行、Hyperliquid 标注、Exchange 选项和 Collecting 横幅：见 v4 一节的 §5。
 
 照主 spec §5 中 Perp states 的定稿；mockup 见 `flows.html` 和 `mobile.html`。
 
@@ -310,6 +335,8 @@
 - **ETH 和 MU**：显示 "Flows are BTC only"（已有）。
 
 ## 6. 验证
+
+> v4：规则对照扩到 16 种组合，方向核对改按窗口：见 v4 一节的 §6。
 
 - **规则（本地）**：在原站样本上，用适配器把样本喂给 `states.py`，覆盖 12 种组合（all、binance、bybit 三个交易所视图 × 2 种块长 × 2 种 Show），计数、Max move 与 `perp_parity.py` 完全一致。`perp_parity.py` 本身不算 Prob.，所以由适配器按 §3.5 的浮点算法另算 Prob.，并在 all/4h/30d 上与页面的 4/8/4/2/3/3/12/64 对照。原站样本没有 null，所以缺失路径只能靠下面的合成数据测试。脚本和结果只写进验收记录，样本不入库。
 - **单元测试（合成数据）**：
@@ -364,13 +391,247 @@
 
 ## 7. 风险
 
+> v4 补充了风险：见 v4 一节的 §7。
+
 - **Binance 清算流不是全量**：每秒最多推送一条，squeeze 会偏少。界面已标注为下限。
 - **采集空洞**：部署和宕机会让覆盖块减少，状态出现间断，但不会出错。权威采集端是 test 环境（P4-D11）。
 - **交易所接口变更**：Binance 在 2026-04 已改过 WebSocket 路由，使用 `wss://fstream.binance.com/market/ws`。
 - **IP 被封**：会连带影响市场页，由 §3.8 的规则约束。
 - **部署**：采集器常驻 Python 服务内，需要放行出站 WebSocket；发布流程另行处理。
 
+## v4（P6）：清算与买卖量改用 Coinalyze
+
+日期：2026-10-19。依据 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.1 和 [PLAN-P6](PLAN-P6.md)；代码范围是分支 `claude/coinalyze` 的 `f0f9d0c..25e6329`，核验记录见 [P6-VERIFICATION](P6-VERIFICATION.md)。
+
+本节只写与 v3.2 不同的部分，其余仍然有效。小节标题里的 § 是 v3.2 的章节，被替代的条目在原章节首行有提示。本节描述的是代码实际做的事；与方案不同之处在小节里直接写明。
+
+**要点**
+- 清算和 Bybit 的买卖差不再自采，改读 Coinalyze 免费 API 的历史，首轮就有约 90 天；
+- 加入 Hyperliquid 视图（清算为估算），All venues 扩为 Binance + Bybit + OKX；
+- WebSocket 采集器默认关闭，只在对照时打开，不再参与网格；
+- `states.py` 的判定规则不变，只给 `Grid` 加了两个 QC 字段。
+
+### §0 决定汇总（改写 P4-D1、D4、D5、D7、D10、D11）
+
+| # | v4 的决定 | 理由 |
+|---|---|---|
+| P4-D1 | 交易所：Binance USDⓈ-M、Bybit linear、OKX 三家的 BTCUSDT 永续，以及 Hyperliquid 的 BTC 永续。视图为 All venues（Binance + Bybit + OKX）、Binance、Bybit、Hyperliquid。不含币本位合约 | 用户 2026-10-19 的决定；Coinalyze 免费提供这四家 |
+| P4-D4 | 清算：Coinalyze 的 Binance、Bybit、OKX 三家 `liquidation-history`，单位 BTC，`l` 为多头被强平，`s` 为空头被强平。Hyperliquid 没有清算数据，按 All 的清算估算（见下文 §3.3 的 HL 估算）。未覆盖的时段仍不算 0 | V1 实测：5min 桶与自采逐桶相等；多头占比的方向正确 |
+| P4-D5 | 买卖差：Binance 沿用交易所 K 线（不变）；Bybit、OKX、Hyperliquid 取 Coinalyze `ohlcv-history`，`2·bv − v`（`bv` 为主动买量，`v` 为总量） | Bybit 的 `bv`、`v` 与自采 10m 买量、总量逐桶相等 |
+| P4-D7 | 起步门槛的块数不变（4h 为 42 块，8h 为 21 块）。横幅文案改为 `Liquidation history too short · n of 7 days (target 90)`；缺 key 或 key 无效时不显示这个横幅，改显示 key 的提示 | 历史由 Coinalyze 回填，不再是"正在采集" |
+| P4-D10 | All venues 的清算：三家相加。Coinalyze 的 Binance 清算与自采的 forceOrder 完全相同，仍是每秒一条的快照，界面继续标注为下限 | V1 实测 #7 |
+| P4-D11 | 不再有"权威采集端"。清算历史来自 Coinalyze，重新部署不会留下清算空洞；采集器默认关闭，仅用于对照 | 采集器退出网格 |
+
+P4-D2、D3、D6、D8、D9 不变。D6 中"采集输入已覆盖"的含义见下文 §3.3。
+
+### §1 目标与范围
+
+- **成功标准 #1**：`states.py` 在原站样本上复现页面，**16 种组合**都与 `perp_parity.py` 一致：4 个交易所视图（all、binance、bybit、hyperliquid）× 2 种块长 × 2 种 Show。all/4h/30d 仍与页面的计数、Prob. 和 Max move 逐项相同。Hyperliquid 的清算在样本里没有，对照时与 `perp_parity.py` 一样用 All 的清算估算，调用的是 `grid.estimate_liquidations`。
+- **成功标准 #3**：价格、OI、清算和买卖差都能回填约 90 天（Coinalyze 的 4hour 一次最多约 334 天，回填 121 天）。界面写明清算已覆盖几天。
+- **"不做"**：删去 Hyperliquid。其余不变：funding、交易能力、与原站 Glassnode 数值的直接对照。
+
+### §2 架构
+
+**后端文件**（在 v3.2 的表上增加）
+
+| 文件 | 职责 |
+|---|---|
+| `coinalyze.py` | Coinalyze 客户端：4 个 symbol、`liq` / `ohlcv` / `oi` 三类历史（4hour 与 5min）、`/future-markets` 的单位核对 |
+| `grid.py` | 把存储的序列折成 10m 网格：REST 序列逐桶，Coinalyze 序列逐窗口放置，Hyperliquid 估算（§3.3） |
+| `sources.py` | 增加 `PerpsRest.coinalyze`（key 只放在这一个请求的 `api_key` 头里）、`api.coinalyze.net` 的退避、浮点 `Retry-After` |
+| `collector.py` | 仍在，默认不启动，网格不读它写的表 |
+| `migrations/003_coinalyze.sql` | 新表 `cz_series`；删除旧形状的 `direction_check` |
+
+**存储**（在 v3.2 的表上增加）
+
+| 表 | 字段 |
+|---|---|
+| `cz_series` | venue, kind, step, t, a, b, filled。`kind` 为 `liq`、`ohlcv`、`oi`；`step` 为 300（5min）或 14400（4hour）；`t` 是区间起点。`liq` 的 a、b 是多头、空头被强平；`ohlcv` 的 a、b 是总量、主动买量；`oi` 的 a、b 是区间起点和终点的 OI；单位都是 BTC。`filled = 1` 表示清算区间 Coinalyze 没有返回、补成 0 |
+| `sync_state` | 另存 `cz_markets`（上次的单位核对）、`cz_markets_at`、`cz_4h:<kind>`（该类 4hour 上次回填的起点）；`direction_check` 改为新形状（见 §4） |
+
+`liquidations`、`coverage`、`trades_10m` 三张表保留，只有采集器写。保留期：`cz_series` 的 4hour 为 125 天，5min 为 1 天。
+
+**启停**
+- `WHEELHOUSE_PERPS`（默认 on）仍是总开关，控制 REST worker。
+- `WHEELHOUSE_PERPS_COLLECTORS`（默认 off，取值 1/0、true/false、on/off）控制采集器。**采集器只在 worker 运行时才可能启动**：`WHEELHOUSE_PERPS=off` 或 `start_worker=False` 时，即使这个开关是 on，也不启动。
+- `create_app` 新增参数 `perps_collectors: bool | None`（默认取设置）和 `coinalyze_key: str | None`（默认取设置）；`create_router` 对应 `start_collectors=False` 和 `coinalyze_key=None`。
+- `WHEELHOUSE_COINALYZE_KEY`：环境变量只要存在就以它为准，空串表示缺失；不存在时，只从仓库根目录 `.env` 读这一个键，整个 `.env` 不导出。`Settings` 里这个字段不进 `repr`。
+- `deploy/test/test_composition.py` 仍断言 worker 和采集器都没有启动；测试一律把 key 置为空串，不读真实的 `.env`。
+
+### §3.1 取值表
+
+| 量 | Binance 视图 | Bybit 视图 | OKX（只进 All） | Hyperliquid 视图 |
+|---|---|---|---|---|
+| price | Bybit 现货 5m（不变，各视图共用） | ← | ← | ← |
+| oi | 交易所 REST（不变） | 交易所 REST，单边（不变） | Coinalyze `oi`，取 `convert_to_usd=false` | Coinalyze `oi` |
+| vd | 交易所 REST K 线（不变） | Coinalyze `ohlcv`：`2·bv − v` | 同左 | 同左 |
+| 清算 | Coinalyze `liq` | Coinalyze `liq` | Coinalyze `liq` | 估算（§3.3） |
+
+- Coinalyze 的 symbol：Binance `BTCUSDT_PERP.A`，Bybit `BTCUSDT.6`，OKX `BTCUSDT_PERP.3`，Hyperliquid `BTC.H`。
+- 每类数据一次请求带上该类所有 symbol：`liq` 取 Binance、Bybit、OKX；`ohlcv` 取 Bybit、OKX、Hyperliquid；`oi` 取 OKX、Hyperliquid。`liq` 和 `oi` 加 `convert_to_usd=false`，使单位是 BTC。
+- Bybit 的 OI 继续用交易所 REST 的单边值，不用 Coinalyze 的双边值。
+- **All venues** = Binance + Bybit + OKX，oi、vd、清算都是三家之和；任一家为 null 或未覆盖，All 也为 null 或未覆盖（P4 规则不变）。
+- **Hyperliquid 视图**：price、oi、vd 取它自己的；清算按 §3.3 的 HL 估算。它依赖 All 的 OI，所以数据边界 `last` 取 Bybit 现货、Binance OI、Bybit OI 三者最后桶中最早的那个（不需要 Binance K 线）。
+
+### §3.2 取数（Coinalyze）；采集器只用于对照
+
+采集器的覆盖规则（v3.2 §3.2）只描述采集器本身。它默认关闭，开启后只写 `liquidations`、`coverage`、`trades_10m`，状态只出现在 `/perps/status`，不参与网格。
+
+Coinalyze 随 REST worker 的每一轮（HH:05、HH:15……）取数，在 Binance 和 Bybit 的 REST 之后：
+- **4hour**：
+  - **回填**：某类从未取过、记录的回填起点晚于网格起点、或该类有一家一行都没有时，从网格起点（121 个 UTC 日之前）取一次，不分页。
+  - **重取**：最新一个已收盘窗口收盘后的 1 小时内，每轮都重取最近 3 个窗口（刚收盘的值可能还没聚合完整）；某家的最新一行落后于最新已收盘窗口时，也同样重取。起点不早于网格起点。
+  - 其余轮次不取 4hour。（"落后时重取"是代码比方案多出的一条：Coinalyze 暂时没返回某家的窗口时，下一轮自动补。）
+- **5min**：每轮取"上一个 4h 窗口的起点"到现在，最多 96 个点；只保留 1 天。
+- **只存已收盘的点**：`t + 区间长 ≤ 取数时刻`。取数时刻在发请求**之前**取，请求途中收盘的 bar 当轮既不存，也不补 0，下一轮再取。
+- **补 0**：只对清算。请求范围内、已收盘、Coinalyze 没有返回的区间，存成 `(0, 0)` 并标 `filled = 1`。整个 symbol 不在回复里时也照样补 0：Coinalyze 会省略这段时间没有清算的品种，而我们只请求已知有清算数据的三家。OHLCV 和 OI 不补，缺失就是缺失。
+- **请求量**：按 symbol 计费。5min 每轮 8 次（清算 3、OHLCV 3、OI 2）；4hour 只在上面几种情形里取，每轮 8 次；单位核对每天 1 次。
+- **限速自律**：每个进程每分钟最多 20 次计费调用，按 60 秒滑动窗口累计。不够时就等，worker 停机时立即放弃这一轮。同一个 key 因此最多两个进程（本机和 test）同时运行。
+- **单位核对**：每天读一次 `/future-markets`（在一轮的各类历史都取完之后）。要求 4 个 symbol 都在列表里、`oi_lq_vol_denominated_in = BASE_ASSET`；用到买卖量的 Bybit、OKX、Hyperliquid 还要 `has_buy_sell_data = true`。不符合的交易所，它的 Coinalyze 列整体不用（该交易所的清算、买卖差、OI 在网格里全部缺失），相关视图带原因码 `coinalyze_units:<venue>`。读取失败时沿用上次的结果；从未读到时，照常使用数据。
+
+### §3.3 放进 10m 网格（替代 v3.2 的覆盖规则）
+
+不给 `states.py` 加窗口值，也不改块的计算。Coinalyze 的 4hour 值放进窗口的**最后一个桶**，块和阈值只看块合计、块首尾的 OI，规则代码不用改。实测 48 个 5min 之和与 4hour 逐位相等，所以两种来源可以混用。
+
+**放置规则**（窗口 `w` 是 14400 秒的整数倍，从网格起点算起）：
+1. **已收盘、4hour 已入库、且窗口最后一个桶 ≤ `last` 的窗口**：
+   - 清算、买卖差：整窗的值放在窗口的最后一个桶，其余 23 个桶记 0.0，全部算已覆盖；
+   - OI：窗口第一个桶放 `o`（起点的 OI），最后一个桶放 `c`（终点的 OI），中间的桶为 null。
+2. **其他窗口**（未收盘的、4hour 没取到的、或网格还没走到窗口末尾的）逐桶用 5min：
+   - 一个 10m 桶等于两个已收盘的 5min 点之和；
+   - OI 取后一个 5min 点的 `c`，即 `t + 10m` 时刻的 OI，与 REST 口径相同；
+   - 缺任何一个点，该桶的清算、买卖差未覆盖，OI 为 null。
+
+**覆盖与缺失**
+- 清算和买卖差：已放置的桶为已覆盖，`filled` 的 0 也算已覆盖；没有行就是没取到，未覆盖。OHLCV、OI 缺失一律为 null，不补 0。
+- 块的"清算未覆盖"、"delta 未覆盖"沿用 v3.2 §3.3 的定义。Binance 视图的 delta 来自 REST，不存在"未覆盖"；Bybit、All、Hyperliquid 视图的 delta 来自 Coinalyze，缺失时记未覆盖。
+- **断档规则**（清算，同一交易所）：连续 ≥2 个 `filled` 的 4h 窗口，全部记为未覆盖，也不再拿 5min 补。读取时从网格起点前一个窗口开始，使起点那一窗也能判断。最新一个 `filled` 窗口在下一窗也被补 0 之前先显示为 0，之后才翻成未覆盖。依据 V1：Binance 在 2026-04-23 20:00 到 04-24 08:00 连续 4 个窗口没有清算点，不可能是真的零清算。这一段不在 121 天的网格内，所以规则还没有在真实数据上触发过，由单元测试覆盖。买卖差没有这条规则。
+- **已接受的风险**：5min 层面 Coinalyze 的短时断档识别不出来，会显示为没有清算。
+
+**合成视图（All、Hyperliquid）的规则**：All 的每个桶是逐桶的 REST 值与整窗放置的 Coinalyze 值相加。REST 值在窗口末桶缺失时，会出两种错：整窗的值被丢掉，或块内最后一个非空的 OI 退回 4 小时前。所以凡是有一家整窗放置的窗口：
+- 买卖差、清算：合成值在窗口末桶为 null 时，整窗都记为未覆盖；
+- OI：合成值在窗口首桶或末桶为 null 时，整窗的合成 OI 都记为 null。
+
+8h 块的后一窗因此为 null 时，块内最后一个非空的 OI 会退到前一窗的末桶，即 4 小时前；这与 P4 中 REST 序列连续缺失时相同，QC 会报缺失。
+
+**Hyperliquid 的清算估算**（`grid.estimate_liquidations`，逐桶）：
+- 估算值 = All 的清算 × HL 的 OI ÷ All 的 OI，多头、空头两侧乘同一个比值；
+- All 的清算未覆盖的桶，估算也未覆盖；All 两侧都为 0 的桶，估算为 0；其余的桶，HL 或 All 的 OI 缺失或 ≤ 0 时为未覆盖，不当作 0；
+- All 的 OI 不含 HL，所以这个比值是"HL 的 OI 相对 All 的 OI"，不是严格意义上的占比。原站公式的分子分母也是这样取的，界面文案照此写；
+- 估算会让 squeeze 标签基本跟着 All 走，原站也是如此。
+
+**与 P4 逐桶取值相比的差别**
+- **整窗只用 4hour**：已收盘、4hour 已入库的窗口一律用 4hour，即使也有 5min；5min 只在 4hour 缺失时才用。
+- **清算在桶内的分布不再真实**：整窗的值全在末桶。所以一切只看块合计；方向核对改为按窗口（见 §6）。
+- **块首的 OI 早 10 分钟**：OKX、Hyperliquid 只有 4hour 的窗口，块首桶放的是 `o`，即窗口起点的 OI，而 REST 读的是 `t0 + 10m`。All 的 dOI 中，OKX 的起点因此是 `t0`，Binance、Bybit 的起点是 `t0 + 10m`。
+- **HL 的估算按窗口末的 OI 占比**：原站逐桶乘各自的占比；整窗放置的窗口，值在末桶，只能整窗乘窗口末的占比。
+- **数值不再与原站逐数相同**：数据源换了，阈值和状态计数只做定性对照；规则层面的一致由 16 种组合的对照证明。
+
+**QC**：v3.2 §3.6 的检查不变，另加 Coinalyze 的 OI（OKX、Hyperliquid）按窗口检查：参考窗口内已收盘的窗口，首桶或末桶的 OI 为 null 就算缺失；缺失的窗口超过 1% 时报 `missing:<venue>:oi`，一个窗口都不全时报 `series_missing:<venue>:oi`。Coinalyze 的清算和买卖差缺口属于"未覆盖"，不进 QC。
+
+**Grid 的改动**：`states.py` 只给 `Grid` 加了 `window_qc` 和 `window_missing` 两个字段，`_qc` 把它们并入结果；判定、阈值、表 1 的代码没有改。
+
+### §3.7 新鲜度与状态
+
+- **去掉** `collector_down:<stream>` 原因码和视图里的 `collectors[]`；采集器状态只留在 `/perps/status`。
+- **原因码**，按载荷中的顺序：
+  1. `series_missing:<venue>:<series>`，series 现在还有 `okx:oi`、`hyperliquid:oi`；
+  2. `coinalyze_units:<venue>`（venue 为 binance、bybit、okx、hyperliquid）：该交易所的单位核对未通过，数据已停用。只出现在用到该交易所的视图里：All 为前三家，Binance、Bybit 各自一家，Hyperliquid 为四家；
+  3. `rest_error:<host>:<code>`，host 现在可以是 `api.coinalyze.net`，code 与其他 host 相同（`429`、`403`、`network`、`bad_response`、`backoff` 等），Coinalyze 另有 `key_missing`（没配 key，不发请求）和 `401`（key 无效）；
+  4. `collecting:<days>`；
+  5. 没有载荷时：`not_derived`，或 `perps_disabled`。
+- **各视图看的 host**（`VIEW_HOSTS`，只有这些 host 的错误才进该视图的 `rest_error`）：
+
+  | 视图 | host |
+  |---|---|
+  | all、binance、hyperliquid | `fapi.binance.com`、`data.binance.vision`、`api.bybit.com`、`api.coinalyze.net` |
+  | bybit | `api.bybit.com`、`api.coinalyze.net` |
+
+- **缺 key 或 key 无效时**：
+  - 不可用：表 1、图 1、图 2；图 4 的清算带；Bybit、All、Hyperliquid 的买卖差柱；All 和 Hyperliquid 视图的 OI（含 OKX、Hyperliquid 的部分），这两个视图的图 3 为空，并报 `series_missing`；
+  - 照常显示：价格；Binance、Bybit 两个视图的 OI；Binance 视图的买卖差。
+- 新鲜度、`collecting` 与 `covered_days` 的来源不变（v3.2 §3.7）。
+
+### §3.8 REST 礼仪（加入 Coinalyze）
+
+- 新增 host `api.coinalyze.net`，退避状态与其他 host 互不影响：
+
+  | 状况 | 退避 |
+  |---|---|
+  | Coinalyze 429 | max(60 秒, `Retry-After`) |
+  | Coinalyze 403（Cloudflare） | 10 分钟 |
+  | Coinalyze 401 | **不退避**，本轮放弃，下一轮再试 |
+  | 缺 key | 不发请求，记 `key_missing` |
+
+- `Retry-After` 按浮点秒数解析（Coinalyze 返回 `28.723` 这样的值），非有限值忽略，也可以是 HTTP 日期；最长不超过 3 天。
+- 401 不把退避存进库：换了 key 或新 key 生效后，下一轮（最多 10 分钟）就能恢复，重启后也不会被锁住。
+- 一个 host 在一轮里失败，或已在退避，本轮不再请求它；其他 host 照常。
+- **配额**：免费 key 每分钟 40 次，一次请求里每个 symbol 各算一次。每个进程限在每分钟 20 次以内（§3.2），所以同一个 key 最多两个进程同时运行。
+- key 只放在 Coinalyze 请求的 `api_key` 头里，不进共用 httpx client 的默认头，不进 URL，不进日志、`repr` 和异常信息。
+
+### §4 接口与载荷
+
+- **`GET /perps/states?exchange=all|binance|bybit|hyperliquid&window=4h|8h`**：每个 (exchange, window) 一份，共 **8 份**。内容同 v3.2，去掉了 `collectors` 字段。
+- **`GET /perps/status`**：
+  - `hosts`：各 host 的最近成功时间、错误码、退避截止时间，现在包括 `api.coinalyze.net`；
+  - `collectors`：3 个采集器的状态和覆盖，仅供对照；采集器没有运行时，`problems` 为空；
+  - `markets`：Coinalyze 单位核对的结果，每个 symbol 一项 `{venue, symbol, denominated, buy_sell, ok}`；`venue` 为 binance、bybit、okx、hyperliquid；symbol 不在列表里时 `denominated`、`buy_sell` 为 null、`ok` 为 false；还没核对过时为空数组；
+  - `direction_check`：`{binance, bybit, okx}`，每项 `{verdict: ok | inverted | pending, samples, down, long_share}`；第一轮之前为 null。旧的 `bybit_qty` 去掉了；
+  - `direction`：三家的合并结论，三家都是 `ok` 才是 `ok`，任一家 `inverted` 则 `inverted`，其余为 `pending`。
+
+### §5 界面
+
+- **页头**共三行：
+  - `Resolution 10m · Data through <last + 10m> UTC · Price Bybit spot · OI Binance and Bybit (public), OKX and Hyperliquid (Coinalyze)`；
+  - **来源行**：`Liquidations and buy/sell volume (except Binance's): Coinalyze`，Coinalyze 链接到 <https://coinalyze.net>；
+  - `Liquidation history: n d covered in the last 90`，n 取自载荷的 `covered_days`，一位小数；没有载荷时不显示。
+- **Binance 清算标注**不变，Bybit 视图以外都显示。
+- **Hyperliquid 标注**：视图下加一行 `Hyperliquid liquidations are estimated: All venues' liquidations scaled by Hyperliquid's OI relative to theirs`；图 4 的清算带，以及悬停中的 Short liq. / Long liq.，都写 `(estimated)`。
+- **Parameters**：Exchange 选项为 All venues / Binance / Bybit / Hyperliquid，与原站相同；URL 参数 `px` 取值 `all`、`binance`、`bybit`、`hyperliquid`。
+- **Collecting 横幅**：`Liquidation history too short · n of 7 days (target 90)`。缺 key 或 key 无效时隐藏它，改显示 key 的提示：`Coinalyze API key not set: liquidations and Coinalyze flows unavailable` 或 `Coinalyze rejected the API key: liquidations and Coinalyze flows unavailable`。
+- **单位核对失败**：`Coinalyze <venue> market check failed: its data is left out`。
+- **方向未核对**：Binance、Bybit 视图看各自交易所的 `direction_check`；All 和 Hyperliquid 视图看合并的 `direction`。视图所含交易所（Binance、Bybit、OKX）的结果为 `inverted` 时，提示 `Liquidation sides look inverted on <venue>: squeeze labels may be swapped`。
+- 原来页头的 "liquidations collected since" 和覆盖说明里逐流的天数去掉了。中英文文案都经 `i18n.ts`，键一一对应。
+
+### §6 验证
+
+- **规则对照**：覆盖 **16 种组合**（all、binance、bybit、hyperliquid × 2 种块长 × 2 种 Show）。Hyperliquid 的清算在样本里没有，适配器用 `grid.estimate_liquidations`，把 All 的清算和 OI、HL 自己的 OI 喂进去，与 `perp_parity.py` 的估算对照。脚本和结果只写进验收记录，样本不入库。
+- **方向核对改为按窗口**（桶内的分布已不真实）。worker 每轮对 Binance、Bybit、OKX 各算一次，用网格范围内已收盘、不是 `filled` 的 4hour 清算行：
+  - 计入的窗口：价格变动 ≥1%（Bybit 现货，窗口第一个桶的价格到最后一个桶的价格），且有清算；
+  - 指标：下跌窗口里多头清算占比 `Σl / (Σl + Σs)`；
+  - 判定：至少 20 个下跌窗口时，占比 > 0.6 为 `ok`，< 0.4 为 `inverted`，其余或样本不足为 `pending`；
+  - 单位核对失败的交易所记 `pending`（样本为 0）；
+  - Hyperliquid 视图沿用 All 的合并结论。
+
+  方向不挡住状态的显示，但核对为 `ok` 之前，squeeze 标签带 `(direction unverified)`。`v` 的单位不再自己检查，改由单位核对（`BASE_ASSET`）担保。
+- **单元测试**另有：只有 4hour 数据的块在 O6 下能被判定；日志、URL、`repr` 和异常信息里不出现 key；未收盘的 bar 不入库；断档规则；HL 估算的缺失路径；合成视图的整窗规则；缺 key、key 无效和各种退避。测试不访问外网，不读真实的 `.env`。
+- **V2 对照**：本机自采的清算与 Coinalyze 的 4hour 行按块合计对照，只比较完整覆盖的块；同时记录刚收盘的 4hour 值在 1 小时内是否被更正。结果见 [P6-VERIFICATION](P6-VERIFICATION.md)。
+- **契约**：改 `contracts.py` 或视图模型后运行 `make contract`。
+- 采集器资源与覆盖率的观察只在打开采集器对照时才有意义。
+
+### §7 风险（补充）
+
+- **单一来源**：清算和三家的买卖差只有 Coinalyze 一个来源。免费条款、限速或字段变化会直接影响表 1 和图 1、图 2；缺 key、key 无效或限速时界面降级（§3.7），不回退到假数据。
+- **Coinalyze 自身的断档**：4h 层面由断档规则识别，5min 层面识别不出来（§3.3）。
+- **估算**：Hyperliquid 的清算是估算，只能做定性参考。
+- **共用 key**：本机和 test 共用同一个 key，最多两个进程同时运行（§3.8）。
+
 ## 8. 修订记录
+
+**v4（2026-10-19）**：P6，清算与买卖量改用 Coinalyze，加入 Hyperliquid 视图。依据 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.1 和 [PLAN-P6](PLAN-P6.md)，核验见 [P6-VERIFICATION](P6-VERIFICATION.md)。
+
+| 变更 | 处理 |
+|---|---|
+| 清算和 Bybit 买卖差只能自采，要采满 7 天，每次部署留下空洞 | 改读 Coinalyze，首轮回填约 90 天；采集器默认关闭，只用于对照（§0 P4-D4、D5、D11；§3.2） |
+| 加入 Hyperliquid，All venues 并入 OKX | 四个视图，All = Binance + Bybit + OKX；HL 的清算按 All 估算并标注 estimated（§0 P4-D1、D10；§3.3；§5） |
+| 4hour 和 5min 如何进 10m 网格 | 4hour 值放窗口末桶，`states.py` 的规则不变；合成视图的整窗规则（复核 C2）；Coinalyze 自身断档的规则（§3.3） |
+| 4hour 刚收盘时的值可能不完整（复核 I1、I7） | 收盘后 1 小时内每轮重取最近 3 个窗口；落后时也重取（§3.2） |
+| 旧的方向核对无法按新模型解析（复核 I2） | 迁移 003 删除旧行；方向核对改按 4h 窗口，Binance、Bybit、OKX 各一次（§6） |
+| 同一个 key 的配额（复核 I5、I6） | 每进程每分钟 20 次；401 不退避，429 为 max(60 秒, `Retry-After`)，403 为 10 分钟（§3.8） |
+| key 的保管（复核 I8、I9） | 环境变量存在即为准，否则只读仓库根目录 `.env` 的这一个键；只放在请求头里，不进 URL、日志、`repr`；测试不读真实的 `.env`（§2；§3.8） |
+| 没有清算的品种整个被 Coinalyze 省略 | 对请求的每家都补 0（§3.2） |
+| 页头、横幅、原因码随之改变 | 来源行与署名、`Liquidation history too short`、缺 key 的提示、`coinalyze_units`（§3.7；§5） |
+| 规则对照 | 扩到 16 种组合（§6） |
 
 **v1（2026-10-17）**：首版，数据源为方案 C。
 

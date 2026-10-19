@@ -27,19 +27,32 @@ python deploy/test/verify.py 'https://<test-domain>' --session-file '/absolute/p
 
 脚本默认检查登录页、匿名 API 401（无 Basic challenge）、跨源请求和 broker sync 被阻止。提供合法钱包会话时进一步检查认证访问，并创建一个 fixture 分析任务验证 DeMark 返回值。此任务会写入 test 模拟数据；浏览器功能验收仍需按本次改动补充。
 
-## Perps 采集（永续状态）
+## Perps（永续状态）
 
-analytics 服务内常驻 perps 的 REST worker 和 WebSocket 采集器，由 `WHEELHOUSE_PERPS` 控制，默认开启（`0`/`false`/`off` 关闭）。
+analytics 服务内常驻 perps 的 REST worker，由 `WHEELHOUSE_PERPS` 控制，默认开启（`0`/`false`/`off` 关闭）。清算和买卖量从 Coinalyze 取数（P6 起）。
 
-- **出站网络**：需要放行到 `fstream.binance.com` 和 `stream.bybit.com` 的 WSS，以及到 `fapi.binance.com`、`data.binance.vision`、`api.bybit.com` 的 HTTPS。
-- **停机**：Compose 给 analytics 设了 `stop_grace_period: 40s`。收到 SIGTERM 后，worker 在下一个请求前放弃本轮（在途请求最长 20 秒），采集器同时关闭连接并结束覆盖区间（最长 8 秒）；之后等待 worker 线程结束最长 25 秒。
+- **总开关与采集器开关**：
+  - WebSocket 采集器由 `WHEELHOUSE_PERPS_COLLECTORS` 控制，默认关闭（取值 `1`/`0`、`true`/`false`、`on`/`off`），只在对照时打开，不参与任何视图。
+  - **`WHEELHOUSE_PERPS` 是总开关**：它为 `off` 时，即使 `WHEELHOUSE_PERPS_COLLECTORS=on`，采集器也不启动。
+  - 写 compose 时注意空字符串：这两个变量写成空值会被当成非法值，服务启动失败。要用默认值就不要设置。
+- **`WHEELHOUSE_COINALYZE_KEY`**：Coinalyze 的 API key，在 Coolify 里设为 secret，不写进仓库、日志或发布记录。
+  - `deploy/test/compose.yaml` 已经把它传给 analytics：`WHEELHOUSE_COINALYZE_KEY: ${WHEELHOUSE_COINALYZE_KEY:-}`。变量存在但为空，等于没有 key。
+  - 没有 key 时，perps 的清算和 Coinalyze 的买卖量、OI 不可用，视图显示 key 的提示（见下文的部署后检查），不会用假数据代替。
+  - **同一个 key 最多两个进程同时使用**：免费 key 每分钟 40 次，每个进程自己限在 20 次以内。本机开发和 test 各占一个；核验时另起的服务要先停掉其他进程，或者另用一个 key。
+- **出站网络**：需要放行到 `fapi.binance.com`、`data.binance.vision`、`api.bybit.com`、`api.coinalyze.net` 的 HTTPS。只有打开采集器对照时，才需要到 `fstream.binance.com` 和 `stream.bybit.com` 的 WSS。
+- **停机**：Compose 给 analytics 设了 `stop_grace_period: 40s`。收到 SIGTERM 后，worker 在下一个请求前放弃本轮（在途请求最长 20 秒）；打开了采集器时，它同时关闭连接并结束覆盖区间（最长 8 秒）；之后等待 worker 线程结束最长 25 秒。
 - **部署后检查**：用合法钱包会话（与 `verify.py --session-file` 相同）请求 `/api/wheelhouse/v1/perps/status`：
-  - `collectors` 中 3 个流都是 `live: true`；
-  - 各流的 `problems` 是本进程启动以来的计数（`rotated`、`stopped` 属正常生命周期，其余如 `stalled`、`half_open`、`connect_failed`、`coverage_split` 是故障或空洞），用来解释覆盖空洞；
-  - 运行一天后，`direction_check.bybit_qty.events` 应在增长；
-  - `hosts` 中没有持续的 `error`。
+  - `hosts` 中 `api.coinalyze.net` 有 `last_success`，没有持续的 `error`：
+    - `key_missing`：secret 没有传进容器；
+    - `401`：key 无效或还没生效（新生成的 key 可能要几分钟），下一轮（最多 10 分钟）自动重试；
+    - `429`、`403`：被限流或被 Cloudflare 挡住，`backoff_until` 之后自动恢复；
+  - `markets` 有 4 项（binance、bybit、okx、hyperliquid），`ok` 都是 `true`。它在第一轮的 Coinalyze 取数结束后才出现，之后每天核对一次；有一项 `ok: false` 时，对应交易所的 Coinalyze 数据不用，相关视图带 `coinalyze_units:<venue>`；
+  - 首轮回填结束后，请求 `/api/wheelhouse/v1/perps/states?exchange=all&window=4h`：`covered_days` 约 90，`reasons` 中没有 `collecting:`，也没有 `rest_error:api.coinalyze.net:`；
+  - `direction_check` 的 binance、bybit、okx 在样本足够后不是 `inverted`；
+  - 其他 host 的 `error` 也不持续。
   `deploy/test/verify.py` 不检查这些项目，需要手动核对并写进发布记录。
-- **覆盖空洞**：每次重新部署 analytics 都会让两条连接同时断开，至少留下一个未覆盖的块。在采集满 7 天之前（spec 的起步门槛），尽量把 analytics 的部署攒在一起做，减少空洞。
+- **采集器对照**（仅在打开采集器时）：`collectors` 中 3 个流都是 `live: true`；各流的 `problems` 是本进程启动以来的计数（`rotated`、`stopped` 属正常生命周期，其余如 `stalled`、`half_open`、`connect_failed`、`coverage_split` 是故障或空洞）。采集器关闭时，这些流不是 `live` 不是故障。
+- **覆盖空洞**：清算历史来自 Coinalyze，重新部署不会再留下清算空洞。只有打开采集器对照时，每次重新部署才会让采集的覆盖断开。
 
 ## 规则开关（`WHEELHOUSE_RULES`）
 
@@ -58,6 +71,8 @@ perps worker 启动时不从库里重新派生：启动后立即开始的第一�
 保留失败日志与实际运行版本，先判断旧版本是否仍可用。需要回滚时选择已验收的历史部署镜像或提交，通过 Coolify 支持的回滚/指定提交重新部署，并重复外网验收。若平台不支持指定提交，则在发布分支创建经过检查的正常回退提交再部署，保留分支历史，不 force push。
 
 数据库格式变化时，先判断旧代码能否读取现有卷；代码回滚不等于数据库回滚。例如 `perps.sqlite` 应用迁移 002 之后，更早的镜像会以 "Perps database is newer than this application" 拒绝启动，而且即使 `WHEELHOUSE_PERPS=0` 也会创建这个库，整个 analytics 服务都起不来；回滚到这类版本之前要先确认这一点。数据恢复必须有已验证的备份和明确授权，禁止通过删除命名卷来修复发布失败。
+
+**迁移 003（P6）同样如此。** 它新增 `cz_series` 表，并删除旧形状的方向核对结果。应用之后，P6 之前的镜像（迁移最高到 002）读到更新的库，会以同样的 "Perps database is newer than this application" 拒绝启动，整个 analytics 服务都起不来。所以回滚到 P6 之前的版本，要连同数据卷一起处理：先停写，再按发布第 3 步取得的备份恢复 `perps.sqlite`（该备份必须在迁移 003 之前取得，并已验证能恢复）。只回滚镜像不会让服务恢复。
 
 P5 起派生载荷带有 `rules` 等新字段。回滚到 P5 之前的版本时，旧代码读这些载荷会因 `extra="forbid"` 校验失败，相关视图报错，直到下一轮派生把载荷覆盖（onchain ≤ 1 小时，perps ≤ 10 分钟）；等待即可，不要为此删除数据卷。
 
