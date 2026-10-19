@@ -100,6 +100,12 @@ def emptied(urpd: Urpd) -> Urpd:
     return urpd.model_copy(update={"buckets": []})
 
 
+def with_floor(urpd: Urpd, floor: float, supply: float) -> Urpd:
+    """`urpd` with one more bucket, at `floor`."""
+    extra = UrpdBucket(price_floor=floor, supply=supply, realized_cap=0.0, unrealized_pnl=0.0)
+    return urpd.model_copy(update={"buckets": [*urpd.buckets, extra]})
+
+
 def flow_of(
     snapshots: dict[Key, Urpd],
     ages: dict[str, Urpd] | None = None,
@@ -240,6 +246,53 @@ def test_missing_d_cohort_takes_its_grid_down(golden):
     assert "urpd_missing:lth:lin200" in flow.reasons
 
 
+def test_grid_is_the_floor_union_of_all_five_days(golden):
+    # A floor only the 2026-10-18 snapshots have is a row of the $500 grid: 0 at D, and the
+    # 1d then column's own supply, rounded like every other.
+    snaps = dict(golden)
+    supply = {"all": 3.006, "sth": 1.004, "lth": 2.002}
+    for cohort, btc in supply.items():
+        key = (cohort, "lin500", date(2026, 10, 18))
+        snaps[key] = with_floor(golden[key], 126000.0, btc)
+    assert all(b.price_floor < 126000.0 for b in golden[("all", "lin500", D)].buckets)
+    g500 = grid(flow_of(snaps), 500)
+    assert len(g500.floors) == 253
+    row = g500.floors.index(126000.0)
+    assert (g500.now.all[row], g500.now.sth[row], g500.now.lth[row]) == (0.0, 0.0, 0.0)
+    one_day = g500.windows[0]
+    assert one_day.window == "1d"
+    then = (one_day.then.all[row], one_day.then.sth[row], one_day.then.lth[row])
+    assert then == (_cents(3.006), _cents(1.004), _cents(2.002)) == (3.01, 1.0, 2.0)
+    assert all(w.then.all[row] == 0.0 for w in g500.windows[1:])
+
+    # Choice 4a: a window that is not built still adds its snapshots' floors.
+    snaps = {k: v for k, v in golden.items() if k != ("sth", "lin200", date(2026, 7, 21))}
+    key = ("all", "lin200", date(2026, 7, 21))
+    snaps[key] = with_floor(golden[key], 126000.0, 1.0)
+    flow = flow_of(snaps)
+    g200 = grid(flow, 200)
+    assert [w.window for w in g200.windows] == ["1d", "7d", "30d"]
+    assert "window_missing:90d:lin200" in flow.reasons
+    row = g200.floors.index(126000.0)
+    assert g200.now.all[row] == 0.0
+    assert all(w.then.all[row] == 0.0 for w in g200.windows)
+
+
+def test_grid_reasons_name_every_d_cohort_in_order(golden):
+    # Choice 4b: a missing and a mismatched cohort of the same grid are both named, in
+    # all/sth/lth order, before the reasons of the age groups.
+    snaps = {k: v for k, v in golden.items() if k != ("sth", "lin200", D)}
+    key = ("lth", "lin200", D)
+    snaps[key] = with_close(golden[key], 1.0)
+    flow = flow_of(snaps)
+    assert [g.step for g in flow.grids] == [500]
+    assert flow.reasons == [
+        "urpd_missing:sth:lin200",
+        "urpd_mismatch:lth:lin200",
+        "age_urpd_missing",
+    ]
+
+
 def test_age_band_matches_the_page_histogram():
     # hilo from 2013-01-01 on, D 2026-10-19, floors 0..125,500 step 500
     floors = [500.0 * i for i in range(252)]
@@ -329,6 +382,33 @@ def test_age_reasons(golden):
     assert flow.reasons == ["age_floor_stale"]
 
 
+def test_high_low_rows_without_a_value_up_to_d_are_missing(golden):
+    high, low = hilo("price_high", date(2013, 1, 1)), hilo("price_low", date(2013, 1, 1))
+    nulls_high: Rows = [(at, None) for at, _ in high]
+    nulls_low: Rows = [(at, None) for at, _ in low]
+    flow = flow_of(golden, six_ages(), nulls_high, nulls_low)
+    assert (flow.age, flow.reasons) == (None, ["age_floor_missing"])
+
+    after = datetime(2026, 10, 20, tzinfo=UTC)
+    flow = flow_of(golden, six_ages(), [(after, 83000.0)], [(after, 82000.0)])
+    assert (flow.age, flow.reasons) == (None, ["age_floor_missing"])
+
+
+def test_null_high_low_on_d_is_stale(golden):
+    # Choice 4c: D's row exists but has no values, so the newest day with both is 2026-10-18.
+    d = datetime(2026, 10, 19, tzinfo=UTC)
+    high, low = hilo("price_high", date(2013, 1, 1)), hilo("price_low", date(2013, 1, 1))
+    assert high[-1][0] == low[-1][0] == d
+    flow = flow_of(
+        golden,
+        six_ages(),
+        [(at, None if at == d else v) for at, v in high],
+        [(at, None if at == d else v) for at, v in low],
+    )
+    assert flow.age is not None
+    assert flow.reasons == ["age_floor_stale"]
+
+
 def columns(all_: list[float], sth: list[float], lth: list[float]) -> CohortColumns:
     return CohortColumns(all=all_, sth=sth, lth=lth)
 
@@ -386,3 +466,23 @@ def test_qc_codes():  # synthetic 3-row grids
     # a row holding 0.5 BTC or less is not read
     thin = columns([0.5, 3.0, 4.0], [0.5, 1.0, 1.0], [0.0, 2.0, 3.0])
     assert qc_codes([synthetic(500, now=thin)], young) == []
+
+
+def test_qc_codes_keep_the_original_order():
+    # Choice 4d: the order of the original's self-check (L:452-492): sth + lth = all on the $500
+    # grid, then on the $200 grid, the identity of each window in window order, the age floor.
+    off = columns([2.06, 3.0, 4.0], [1.0, 1.0, 1.0], [1.0, 2.0, 3.0])
+    # row 1: sold = 2.9 - (3.0 - 0.0) = -0.1 in 1d and 30d
+    drop = columns([2.0, 2.9, 4.0], [1.0, 0.9, 1.0], [1.0, 2.0, 3.0])
+    young = AgeFlow(
+        groups=[[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+        band=[2, 11, 11],
+    )
+    grids = [synthetic(500, {"1d": drop, "7d": off, "30d": drop}), synthetic(200, {"30d": off})]
+    assert qc_codes(grids, young) == [
+        "cohort_sum:lin500",
+        "cohort_sum:lin200",
+        "sold_negative:1d",
+        "sold_negative:30d",
+        "age_floor",
+    ]
