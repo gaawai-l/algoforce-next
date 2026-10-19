@@ -28,7 +28,7 @@ def derive_perps(path: Path, rules: Rules) -> list[str] | None:
     found = [derived for key in keys if (derived := store.derived(key)) is not None]
     if not found:
         return None
-    # One round stores all six with one time and one start; the latest, should a round have been
+    # One round stores all eight with one time and one start; the latest, should a round have been
     # cut short. The start depends on the worker's horizon, so it is read, not worked out.
     payload, at = max(found, key=lambda derived: derived[1])
     start = int(StoredStates.model_validate_json(payload).start.timestamp())

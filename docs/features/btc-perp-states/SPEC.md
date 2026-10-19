@@ -487,7 +487,7 @@ Coinalyze 随 REST worker 的每一轮（HH:05、HH:15……）取数，在 Bina
 - **补 0**：只对清算。请求范围内、已收盘、Coinalyze 没有返回的区间，存成 `(0, 0)` 并标 `filled = 1`。整个 symbol 不在回复里时也照样补 0：Coinalyze 会省略这段时间没有清算的品种，而我们只请求已知有清算数据的三家。OHLCV 和 OI 不补，缺失就是缺失。
 - **请求量**：按 symbol 计费。5min 每轮 8 次（清算 3、OHLCV 3、OI 2）；4hour 只在上面几种情形里取，每轮 8 次；单位核对每天 1 次。
 - **限速自律**：每个进程每分钟最多 20 次计费调用，按 60 秒滑动窗口累计。不够时就等，worker 停机时立即放弃这一轮。同一个 key 因此最多两个进程（本机和 test）同时运行。
-- **单位核对**：每天读一次 `/future-markets`（在一轮的各类历史都取完之后）。要求 4 个 symbol 都在列表里、`oi_lq_vol_denominated_in = BASE_ASSET`；用到买卖量的 Bybit、OKX、Hyperliquid 还要 `has_buy_sell_data = true`。不符合的交易所，它的 Coinalyze 列整体不用（该交易所的清算、买卖差、OI 在网格里全部缺失），相关视图带原因码 `coinalyze_units:<venue>`。读取失败时沿用上次的结果；从未读到时，照常使用数据。
+- **单位核对**：每天读一次 `/future-markets`（在一轮的各类历史都取完之后）。要求 4 个 symbol 都在列表里、`oi_lq_vol_denominated_in = BASE_ASSET`；用到买卖量的 Bybit、OKX、Hyperliquid 还要 `has_buy_sell_data = true`。不符合的交易所，它取自 Coinalyze 的列整体不用，按缺失处理（Binance 为清算，Bybit 为清算和买卖差，OKX 为清算、买卖差和 OI，Hyperliquid 为 OI 和买卖差，它的清算估算也随 OI 缺失；Binance、Bybit 的 REST OI 和 Binance 的 REST 买卖差不受影响），相关视图带原因码 `coinalyze_units:<venue>`。读取失败时沿用上次的结果；从未读到时，照常使用数据。
 
 ### §3.3 放进 10m 网格（替代 v3.2 的覆盖规则）
 
@@ -510,7 +510,7 @@ Coinalyze 随 REST worker 的每一轮（HH:05、HH:15……）取数，在 Bina
 
 **合成视图（All、Hyperliquid）的规则**：All 的每个桶是逐桶的 REST 值与整窗放置的 Coinalyze 值相加。REST 值在窗口末桶缺失时，会出两种错：整窗的值被丢掉，或块内最后一个非空的 OI 退回 4 小时前。所以凡是有一家整窗放置的窗口：
 - 买卖差、清算：合成值在窗口末桶为 null 时，整窗都记为未覆盖；
-- OI：合成值在窗口首桶或末桶为 null 时，整窗的合成 OI 都记为 null。
+- OI：合成值在窗口末桶为 null 时，整窗的合成 OI 都记为 null；首桶为 null 不触发，它只让该块的 dOI 记为估算。
 
 8h 块的后一窗因此为 null 时，块内最后一个非空的 OI 会退到前一窗的末桶，即 4 小时前；这与 P4 中 REST 序列连续缺失时相同，QC 会报缺失。
 
