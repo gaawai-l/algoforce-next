@@ -16,7 +16,7 @@ describe("wheelhouse copy", () => {
         "粒度 10m · 数据截至 {{time}} UTC · 价格 Bybit 现货 · OI：Binance、Bybit（公开接口），OKX、Hyperliquid（Coinalyze）",
       ],
       "perp.source": [
-        "Liquidations and buy/sell volume (except Binance's):",
+        "Liquidations and buy/sell volume (except Binance's): ",
         "清算与主动买卖量（Binance 的买卖量除外）：",
       ],
       "perp.coverage": [
@@ -55,6 +55,25 @@ describe("wheelhouse copy", () => {
       "Liquidations (estimated)",
     );
     expect(phrase("zh", "perp.estimated", { label: "清算" })).toBe("清算（估算）");
+  });
+
+  it("ends the source line so the Coinalyze link follows it without a gap", () => {
+    // The line renders as the string followed by the link, with no space between them.
+    expect(`${messages.en["perp.source"]}Coinalyze`).toBe(
+      "Liquidations and buy/sell volume (except Binance's): Coinalyze",
+    );
+    expect(`${messages.zh["perp.source"]}Coinalyze`).toBe(
+      "清算与主动买卖量（Binance 的买卖量除外）：Coinalyze",
+    );
+  });
+
+  it("names missing data, not collection, as the cause of the chart hatching", () => {
+    for (const key of ["perp.c1.shows", "perp.c4.shows"] as const) {
+      expect(messages.en[key], key).toMatch(/hatching[^.]*missing/);
+      expect(messages.en[key], key).not.toMatch(/collect/i);
+      expect(messages.zh[key], key).toMatch(/缺少/);
+      expect(messages.zh[key], key).not.toMatch(/采集/);
+    }
   });
 
   it("no longer has the copy of the self-collected liquidations", () => {

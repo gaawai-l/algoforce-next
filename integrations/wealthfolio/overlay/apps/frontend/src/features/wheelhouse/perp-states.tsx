@@ -464,7 +464,7 @@ export function PerpStates() {
       <>
         <p className="wh-perp-meta">{text("perp.meta", { time: through })}</p>
         <p className="wh-perp-meta">
-          {text("perp.source")}{" "}
+          {text("perp.source")}
           <a href={COINALYZE_URL} target="_blank" rel="noreferrer">
             Coinalyze
           </a>

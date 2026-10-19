@@ -572,7 +572,7 @@ const en = {
   "perp.unavailable": "Perp states unavailable",
   "perp.meta":
     "Resolution 10m · Data through {{time}} UTC · Price Bybit spot · OI Binance and Bybit (public), OKX and Hyperliquid (Coinalyze)",
-  "perp.source": "Liquidations and buy/sell volume (except Binance's):",
+  "perp.source": "Liquidations and buy/sell volume (except Binance's): ",
   "perp.coverage": "Liquidation history: {{days}} d covered in the last 90",
   "perp.binanceNote":
     "Binance liquidations are a one-per-second snapshot (lower bound)",
@@ -705,7 +705,7 @@ const en = {
   "perp.chart.noData": "No blocks in this view",
   "perp.c1.title": "Chart 1 — Price: long/short squeezes and unwinds",
   "perp.c1.shows":
-    "One point per 4h or 8h block: the BTC price where the block closed. Blocks the rules called a squeeze or an unwind are tinted top to bottom, rust when longs were the ones leaving and moss when shorts were, with squeezes in the deeper tint. Grey hatching marks blocks left unjudged because liquidation or Bybit trade collection had gaps.",
+    "One point per 4h or 8h block: the BTC price where the block closed. Blocks the rules called a squeeze or an unwind are tinted top to bottom, rust when longs were the ones leaving and moss when shorts were, with squeezes in the deeper tint. Grey hatching marks blocks left unjudged because their liquidation or buy/sell data was missing.",
   "perp.c1.implies":
     "Every label is a test against the 90-day distribution. A squeeze needs three things at once: one side's liquidations at or above its 90th percentile among covered blocks, at least triple the other side's, and a price move of at least the 75th-percentile size in the direction those forced orders push. An unwind only needs open interest to drop by at least its 75th-percentile amount; taker delta then says whether longs (net selling) or shorts (net buying) were the ones closing. Squeezes clustered together mean forced exits were driving that stretch.",
   "perp.c1.how":
@@ -728,7 +728,7 @@ const en = {
     "Pair the slopes. Both climbing points to longs opening; open interest climbing into a falling price points to shorts opening; open interest sliding, whatever price does, points to positions being closed. Charts 1 and 2 turn these pairings into one label per block, using the thresholds instead of eyeballed slopes.",
   "perp.c4.title": "Chart 4 — Volume delta and liquidations",
   "perp.c4.shows":
-    "Two panels on one time axis with one bar per block. On top, net taker volume on the perpetuals: taker buys minus taker sells. In the shaded band below, liquidated shorts rise from the line and liquidated longs hang under it. Everything is in BTC. A slot with grey hatching and no bar means that input was not collected for the block.",
+    "Two panels on one time axis with one bar per block. On top, net taker volume on the perpetuals: taker buys minus taker sells. In the shaded band below, liquidated shorts rise from the line and liquidated longs hang under it. Everything is in BTC. A slot with grey hatching and no bar means that input was missing for the block.",
   "perp.c4.implies":
     "Delta shows who crossed the spread: a tall positive bar means buyers paid up, a tall negative one means sellers hit the bids. The band shows forced exits by side. In a squeeze the two panels agree: one side's liquidations spike while delta leans hard in the direction those forced orders push, for example many shorts liquidated during strong net buying.",
   "perp.c4.how":
@@ -1413,7 +1413,7 @@ const zh: Record<MessageKey, string> = {
   "perp.chart.noData": "视图内没有块",
   "perp.c1.title": "图 1 — 价格：多空挤压与离场",
   "perp.c1.shows":
-    "每个 4h 或 8h 块取一个点，即该块收盘时的 BTC 价格。被规则判为挤压或离场的块整列着色：离场的一方是多头时用锈红，是空头时用苔绿，挤压的颜色比离场深。灰色斜线表示该块的清算或 Bybit 成交采集有缺口，因此没有判定。",
+    "每个 4h 或 8h 块取一个点，即该块收盘时的 BTC 价格。被规则判为挤压或离场的块整列着色：离场的一方是多头时用锈红，是空头时用苔绿，挤压的颜色比离场深。灰色斜线表示该块缺少清算或买卖量数据，因此没有判定。",
   "perp.c1.implies":
     "每个标签都是拿这块和近 90 天的分布比。判为挤压要同时满足三点：某一侧清算量达到该侧在已覆盖块中的第 90 百分位；至少是另一侧的三倍；价格朝这些强平单推动的方向变动，幅度不低于第 75 百分位。离场只看持仓量，降幅达到第 75 百分位即可，再由主动买卖差的正负区分是多头卖出离场还是空头买回离场。挤压成片出现，说明那段时间行情主要由强平驱动。",
   "perp.c1.how":
@@ -1436,7 +1436,7 @@ const zh: Record<MessageKey, string> = {
     "看两条线斜率的搭配：持仓与价格同升，多半是多头开仓；价格下跌而持仓上升，多半是空头开仓；持仓下滑，不论价格往哪走，多半是仓位在关闭。图 1 和图 2 用阈值而不是目测，把这些搭配落实为每块的一个标签。",
   "perp.c4.title": "图 4 — 主动买卖差与清算",
   "perp.c4.shows":
-    "上下两个区共用时间轴，每块一根柱。上区是永续合约的净主动成交量，即主动买入减主动卖出；下方带状区是清算，空头被强平的量从线往上画，多头被强平的量往下画。单位都是 BTC。某块某项数据没有采集到时，对应位置只有灰色斜线，没有柱。",
+    "上下两个区共用时间轴，每块一根柱。上区是永续合约的净主动成交量，即主动买入减主动卖出；下方带状区是清算，空头被强平的量从线往上画，多头被强平的量往下画。单位都是 BTC。某块缺少某项数据时，对应位置只有灰色斜线，没有柱。",
   "perp.c4.implies":
     "买卖差反映谁在主动吃单：正向高柱是买方愿意加价成交，负向高柱是卖方主动砸向买盘。带状区按方向显示被迫离场的量。挤压时上下两区会相互印证：一侧清算量骤增，同时买卖差明显倒向这些强平单推动的方向，例如大量空头被强平的同时出现强劲净买入。",
   "perp.c4.how":
