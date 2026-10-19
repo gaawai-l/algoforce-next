@@ -19,7 +19,7 @@
 
 **技术栈**：同 P4，不加依赖。
 
-**Spec**：[PROPOSAL-COINALYZE.md](PROPOSAL-COINALYZE.md) v3.1（下文简称"方案"，§x 指方案的章节），在 [SPEC.md](SPEC.md) v3.2 之上修改。两者冲突时以方案为准；方案没提到的规则按 SPEC v3.2 执行。T5 会把 SPEC 改成 v4，与方案一致。
+**Spec**：[PROPOSAL-COINALYZE.md](PROPOSAL-COINALYZE.md) v3.2（v1.2 起；v1.0–v1.1 依据 v3.1。下文简称"方案"，§x 指方案的章节），在 [SPEC.md](SPEC.md) v3.2 之上修改。两者冲突时以方案为准；方案没提到的规则按 SPEC v3.2 执行。T5 会把 SPEC 改成 v4，与方案一致。
 
 ## 计划层面的裁定
 

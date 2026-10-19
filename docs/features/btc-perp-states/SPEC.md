@@ -17,7 +17,7 @@ v4 把清算和买卖量改读 Coinalyze，并加入 Hyperliquid 视图：见 §
 | 原站源码 `.local/research-samples/alpha-dashboards-2026-10-16/perp-squeeze/raw/script_2_app.js`；笔记 `NOTES.md` | 规则细节 |
 | 复算脚本 `.local/research-samples/alpha-dashboards-2026-10-16/perp-squeeze/tools/perp_parity.py` | 在原站样本上复现了页面：543 块排名，180 块显示；各状态计数为 LS 14、SS 8、LU 3、SU 8、NL 5、NS 6、spot 21、chop 115；表 1 的 Prob. 和 Max move 也一致 |
 | 探测原始文件 `.local/research-samples/perp-free-data-2026-10-17/` | 已从会话临时目录保存 |
-| [方案：改用 Coinalyze](PROPOSAL-COINALYZE.md) v3.1 | v4 的依据，含 2026-10-19 的 V1 实测 |
+| [方案：改用 Coinalyze](PROPOSAL-COINALYZE.md) v3.2 | v4 的依据，含 2026-10-19 的 V1 实测 |
 
 ## 0. 决定汇总
 
@@ -401,7 +401,7 @@ v4 把清算和买卖量改读 Coinalyze，并加入 Hyperliquid 视图：见 §
 
 ## v4（P6）：清算与买卖量改用 Coinalyze
 
-日期：2026-10-19。依据 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.1 和 [PLAN-P6](PLAN-P6.md)；代码范围是分支 `claude/coinalyze` 的 `f0f9d0c..25e6329`，核验记录见 [P6-VERIFICATION](P6-VERIFICATION.md)。
+日期：2026-10-19。依据 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.2 和 [PLAN-P6](PLAN-P6.md)；代码范围是分支 `claude/coinalyze` 的 `f0f9d0c..8707fab`（含整分支终审的修复），核验记录见 [P6-VERIFICATION](P6-VERIFICATION.md)。
 
 本节只写与 v3.2 不同的部分，其余仍然有效。小节标题里的 § 是 v3.2 的章节，被替代的条目在原章节首行有提示。本节描述的是代码实际做的事；与方案不同之处在小节里直接写明。
 
@@ -618,7 +618,7 @@ Coinalyze 随 REST worker 的每一轮（HH:05、HH:15……）取数，在 Bina
 
 ## 8. 修订记录
 
-**v4（2026-10-19）**：P6，清算与买卖量改用 Coinalyze，加入 Hyperliquid 视图。依据 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.1 和 [PLAN-P6](PLAN-P6.md)，核验见 [P6-VERIFICATION](P6-VERIFICATION.md)。
+**v4（2026-10-19）**：P6，清算与买卖量改用 Coinalyze，加入 Hyperliquid 视图。依据 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.2 和 [PLAN-P6](PLAN-P6.md)，核验见 [P6-VERIFICATION](P6-VERIFICATION.md)。
 
 | 变更 | 处理 |
 |---|---|

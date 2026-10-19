@@ -1,6 +1,6 @@
 # P6 核验记录
 
-日期：2026-10-19，约 11:05–11:25 UTC 做浏览器与降级核验，V2 取数在 11:10:52 UTC。分支 `claude/coinalyze`，代码范围 `f0f9d0c..25e6329`（Task 1–4，最后一个代码提交是 25e6329），文档提交 d4ac5bc。方案见 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.1，计划见 [PLAN-P6](PLAN-P6.md)，规则见 [SPEC](SPEC.md) v4 一节。
+日期：2026-10-19，约 11:05–11:25 UTC 做浏览器与降级核验，V2 取数在 11:10:52 UTC。分支 `claude/coinalyze`，代码范围 `f0f9d0c..25e6329`（Task 1–4，最后一个代码提交是 25e6329），文档提交 d4ac5bc；整分支终审后的修复是 `fc7916a..0f2940a`，复核见 §1 末尾。方案见 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.2，计划见 [PLAN-P6](PLAN-P6.md)，规则见 [SPEC](SPEC.md) v4 一节。
 
 ## 1. 全量检查
 
@@ -11,6 +11,8 @@
 | `make check` | 退出码 0。ruff 通过；mypy strict 52 个源文件无问题；pytest **936 passed**（P6 之前为 823）；type-check 通过；vitest 24 个文件 **446** 个测试通过（P6 之前为 436） |
 | `deploy/test/test_composition.py`（不在 `make check` 范围内，单独运行） | 1 passed，断言 perps 的 worker 和采集器都没有启动 |
 | 测试不访问外网 | 按设计不访问：客户端测试用 `httpx.MockTransport`，同步测试用 `FakeCoinalyze`，API 测试走注入的 `perps_http`；两处测试都把 key 置为空串并让 `.env` 指向不存在的文件：`services/analytics/tests/conftest.py` 的 autouse fixture，以及 `deploy/test/test_composition.py` 自己（它在 conftest 管不到的目录，终审发现原先会读仓库根目录的 `.env`，已在 fix 提交里补上；在测试进程里统计对 `.env` 的读取，修复前 2 次，修复后 0 次）。没有测试读真实的 key。这次没有另做屏蔽 DNS 的运行 |
+
+**终审修复之后**（代码为 0f2940a：合成 OI 只看窗口末桶、图 1 与图 4 的说明、中文来源行的冒号）：`make check` 退出码 0，pytest **938 passed**，vitest **448** 个测试通过；`deploy/test/test_composition.py` 1 passed；规则对照 16 种组合仍为 `ALL MATCH`（§2）。浏览器里核对了中文来源行为"：Coinalyze"（冒号后没有空格），英文的冒号后仍有一个空格；图 1、图 4 的说明在中英文里都改为数据缺失。
 
 ## 2. 规则对照（本地，不入库；P4-D9、P6-R6）
 
@@ -168,16 +170,24 @@ hyperliquid 8h/7d 视图：控制台没有报错；HL 说明行在；阈值随�
 
 ## 9. 代码与方案的差别
 
-SPEC v4 写的是代码实际所做的事。与方案 v3.1 不同之处：
+SPEC v4 写的是代码实际所做的事。与方案 v3.2 不同之处：
 1. **多出一条 4hour 重取**：方案只在窗口收盘后 1 小时内重取最近 3 个窗口。代码（`sync._coinalyze`）在某家的最新 4hour 行落后于最新已收盘窗口时，也同样重取（起点为各家最新行的最小值再往前 2 个窗口）。不超出配额，但如果 Coinalyze 对某家始终不返回最新窗口（例如 OKX 的 OI），每轮都会触发。
 2. **方向核对的价格变动**：方案只写"窗口内价格变动 ≥1%"。代码取 Bybit 现货的窗口第一个桶价格到最后一个桶价格（开盘于 `w+5m` 与 `w+4h−5m` 的两根 bar 的收盘），且窗口有清算（`l + s > 0`）、不是 `filled`。
 3. **单位核对的时机**：在一轮的各类历史都取成功之后才读 `/future-markets`；前面的请求失败时顺延到下一轮。方案只写每天一次。
 4. **回填记录**：各类 4hour 的回填起点存在 `sync_state` 的 `cz_4h:<kind>`，而不是从数据推断。与方案的条件等价。
 5. `/perps/status` 在新的 `direction_check{binance,bybit,okx}` 之外保留合并的 `direction`，与方案"HL 视图沿用 All 的合并结论"一致。
 
-## 10. 待补
+## 10. 4hour 稳定性与发布后待做
 
-**4hour 刚收盘值的稳定性**（方案 §3.2、§6 V2）：收盘于 2026-10-19 12:00 UTC 的 4h 窗口，在 12:06 和 13:06 UTC 各取一次它的 4hour 值（`.local/p6-verify/settle.py`，结果写入 `.local/p6-verify/settle.json`），看 1 小时内是否被更正。结果：**待补**，由取数的人在此处补写。
+**4hour 刚收盘值的稳定性**（方案 §3.2、§6 V2）：收盘于 2026-10-19 12:00 UTC 的 4h 窗口（08:00–12:00），在 12:06:00 和 13:06:00 UTC 各取一次它的 4hour 清算值（`.local/p6-verify/settle.py`，结果在 `.local/p6-verify/settle.json`，不入库），看 1 小时内是否被更正。两次取到的值完全相同，三家都不是补 0 的点：
+
+| 交易所 | 多头清算（BTC） | 空头清算（BTC） |
+|---|---|---|
+| Binance | 14.996 | 5.926 |
+| Bybit | 7.066 | 1.046 |
+| OKX | 2.1017 | 0.0678 |
+
+结论：这个窗口收盘 6 分钟后取到的值，1 小时内没有被更正。只测了一个窗口，也只测了清算，不能说明 Coinalyze 从不更正；收盘后 1 小时内的重取（`sync.CZ_SETTLE`）照方案保留，每个窗口只多几次请求。
 
 另外，发布到 test 之后还要做：在 Coolify 设好 `WHEELHOUSE_COINALYZE_KEY`，按 [发布流程](../../deployment/RELEASING.md) 的"Perps（永续状态）"一节核对 `/perps/status` 的 `api.coinalyze.net` 和 `markets`。发布要等用户说"发布 test"。
 
@@ -185,14 +195,13 @@ SPEC v4 写的是代码实际所做的事。与方案 v3.1 不同之处：
 
 **与预期不同**
 1. **V2 的 strict 窗口数为 0**（§4）。方案要求"只比较完整覆盖的块"，本机自采覆盖被重启切碎，没有一个 4h 窗口整窗被覆盖。用缺口 ≤120 秒的 near 窗口（1 个）、部分覆盖窗口的不等式（6 个，无一违反）和完整覆盖的 5min 桶（70 个，全部相等）代替，没有达到方案原本的整窗对照。
-2. **页面文案残留（小问题，按发现记录，未修；留给终审分类）**：
+2. **页面文案残留（小问题；终审列为必修，已在 8707fab 修复，复核见 §1 末尾）**：
    - 图 1 的 "What it shows"（en；zh 大概同样）仍写灰色斜线标出的是"因为清算或 Bybit 成交的采集有缺口"而未判定的块。改用 Coinalyze 之后没有"采集"，应改为数据有缺口；
    - 图 4 的 "What it shows" 写的是 "that input was not collected for the block"，同样是过时的措辞；
    - 中文来源行里，全角冒号后面多一个空格，再接 Coinalyze 链接（"（Binance 的买卖量除外）： Coinalyze"）。
 3. **:1430 上的 HTTP 403 是环境产物，不是 P6 的问题**：核验用的是本分支的 Wealthfolio 宿主（:1430）代理到 :8797。analytics 服务拒绝 Origin 不是 :1420 的 POST（`http.py` 的 origin 检查），所以市场页显示 "Python service unavailable (HTTP 403)"。perps 的接口都是 GET，不受影响。
 
 **未做或未覆盖**
-- 4hour 稳定性测量（§10）。
 - 单位核对失败（`coinalyze_units`）、429 和 403 退避没有在浏览器里复现，只有单元测试覆盖；断档规则没有在真实数据上触发过（Binance 04-23 那一段不在 121 天的网格内），只有单元测试覆盖。
 - 没有发布到 test，也没有在 Coolify 上用真实的 secret 验证；采集器的对照（开 `WHEELHOUSE_PERPS_COLLECTORS`）没有再跑。
 - 这次核验在 Coinalyze 上的计费调用：V2 用了 3 次；首轮 worker 与降级模式的调用由 worker 自己按每进程每分钟 20 次限速，没有单独统计。
