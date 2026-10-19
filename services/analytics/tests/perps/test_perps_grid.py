@@ -669,6 +669,18 @@ def test_excluded_venue_is_uncovered(store: PerpsStore):
     assert hyperliquid.oi == hyperliquid.vd == hyperliquid.long_liq == [None] * 4
 
 
+def test_start_window_checks_the_window_before_it_for_an_outage(store: PerpsStore):
+    rest(store, W + H4 - STEP)
+    # A filled window at the start alone is 24 zeros, covered.
+    store.upsert_cz("liq", H4, "bybit", [point(W, 0.0, 0.0, filled=True)])
+    alone = grid_of(store, "bybit")
+    assert alone.long_liq == [0.0] * 24 and all(alone.liq_covered)
+    # With the one before it filled too (read from start - H4), Coinalyze's gap: uncovered.
+    store.upsert_cz("liq", H4, "bybit", [point(W - H4, 0.0, 0.0, filled=True)])
+    gap = grid_of(store, "bybit")
+    assert gap.long_liq == [None] * 24 and not any(gap.liq_covered)
+
+
 def test_only_4hour_history_is_judged_under_o6(store: PerpsStore):
     start = T0 - 100 * DAY
     last = T0 - STEP  # the end bucket of the window before T0: no forming block
