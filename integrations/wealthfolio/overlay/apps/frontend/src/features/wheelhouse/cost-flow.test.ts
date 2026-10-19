@@ -6,6 +6,7 @@ import {
   agingNote,
   barCounts,
   chip,
+  clusterCells,
   clusterMeta,
   clusters,
   flowTip,
@@ -15,6 +16,8 @@ import {
   fmtSigned,
   gridFor,
   kLabel,
+  legendRows,
+  mixCells,
   mixRows,
   mixtureMeta,
   segments,
@@ -315,53 +318,39 @@ const s2Sides = (rows: readonly FlowRow[], h: Holders, aging: boolean, s: SideSe
   };
 };
 
+// A table row's cells, checking that the tag colour agrees with the words: below exactly when the
+// vs-spot cell says "below".
+const tagged = ({ cells, below }: { cells: string[]; below: boolean }) => {
+  expect(below, cells.join(" | ")).toBe(cells[cells.length - 1].endsWith(" below"));
+  return cells;
+};
+
 // One block in the sweep's format (sweep_expected.py): the legend's label and value joined by a
-// space and its rows by " || ", the note, the drawn bars, then each table's meta and rows. The
-// cell formats are the page's (A:1828-1835, A:1856-1863). The empty-table lines are the page's
-// own text; their copy keys belong to the UI.
+// space and its rows by " || ", the note, the drawn bars, then each table's meta and rows (number,
+// side pill, the shipped cells), or the table's empty message. It only joins strings: every value
+// is formatted by cost-flow.ts.
 const chart3Lines = (label: string, b: Block): string[] => {
   const spot = s2.spot!;
   const grid = gridFor(s2, b.h)!;
   const rows = s2Rows(b.w, b.h, b.aging, b.z);
-  const t = flowTotals(rows, b.h, b.aging);
-  const legend = [
-    `${en("costflow.buy")} ${fmtSigned(t.buy)} BTC`,
-    `${en("costflow.sell")} ${fmtSigned(-t.sell)} BTC`,
-  ];
-  if (t.aging !== null && t.share !== null)
-    legend.push(
-      `${en("costflow.agingRow")} ${en(b.h === "sth" ? "costflow.ofSell" : "costflow.ofBuy", {
-        btc: fmtBtc(t.aging),
-        pct: `${(t.share * 100).toFixed(0)}%`,
-      })}`,
-    );
+  const legend = legendRows(en, flowTotals(rows, b.h, b.aging), b.h);
   const n = barCounts(rows, b.h, b.aging);
   const { pos, neg } = s2Sides(rows, b.h, b.aging, b.side);
   const cs = clusters(pos, neg);
   const ms = mixRows(pos, neg);
   return [
     `## ${label}`,
-    `legend: ${legend.join(" || ")}`,
+    `legend: ${legend.map((r) => `${r.label} ${r.value}`).join(" || ")}`,
     `note: ${agingNote(en, b.h, b.aging, grid.step)}`,
     `bars: pos ${n["bar-pos"]} neg ${n["bar-neg"]} agingPos ${n["bar-aging-pos"]} agingNeg ${n["bar-aging-neg"]}`,
     `clusterMeta: ${clusterMeta(en, cs)}`,
     ...(cs.length
-      ? cs.map(
-          (c) =>
-            `K${c.n} | ${PILL[c.side]} | ${fmtPrice(c.peak.location)} | ${fmtPrice(c.peak.width)} | ` +
-            `${fmtBtc(c.peak.supply)} BTC | ${(c.peak.share * 100).toFixed(1)}% | ` +
-            `${(c.peak.strength * 100).toFixed(0)}% | ${vsSpot(en, c.peak.location, spot)}`,
-        )
-      : ["No clusters. Turn smoothing on for a side, or lower its peak cutoff."]),
+      ? cs.map((c) => [`K${c.n}`, PILL[c.side], ...tagged(clusterCells(en, c, spot))].join(" | "))
+      : [en("costflow.noClusters")]),
     `mixtureMeta: ${mixtureMeta(en, pos, neg)}`,
     ...(ms.length
-      ? ms.map(
-          (m) =>
-            `M${m.m} | ${PILL[m.side]} | ${fmtPrice(Math.round(m.comp.mu))} | ` +
-            `${fmtPrice(Math.round(m.comp.sigma))} | ${(m.comp.w * 100).toFixed(1)}% | ` +
-            `${fmtBtc(m.comp.w * m.totalW)} BTC | ${vsSpot(en, m.comp.mu, spot)}`,
-        )
-      : ["Bell curves are off. Turn them on for either side above."]),
+      ? ms.map((m) => [`M${m.m}`, PILL[m.side], ...tagged(mixCells(en, m, spot))].join(" | "))
+      : [en("costflow.bellsOff")]),
   ];
 };
 
@@ -379,13 +368,24 @@ describe("cost-flow chart 3 readings", () => {
     expect(noSth).toHaveLength(17);
     expect([...BLOCKS.keys()].sort()).toEqual([...noSth].sort());
     for (const [label, b] of BLOCKS) {
-      // 页面记录: the block as the page rendered it, minus the chart's K labels (U4 renumbers them).
+      // page-recorded: the block as the page rendered it, minus the chart's K labels (U4 renumbers
+      // them).
       const page = pageBlocks.get(label)!.filter((line) => !line.startsWith("labels: "));
       expect(chart3Lines(label, b), label).toEqual(page);
     }
+    // page-recorded: both empty tables, at smoothing Off (no clusters) and at the opening state
+    // (bells off), are among the blocks above.
+    expect(pageBlocks.get("30d all zoomAll smoothing Off bells on (BIC)")).toContain(
+      en("costflow.noClusters"),
+    );
+    expect(pageBlocks.get("restored defaults")).toContain(en("costflow.bellsOff"));
+    expect([zh("costflow.noClusters"), zh("costflow.bellsOff")]).toEqual([
+      "没有聚类。请为某一侧打开平滑，或调低它的峰值阈值。",
+      "正态曲线已关闭。请在上方为任一侧打开。",
+    ]);
 
-    // 页面记录 with the plan's display ruling: the STH notes are the page's, at 150 days, not 155
-    // (BRK's line), on the $200 bins STH reads.
+    // page-recorded, with the plan's display ruling: the STH notes are the page's, at 150 days,
+    // not 155 (BRK's line), on the $200 bins STH reads.
     for (const w of WINDOWS)
       for (const aging of [false, true]) {
         const page = pageBlocks.get(`${w} sth zoomAll aging ${aging ? "on" : "off"} bells on`)!;
@@ -393,11 +393,26 @@ describe("cost-flow chart 3 readings", () => {
         if (!aging) expect(note).toContain("crossed 155 days.");
         expect(agingNote(en, "sth", aging, 200)).toBe(note.replace("155 days", "150 days"));
       }
-    // 页面记录: STH's aging row reads against the sell side (30d STH Show: 334,817 BTC, 23%).
-    const sthLegend = pageBlocks.get("30d sth zoomAll aging on bells on")![1];
-    expect(sthLegend.split(" || ")[2]).toBe(
-      `${en("costflow.agingRow")} ${en("costflow.ofSell", { btc: "334,817", pct: "23%" })}`,
+    // derived from page values: the 30d STH Show legend from its own totals (+1,146,871, −1,468,091,
+    // aging 334,817) reads as the page's, the aging row on the sell side.
+    const sthTotals = { buy: 1146871, sell: 1468091, aging: 334817, share: 334817 / 1468091 };
+    const sthLegend = legendRows(en, sthTotals, "sth");
+    expect(`legend: ${sthLegend.map((r) => `${r.label} ${r.value}`).join(" || ")}`).toBe(
+      pageBlocks.get("30d sth zoomAll aging on bells on")![1],
     );
+    expect(sthLegend.map((r) => [r.key, r.side])).toEqual([
+      ["buy", "pos"],
+      ["sell", "neg"],
+      ["aging", "neg"],
+    ]);
+    // page-recorded (90d LTH Show): the aging row sits on the buy side (A:1764-1767).
+    const lthTotals = flowTotals(s2Rows("90d", "lth", true, 0), "lth", true);
+    expect(legendRows(en, lthTotals, "lth")[2]).toEqual({
+      key: "aging",
+      side: "pos",
+      label: "Aging STH→LTH",
+      value: "1,283,400 BTC · 40% of buy side",
+    });
 
     // A:1762: All draws no aging row, whatever the Aging button says, and Show changes nothing.
     const show = s2Rows("30d", "all", true, 0);
@@ -421,9 +436,11 @@ describe("cost-flow chart 3 readings", () => {
     expect(agingNote(zh, "lth", true, 500)).toBe(
       "LTH 的真实买卖，加上因币龄增长进入 LTH 的币，两者都在买方。币龄迁移是下界。$500 价格桶。",
     );
-    expect(zh("costflow.ofBuy", { btc: "1,283,400", pct: "40%" })).toBe(
-      "1,283,400 BTC · 占买方 40%",
-    );
+    expect(legendRows(zh, lthTotals, "lth").map((r) => `${r.label} ${r.value}`)).toEqual([
+      "净买入（累积） +3,210,656 BTC",
+      "净卖出（派发） −1,886,531 BTC",
+      "币龄迁移 STH→LTH 1,283,400 BTC · 占买方 40%",
+    ]);
     const shown = s2Sides(show, "all", true, gmm);
     expect(clusterMeta(zh, clusters(shown.pos, shown.neg))).toBe("5 个聚类 · 流入 1 · 流出 4");
   });
@@ -451,17 +468,16 @@ describe("cost-flow chart 3 readings", () => {
     const rows = s2Rows("30d", "all", false, 0);
     const at = (minProm: number) =>
       s2Sides(rows, "all", false, { ...DEFAULT_SIDE, smoothing: "kde", minProm });
-    // 页面记录: the four sell clusters at the default cutoff, by price.
-    expect(at(0.05).neg!.peaks.map((p) => `${(p.strength * 100).toFixed(0)}%`)).toEqual([
-      "7%",
-      "30%",
-      "99%",
-      "7%",
-    ]);
+    const spot = s2.spot!;
+    // page-recorded: the strengths of the four sell clusters at the default cutoff, by price.
+    const strengths = clusters(null, at(0.05).neg).map((c) => clusterCells(en, c, spot).cells[4]);
+    expect(strengths).toEqual(["7%", "30%", "99%", "7%"]);
     const { pos, neg } = at(0.4);
-    expect(
-      neg!.peaks.map((p) => [fmtPrice(p.location), fmtPrice(p.width), fmtBtc(p.supply)]),
-    ).toEqual([["$77,750", "$6,960", "490,118"]]);
+    // derived from page values: the one peak left is the page's K3 row, cell for cell (the cutoff
+    // drops peaks; it does not move the width or the BTC within it).
+    expect(clusters(null, neg).map((c) => clusterCells(en, c, spot).cells)).toEqual([
+      ["$77,750", "$6,960", "490,118 BTC", "43.7%", "99%", "5.6% below"],
+    ]);
     // The buy side keeps its own cutoff; the table renumbers the two rows by price.
     expect(clusters(pos, neg).map((c) => [c.n, c.side, fmtPrice(c.peak.location)])).toEqual([
       [1, "neg", "$77,750"],
@@ -629,15 +645,31 @@ describe("cost-flow chart 3 readings", () => {
 
   // The page's spot comparison (A:1812-1817): one decimal, below or above; no spot reads "—".
   it("compares a level with spot as the page does", () => {
-    // 页面记录: 30d All K1 at $41,750 and K4 at $83,750 against spot 82,361.33.
+    // page-recorded: 30d All K1 at $41,750 and K4 at $83,750 against spot 82,361.33.
     expect(vsSpot(en, 41750, s2.spot!)).toBe("49.3% below");
     expect(vsSpot(en, 83750, s2.spot!)).toBe("1.7% above");
     expect(vsSpot(zh, 41750, s2.spot!)).toBe("低于现价 49.3%");
     expect(vsSpot(zh, 83750, s2.spot!)).toBe("高于现价 1.7%");
     expect(vsSpot(en, 83750, 0)).toBe("—");
     expect(vsSpot(en, 83750, Number.NaN)).toBe("—");
-    // A:1812's strict "<": a level at spot itself (a close on a bucket's middle) reads "above".
+    // A:1812's strict "<": a level at spot itself (a close on a bucket's middle) reads "above",
+    // and both tables' tags take the same strict "<" (A:1813-1816).
     expect(vsSpot(en, 82250, 82250)).toBe("0.0% above");
+    const peak = {
+      index: 0,
+      location: 82250,
+      height: 1,
+      prominence: 1,
+      strength: 1,
+      width: 500,
+      supply: 2,
+      share: 1,
+    };
+    expect(clusterCells(en, { n: 1, side: "pos", peak }, 82250).below).toBe(false);
+    expect(clusterCells(en, { n: 1, side: "pos", peak }, 82250.01).below).toBe(true);
+    const comp = { mu: 82250, sigma: 10, w: 1 };
+    expect(mixCells(en, { m: 1, side: "pos", comp, totalW: 2 }, 82250).below).toBe(false);
+    expect(mixCells(en, { m: 1, side: "pos", comp, totalW: 2 }, 82250.01).below).toBe(true);
     // The brief's integer format: grouped, rounded, signed with "+" from zero up and "−" below.
     expect([fmtSigned(-0.4), fmtSigned(0.5), fmtSigned(-1121241.2)]).toEqual([
       "−0",
@@ -662,11 +694,13 @@ describe("cost-flow chart 3 readings", () => {
       if (v.aging_btc === null) expect(t.aging, what).toBeNull();
       else near(t.aging!, v.aging_btc, 1e-9, `${what} aging`);
     }
-    // 阶段 A 参考实现 printout: 30d STH Show, Aging 334,783, 23% of the sell side.
+    // stage A printout: 30d STH Show, Aging 334,783, 23% of the sell side; the shipped legend row.
     const sth30 = flowTotals(rowsOf(gridFor(s1, "sth")!, "30d", "sth", true, 0, spot), "sth", true);
-    expect([fmtBtc(sth30.aging!), `${(sth30.share! * 100).toFixed(0)}%`]).toEqual([
-      "334,783",
-      "23%",
-    ]);
+    expect(legendRows(en, sth30, "sth")[2]).toEqual({
+      key: "aging",
+      side: "neg",
+      label: "Aging STH→LTH",
+      value: "334,783 BTC · 23% of sell side",
+    });
   });
 });

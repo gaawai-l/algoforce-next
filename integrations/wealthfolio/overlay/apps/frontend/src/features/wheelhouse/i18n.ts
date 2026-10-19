@@ -800,6 +800,10 @@ const en = {
   "costflow.tip.sthBought": "STH acquired at this cost basis",
   "costflow.tip.left": "supply left this bucket outright",
   "costflow.tip.window": "{{verdict}} · {{window}} window",
+  "costflow.noClusters":
+    "No clusters. Turn smoothing on for a side, or lower its peak cutoff.",
+  "costflow.bellsOff":
+    "Bell curves are off. Turn them on for either side above.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1569,6 +1573,8 @@ const zh: Record<MessageKey, string> = {
   "costflow.tip.sthBought": "短期持有者在此成本价买入",
   "costflow.tip.left": "供应直接离开了这个价格桶",
   "costflow.tip.window": "{{verdict}} · {{window}} 窗口",
+  "costflow.noClusters": "没有聚类。请为某一侧打开平滑，或调低它的峰值阈值。",
+  "costflow.bellsOff": "正态曲线已关闭。请在上方为任一侧打开。",
 };
 
 export const messages = { en, zh };

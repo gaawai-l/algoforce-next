@@ -123,7 +123,7 @@ const fmtInt = (v: number) => Number(v.toFixed(0)).toLocaleString("en-US");
 export const fmtSigned = (v: number) => (v >= 0 ? "+" : "−") + fmtInt(Math.abs(v));
 // A:1584
 export const fmtPrice = (v: number) => "$" + fmtInt(v);
-// A:1810 without its unit: the copy and the cells add " BTC".
+// A:1810 without its unit: the legend copy and the cell builders below add " BTC".
 export const fmtBtc = (v: number) => fmtInt(v);
 
 // A:1811-1817: how far a level sits from spot; "—" without a spot.
@@ -137,11 +137,13 @@ export function vsSpot(text: TextFn, price: number, spot: number): string {
 // sell is the size of the sell side. aging is the aging bars' size and share its fraction of the
 // side they are drawn on (STH's sell side, LTH's buy side); both are null when no aging row is
 // shown, that is for All or with Aging Hide.
-export function flowTotals(
-  rows: readonly FlowRow[],
-  h: Holders,
-  aging: boolean,
-): { buy: number; sell: number; aging: number | null; share: number | null } {
+export interface FlowTotals {
+  buy: number;
+  sell: number;
+  aging: number | null;
+  share: number | null;
+}
+export function flowTotals(rows: readonly FlowRow[], h: Holders, aging: boolean): FlowTotals {
   let buy = 0,
     sell = 0,
     age = 0;
@@ -154,6 +156,34 @@ export function flowTotals(
   if (!aging || h === "all") return { buy, sell, aging: null, share: null };
   const side = h === "sth" ? sell : buy;
   return { buy, sell, aging: age, share: side > 0 ? age / side : 0 };
+}
+
+// One legend row: side is the colour it takes (A:1758-1767); the aging row is drawn hollow.
+export interface LegendRow {
+  key: "buy" | "sell" | "aging";
+  side: Side;
+  label: string;
+  value: string;
+}
+
+// A:1758-1770: Net Buy, Net Sell (shown negative), then, when flowTotals has one, the aging row on
+// the side it is drawn on: STH's sell side, LTH's buy side.
+export function legendRows(text: TextFn, t: FlowTotals, h: Holders): LegendRow[] {
+  const rows: LegendRow[] = [
+    { key: "buy", side: "pos", label: text("costflow.buy"), value: `${fmtSigned(t.buy)} BTC` },
+    { key: "sell", side: "neg", label: text("costflow.sell"), value: `${fmtSigned(-t.sell)} BTC` },
+  ];
+  if (t.aging !== null && t.share !== null) {
+    const onSell = h === "sth";
+    const vars = { btc: fmtBtc(t.aging), pct: `${(t.share * 100).toFixed(0)}%` };
+    rows.push({
+      key: "aging",
+      side: onSell ? "neg" : "pos",
+      label: text("costflow.agingRow"),
+      value: text(onSell ? "costflow.ofSell" : "costflow.ofBuy", vars),
+    });
+  }
+  return rows;
 }
 
 // A:1625-1633: the bars drawn per class; a bar of zero is not drawn.
@@ -199,6 +229,29 @@ export function clusters(pos: SideCurves | null, neg: SideCurves | null): Cluste
   return rows.map((r, i) => ({ n: i + 1, ...r }));
 }
 
+// A table row's text after its number and side pill, and whether its level is below spot, which
+// picks the vs-spot tag's colour (A:1813-1816).
+export interface TableCells {
+  cells: string[];
+  below: boolean;
+}
+
+// A:1828-1835: Price level, Width, BTC, Share, Strength, vs spot.
+export function clusterCells(text: TextFn, c: Cluster, spot: number): TableCells {
+  const p = c.peak;
+  return {
+    cells: [
+      fmtPrice(p.location),
+      fmtPrice(p.width),
+      `${fmtBtc(p.supply)} BTC`,
+      `${(p.share * 100).toFixed(1)}%`,
+      `${(p.strength * 100).toFixed(0)}%`,
+      vsSpot(text, p.location, spot),
+    ],
+    below: p.location < spot,
+  };
+}
+
 // One Bell curve components row: m numbers the bells within their side; Est. BTC is
 // comp.w × totalW (A:1861-1864).
 export interface MixRow {
@@ -220,6 +273,21 @@ export function mixRows(pos: SideCurves | null, neg: SideCurves | null): MixRow[
   }
   rows.sort((a, b) => a.comp.mu - b.comp.mu);
   return rows;
+}
+
+// A:1856-1863: Centre and Spread rounded to the dollar, Share, Est. BTC (w × totalW), vs spot.
+export function mixCells(text: TextFn, r: MixRow, spot: number): TableCells {
+  const c = r.comp;
+  return {
+    cells: [
+      fmtPrice(Math.round(c.mu)),
+      fmtPrice(Math.round(c.sigma)),
+      `${(c.w * 100).toFixed(1)}%`,
+      `${fmtBtc(c.w * r.totalW)} BTC`,
+      vsSpot(text, c.mu, spot),
+    ],
+    below: c.mu < spot,
+  };
 }
 
 // A:1838: how many clusters, and how many are on each side; empty without one.
