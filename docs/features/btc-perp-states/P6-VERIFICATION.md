@@ -10,7 +10,7 @@
 |---|---|
 | `make check` | 退出码 0。ruff 通过；mypy strict 52 个源文件无问题；pytest **936 passed**（P6 之前为 823）；type-check 通过；vitest 24 个文件 **446** 个测试通过（P6 之前为 436） |
 | `deploy/test/test_composition.py`（不在 `make check` 范围内，单独运行） | 1 passed，断言 perps 的 worker 和采集器都没有启动 |
-| 测试不访问外网 | 按设计不访问：客户端测试用 `httpx.MockTransport`，同步测试用 `FakeCoinalyze`，API 测试走注入的 `perps_http`；`conftest.py` 的 autouse 把 key 置为空串并让 `.env` 指向不存在的文件，没有测试读真实的 key。这次没有另做屏蔽 DNS 的运行 |
+| 测试不访问外网 | 按设计不访问：客户端测试用 `httpx.MockTransport`，同步测试用 `FakeCoinalyze`，API 测试走注入的 `perps_http`；两处测试都把 key 置为空串并让 `.env` 指向不存在的文件：`services/analytics/tests/conftest.py` 的 autouse fixture，以及 `deploy/test/test_composition.py` 自己（它在 conftest 管不到的目录，终审发现原先会读仓库根目录的 `.env`，已在 fix 提交里补上；在测试进程里统计对 `.env` 的读取，修复前 2 次，修复后 0 次）。没有测试读真实的 key。这次没有另做屏蔽 DNS 的运行 |
 
 ## 2. 规则对照（本地，不入库；P4-D9、P6-R6）
 
@@ -162,7 +162,7 @@ hyperliquid 8h/7d 视图：控制台没有报错；HL 说明行在；阈值随�
 | Hyperliquid | 原站 | 4 (+5.60) | 9 (−2.48) | 2 (+1.52) | 4 (+0.69) | 7 (+1.05) | 2 (−1.49) | 10 (+2.23) | 62 (−1.40) |
 | Hyperliquid | 本地 v1 | 4 (+5.58) | 9 (−2.51) | 2 (+2.21) | 6 (+0.71) | 7 (+1.06) | 1 (−1.29) | 10 (+1.87) | 61 (+1.27) |
 
-- 每个占比与原站相差都在 3 个百分点以内，两个 squeeze 行的占比与走势一致，方向和量级一致。
+- 每个占比与原站相差都在 3 个百分点以内，两个 squeeze 行的占比与走势一致，方向和量级一致。唯一的符号相反出现在 Hyperliquid 的 chop 行：Max move 原站 −1.40，本地 +1.27（占比 62 对 61 一致）。Max move 取的是该状态里绝对值最大的一段，两边选中的最可能不是同一段（价格源不同，段在块边缘处的切分也不同），所以符号可以相反；没有逐段核对。整体结论不变。
 - 页面实际使用默认的 O1+O6：all/4h/30d 为 4/8/6/3/2/4/9/64；其他视图与各自的 v1 数字相差在 2 个百分点以内。
 - Max move 的差别来自价格源（本地 Bybit 现货，原站 Glassnode `price_usd_close`），以及块边缘处的段切分不同。
 

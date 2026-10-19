@@ -456,7 +456,7 @@ P4-D2、D3、D6、D8、D9 不变。D6 中"采集输入已覆盖"的含义见下�
 - `WHEELHOUSE_PERPS_COLLECTORS`（默认 off，取值 1/0、true/false、on/off）控制采集器。**采集器只在 worker 运行时才可能启动**：`WHEELHOUSE_PERPS=off` 或 `start_worker=False` 时，即使这个开关是 on，也不启动。
 - `create_app` 新增参数 `perps_collectors: bool | None`（默认取设置）和 `coinalyze_key: str | None`（默认取设置）；`create_router` 对应 `start_collectors=False` 和 `coinalyze_key=None`。
 - `WHEELHOUSE_COINALYZE_KEY`：环境变量只要存在就以它为准，空串表示缺失；不存在时，只从仓库根目录 `.env` 读这一个键，整个 `.env` 不导出。`Settings` 里这个字段不进 `repr`。
-- `deploy/test/test_composition.py` 仍断言 worker 和采集器都没有启动；测试一律把 key 置为空串，不读真实的 `.env`。
+- `deploy/test/test_composition.py` 仍断言 worker 和采集器都没有启动。两处测试都把 key 置为空串，并让 `.env` 指向不存在的文件，不读真实的 `.env`：`services/analytics/tests/conftest.py` 的 autouse fixture，以及这个部署测试自己（它在 `services/analytics/tests` 之外，conftest 管不到，`create_app` 仍会调用 `Settings.from_env()`）。
 
 ### §3.1 取值表
 
