@@ -13,6 +13,7 @@ from .brk import (
     DAY1_SERIES,
     HOUR1_BACKFILL,
     HOUR1_SERIES,
+    SELL_SIDE_SERIES,
     START,
     URPD_AGG,
     URPD_COHORT,
@@ -34,7 +35,8 @@ from .costbasis import (
 from .cycle import classify
 from .levels import ModelLine, last_complete, model_lines
 from .models import closed_day, final_from
-from .pressure import lookback, seller_pressure
+from .pressure import V1_LOOKBACK, lookback, seller_pressure
+from .sellside import INPUTS, sell_side
 from .store import OnchainStore
 
 logger = logging.getLogger("wheelhouse.onchain")
@@ -56,9 +58,9 @@ RETRY_AFTER = timedelta(minutes=5)
 OVERLAP = 3
 IDLE_SECONDS = 30
 STOP_TIMEOUT_SECONDS = 25
-# The derived views: those from the day1 series and URPD, then the seller pressure from hour1.
+# The derived views: those from the day1 series and URPD, then the hour1 ones.
 DAY1_VIEWS: tuple[View, ...] = ("cycle", "levels", "costbasis")
-VIEWS: tuple[View, ...] = (*DAY1_VIEWS, "pressure")
+VIEWS: tuple[View, ...] = (*DAY1_VIEWS, "pressure", "sellside")
 
 
 def next_slot(at: datetime) -> datetime:
@@ -175,6 +177,7 @@ class OnchainSync:
             self._derive(self._recent_urpd(at), at, hour1_missing, hour1_at, closed=closed_day(at))
         else:
             self._derive_pressure(hour1_missing, hour1_at)
+            self._derive_sell_side(hour1_missing, hour1_at)
 
     def _refresh(self, at: datetime, clock: Callable[[], datetime]) -> BrkError | None:
         """Run one refresh; return the error of the hour1 or URPD stage when only those failed."""
@@ -198,7 +201,7 @@ class OnchainSync:
         hour1_error: BrkError | None = None
         hour1_done: datetime | None = None
         try:
-            self._increment(HOUR1_SERIES, "hour1", at, hour1_missing)
+            self._increment((*HOUR1_SERIES, *SELL_SIDE_SERIES), "hour1", at, hour1_missing)
             # The pressure is as of now: the URPD fetch below can take long enough to cross the
             # hour, and the last row would then look closed when it was computed.
             hour1_done = clock()
@@ -221,7 +224,9 @@ class OnchainSync:
         done = clock()
         not_final = self._derive(urpd, done, hour1_missing, hour1_done, closed=closed)
         absent = [name for name in DAY1_SERIES if name in missing]
-        absent_hour1 = [name for name in HOUR1_SERIES if name in hour1_missing]
+        absent_hour1 = [
+            name for name in (*HOUR1_SERIES, *SELL_SIDE_SERIES) if name in hour1_missing
+        ]
         # `price_close` is in both indexes, so day1 reasons keep their form and hour1 ones add it.
         reasons = [f"series_missing:{name}" for name in absent]
         reasons += [f"series_missing:hour1:{name}" for name in absent_hour1]
@@ -443,6 +448,7 @@ class OnchainSync:
                 else:
                     self.store.save_derived("costbasis", payload, at)
         self._derive_pressure(hour1_missing, hour1_at)
+        self._derive_sell_side(hour1_missing, hour1_at)
         return not_final
 
     def _derive_pressure(self, hour1_missing: set[str], hour1_at: datetime | None) -> None:
@@ -457,7 +463,7 @@ class OnchainSync:
         # Only the rules the payload records are applied.
         rules = rules_for_view("pressure", self.rules)
         applied = frozenset(rules)
-        if not hour1_missing:
+        if not hour1_missing.intersection(HOUR1_SERIES):
             # An absent series is not a zero: with any of them gone there is no pressure at all.
             # Under O1 a row has closed once its hour was over when hour1 was read.
             pressure = seller_pressure(
@@ -473,6 +479,28 @@ class OnchainSync:
         else:
             pressure = pressure.model_copy(update={"rules": rules})
             self.store.save_derived("pressure", pressure.model_dump_json(), hour1_at)
+
+    def _derive_sell_side(self, hour1_missing: set[str], hour1_at: datetime | None) -> None:
+        """Derive the sell-side legs and stamp them `hour1_at`, like the seller pressure."""
+        if hour1_at is None:
+            return
+        result = None
+        if not hour1_missing.intersection(INPUTS):
+            try:
+                result = sell_side(
+                    {
+                        name: self.store.read_series(name, "hour1", tail=V1_LOOKBACK + 1)
+                        for name in INPUTS
+                    }
+                )
+            except Exception:
+                # The other views and the run's state must not depend on the sell side. Never
+                # log the exception: it may carry values. A fixed code is enough here.
+                logger.warning("onchain_derive_failed code=sellside_failed")
+        if result is None:
+            self.store.clear_derived("sellside")
+        else:
+            self.store.save_derived("sellside", result.model_dump_json(), hour1_at)
 
     def _cost_basis(
         self, day: date, lines_as_of: date, lines: list[ModelLine], *, latest_day: date | None

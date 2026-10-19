@@ -1,0 +1,1499 @@
+{
+ "source": "The original page's readings for 41 settings (verify/sr1b/expect_B.json, matched on the live page 2026-10-19 05:30Z); legendA from the port recompute_c1b.py that matched the page",
+ "cases": [
+  {
+   "measure": "pnl",
+   "exclude": "",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "19.4%",
+    "3.1%",
+    "72.1%",
+    "5.4%"
+   ],
+   "legendB": [
+    "$2.0M",
+    "$314,300",
+    "$7.4M",
+    "$548,300"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 realized gain / loss, USD \u00b7 total $10.2M",
+   "top": 800000000,
+   "ticks": [
+    "$0",
+    "$200M",
+    "$400M",
+    "$600M",
+    "$800M"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "42.2%",
+    "12.1%",
+    "32.4%",
+    "13.3%"
+   ],
+   "legendB": [
+    "$5.6M",
+    "$1.6M",
+    "$4.3M",
+    "$1.8M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $13.2M",
+   "top": 110000000,
+   "ticks": [
+    "$0",
+    "$20M",
+    "$40M",
+    "$60M",
+    "$80M",
+    "$100M"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "",
+   "smoothing": 168,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "30.5%",
+    "17.0%",
+    "28.2%",
+    "24.2%"
+   ],
+   "legendB": [
+    "$7.8M",
+    "$4.3M",
+    "$7.2M",
+    "$6.2M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 168-hour mean \u00b7 realized gain / loss, USD \u00b7 total $25.5M",
+   "top": 55000000,
+   "ticks": [
+    "$0",
+    "$10M",
+    "$20M",
+    "$30M",
+    "$40M",
+    "$50M"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x1",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "19.4%",
+    "3.1%",
+    "72.1%",
+    "5.4%"
+   ],
+   "legendB": [
+    "$2.0M",
+    "$314,300",
+    "$7.3M",
+    "$548,300"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 realized gain / loss, USD \u00b7 total $10.2M \u00b7 STH: >1h old coins only",
+   "top": 800000000,
+   "ticks": [
+    "$0",
+    "$200M",
+    "$400M",
+    "$600M",
+    "$800M"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x1",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "44.9%",
+    "12.9%",
+    "30.6%",
+    "11.6%"
+   ],
+   "legendB": [
+    "$5.6M",
+    "$1.6M",
+    "$3.8M",
+    "$1.4M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $12.4M \u00b7 STH: >1h old coins only",
+   "top": 110000000,
+   "ticks": [
+    "$0",
+    "$20M",
+    "$40M",
+    "$60M",
+    "$80M",
+    "$100M"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x1",
+   "smoothing": 168,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "31.7%",
+    "17.7%",
+    "27.5%",
+    "23.1%"
+   ],
+   "legendB": [
+    "$7.8M",
+    "$4.3M",
+    "$6.8M",
+    "$5.7M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 168-hour mean \u00b7 realized gain / loss, USD \u00b7 total $24.6M \u00b7 STH: >1h old coins only",
+   "top": 55000000,
+   "ticks": [
+    "$0",
+    "$10M",
+    "$20M",
+    "$30M",
+    "$40M",
+    "$50M"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "29.1%",
+    "4.6%",
+    "58.2%",
+    "8.1%"
+   ],
+   "legendB": [
+    "$2.0M",
+    "$314,300",
+    "$4.0M",
+    "$548,300"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 realized gain / loss, USD \u00b7 total $6.8M \u00b7 STH: >24h old coins only",
+   "top": 800000000,
+   "ticks": [
+    "$0",
+    "$200M",
+    "$400M",
+    "$600M",
+    "$800M"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "56.5%",
+    "16.1%",
+    "19.5%",
+    "7.9%"
+   ],
+   "legendB": [
+    "$5.6M",
+    "$1.6M",
+    "$1.9M",
+    "$780,288"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $9.9M \u00b7 STH: >24h old coins only",
+   "top": 100000000,
+   "ticks": [
+    "$0",
+    "$20M",
+    "$40M",
+    "$60M",
+    "$80M",
+    "$100M"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 168,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "37.7%",
+    "21.0%",
+    "24.5%",
+    "16.7%"
+   ],
+   "legendB": [
+    "$7.8M",
+    "$4.3M",
+    "$5.1M",
+    "$3.5M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 168-hour mean \u00b7 realized gain / loss, USD \u00b7 total $20.6M \u00b7 STH: >24h old coins only",
+   "top": 45000000,
+   "ticks": [
+    "$0",
+    "$10M",
+    "$20M",
+    "$30M",
+    "$40M"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.3%",
+    "0.1%",
+    "97.7%",
+    "1.9%"
+   ],
+   "legendB": [
+    "45.9 BTC",
+    "15.3 BTC",
+    "14,119 BTC",
+    "277.7 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, BTC \u00b7 total 14,457 BTC",
+   "top": 200000,
+   "ticks": [
+    "0",
+    "50k",
+    "100k",
+    "150k",
+    "200k"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.5%",
+    "0.3%",
+    "58.7%",
+    "40.5%"
+   ],
+   "legendB": [
+    "125.8 BTC",
+    "72.7 BTC",
+    "14,941 BTC",
+    "10,302 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 coin volume moved, BTC \u00b7 total 25,442 BTC",
+   "top": 70000,
+   "ticks": [
+    "0",
+    "10k",
+    "20k",
+    "30k",
+    "40k",
+    "50k",
+    "60k",
+    "70k"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "",
+   "smoothing": 168,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.7%",
+    "1.1%",
+    "49.8%",
+    "48.3%"
+   ],
+   "legendB": [
+    "239.3 BTC",
+    "360.9 BTC",
+    "16,279 BTC",
+    "15,786 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 168-hour mean \u00b7 coin volume moved, BTC \u00b7 total 32,665 BTC",
+   "top": 50000,
+   "ticks": [
+    "0",
+    "10k",
+    "20k",
+    "30k",
+    "40k",
+    "50k"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "x1",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.4%",
+    "0.1%",
+    "97.2%",
+    "2.3%"
+   ],
+   "legendB": [
+    "45.9 BTC",
+    "15.3 BTC",
+    "11,638 BTC",
+    "277.7 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, BTC \u00b7 total 11,976 BTC \u00b7 STH: >1h old coins only",
+   "top": 80000,
+   "ticks": [
+    "0",
+    "20k",
+    "40k",
+    "60k",
+    "80k"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "x1",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "1.5%",
+    "0.9%",
+    "53.7%",
+    "44.0%"
+   ],
+   "legendB": [
+    "125.8 BTC",
+    "72.7 BTC",
+    "4,544 BTC",
+    "3,720 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 coin volume moved, BTC \u00b7 total 8,463 BTC \u00b7 STH: >1h old coins only",
+   "top": 28000,
+   "ticks": [
+    "0",
+    "5k",
+    "10k",
+    "15k",
+    "20k",
+    "25k"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "x1",
+   "smoothing": 168,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "1.8%",
+    "2.6%",
+    "42.4%",
+    "53.2%"
+   ],
+   "legendB": [
+    "239.3 BTC",
+    "360.9 BTC",
+    "5,781 BTC",
+    "7,241 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 168-hour mean \u00b7 coin volume moved, BTC \u00b7 total 13,622 BTC \u00b7 STH: >1h old coins only",
+   "top": 20000,
+   "ticks": [
+    "0",
+    "5k",
+    "10k",
+    "15k",
+    "20k"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "x24",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.8%",
+    "0.3%",
+    "94.0%",
+    "4.9%"
+   ],
+   "legendB": [
+    "45.9 BTC",
+    "15.3 BTC",
+    "5,319 BTC",
+    "277.7 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, BTC \u00b7 total 5,658 BTC \u00b7 STH: >24h old coins only",
+   "top": 55000,
+   "ticks": [
+    "0",
+    "10k",
+    "20k",
+    "30k",
+    "40k",
+    "50k"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "4.7%",
+    "2.7%",
+    "53.5%",
+    "39.1%"
+   ],
+   "legendB": [
+    "125.8 BTC",
+    "72.7 BTC",
+    "1,421 BTC",
+    "1,038 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 coin volume moved, BTC \u00b7 total 2,658 BTC \u00b7 STH: >24h old coins only",
+   "top": 10000,
+   "ticks": [
+    "0",
+    "2k",
+    "4k",
+    "6k",
+    "8k",
+    "10k"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "x24",
+   "smoothing": 168,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "5.7%",
+    "8.6%",
+    "39.3%",
+    "46.4%"
+   ],
+   "legendB": [
+    "239.3 BTC",
+    "360.9 BTC",
+    "1,651 BTC",
+    "1,951 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 168-hour mean \u00b7 coin volume moved, BTC \u00b7 total 4,202 BTC \u00b7 STH: >24h old coins only",
+   "top": 6000,
+   "ticks": [
+    "0",
+    "1k",
+    "2k",
+    "3k",
+    "4k",
+    "5k",
+    "6k"
+   ]
+  },
+  {
+   "measure": "volu",
+   "exclude": "",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.3%",
+    "0.1%",
+    "97.7%",
+    "1.9%"
+   ],
+   "legendB": [
+    "$3.8M",
+    "$1.3M",
+    "$1.16B",
+    "$22.9M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, USD \u00b7 total $1.19B",
+   "top": 16000000000,
+   "ticks": [
+    "$0",
+    "$5B",
+    "$10B",
+    "$15B"
+   ]
+  },
+  {
+   "measure": "volu",
+   "exclude": "",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.5%",
+    "0.3%",
+    "58.8%",
+    "40.4%"
+   ],
+   "legendB": [
+    "$10.3M",
+    "$5.9M",
+    "$1.22B",
+    "$838.8M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 coin volume moved, USD \u00b7 total $2.08B",
+   "top": 6000000000,
+   "ticks": [
+    "$0",
+    "$1B",
+    "$2B",
+    "$3B",
+    "$4B",
+    "$5B",
+    "$6B"
+   ]
+  },
+  {
+   "measure": "volu",
+   "exclude": "",
+   "smoothing": 168,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.7%",
+    "1.1%",
+    "49.9%",
+    "48.3%"
+   ],
+   "legendB": [
+    "$19.7M",
+    "$29.7M",
+    "$1.34B",
+    "$1.29B"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 168-hour mean \u00b7 coin volume moved, USD \u00b7 total $2.68B",
+   "top": 4500000000,
+   "ticks": [
+    "$0",
+    "$1B",
+    "$2B",
+    "$3B",
+    "$4B"
+   ]
+  },
+  {
+   "measure": "volu",
+   "exclude": "x1",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.4%",
+    "0.1%",
+    "97.2%",
+    "2.3%"
+   ],
+   "legendB": [
+    "$3.8M",
+    "$1.3M",
+    "$958.4M",
+    "$22.9M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, USD \u00b7 total $986.3M \u00b7 STH: >1h old coins only",
+   "top": 7000000000,
+   "ticks": [
+    "$0",
+    "$1B",
+    "$2B",
+    "$3B",
+    "$4B",
+    "$5B",
+    "$6B",
+    "$7B"
+   ]
+  },
+  {
+   "measure": "volu",
+   "exclude": "x1",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "1.5%",
+    "0.9%",
+    "53.9%",
+    "43.7%"
+   ],
+   "legendB": [
+    "$10.3M",
+    "$5.9M",
+    "$372.7M",
+    "$302.2M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 coin volume moved, USD \u00b7 total $691.1M \u00b7 STH: >1h old coins only",
+   "top": 2400000000,
+   "ticks": [
+    "$0",
+    "$500M",
+    "$1B",
+    "$1.5B",
+    "$2B"
+   ]
+  },
+  {
+   "measure": "volu",
+   "exclude": "x1",
+   "smoothing": 168,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "1.8%",
+    "2.7%",
+    "42.5%",
+    "53.0%"
+   ],
+   "legendB": [
+    "$19.7M",
+    "$29.7M",
+    "$476.0M",
+    "$593.3M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 168-hour mean \u00b7 coin volume moved, USD \u00b7 total $1.12B \u00b7 STH: >1h old coins only",
+   "top": 1800000000,
+   "ticks": [
+    "$0",
+    "$500M",
+    "$1B",
+    "$1.5B"
+   ]
+  },
+  {
+   "measure": "volu",
+   "exclude": "x24",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "0.8%",
+    "0.3%",
+    "94.0%",
+    "4.9%"
+   ],
+   "legendB": [
+    "$3.8M",
+    "$1.3M",
+    "$438.1M",
+    "$22.9M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, USD \u00b7 total $466.0M \u00b7 STH: >24h old coins only",
+   "top": 5000000000,
+   "ticks": [
+    "$0",
+    "$1B",
+    "$2B",
+    "$3B",
+    "$4B",
+    "$5B"
+   ]
+  },
+  {
+   "measure": "volu",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "4.7%",
+    "2.7%",
+    "53.7%",
+    "38.9%"
+   ],
+   "legendB": [
+    "$10.3M",
+    "$5.9M",
+    "$116.6M",
+    "$84.5M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 coin volume moved, USD \u00b7 total $217.3M \u00b7 STH: >24h old coins only",
+   "top": 900000000,
+   "ticks": [
+    "$0",
+    "$200M",
+    "$400M",
+    "$600M",
+    "$800M"
+   ]
+  },
+  {
+   "measure": "volu",
+   "exclude": "x24",
+   "smoothing": 168,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "5.7%",
+    "8.6%",
+    "39.4%",
+    "46.3%"
+   ],
+   "legendB": [
+    "$19.7M",
+    "$29.7M",
+    "$136.0M",
+    "$159.6M"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 168-hour mean \u00b7 coin volume moved, USD \u00b7 total $344.9M \u00b7 STH: >24h old coins only",
+   "top": 500000000,
+   "ticks": [
+    "$0",
+    "$100M",
+    "$200M",
+    "$300M",
+    "$400M",
+    "$500M"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 24,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 24,
+   "first": "2026-10-18T06",
+   "legendA": [
+    "56.5%",
+    "16.1%",
+    "19.5%",
+    "7.9%"
+   ],
+   "legendB": [
+    "$5.6M",
+    "$1.6M",
+    "$1.9M",
+    "$780,288"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $9.9M \u00b7 STH: >24h old coins only",
+   "top": 13000000,
+   "ticks": [
+    "$0",
+    "$2M",
+    "$4M",
+    "$6M",
+    "$8M",
+    "$10M",
+    "$12M"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 24,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 24,
+   "first": "2026-10-18T06",
+   "legendA": [
+    "4.7%",
+    "2.7%",
+    "53.5%",
+    "39.1%"
+   ],
+   "legendB": [
+    "125.8 BTC",
+    "72.7 BTC",
+    "1,421 BTC",
+    "1,038 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 coin volume moved, BTC \u00b7 total 2,658 BTC \u00b7 STH: >24h old coins only",
+   "top": 2800,
+   "ticks": [
+    "0",
+    "500",
+    "1k",
+    "1.5k",
+    "2k",
+    "2.5k"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 168,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 168,
+   "first": "2026-10-12T06",
+   "legendA": [
+    "56.5%",
+    "16.1%",
+    "19.5%",
+    "7.9%"
+   ],
+   "legendB": [
+    "$5.6M",
+    "$1.6M",
+    "$1.9M",
+    "$780,288"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $9.9M \u00b7 STH: >24h old coins only",
+   "top": 40000000,
+   "ticks": [
+    "$0",
+    "$10M",
+    "$20M",
+    "$30M",
+    "$40M"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 168,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 168,
+   "first": "2026-10-12T06",
+   "legendA": [
+    "4.7%",
+    "2.7%",
+    "53.5%",
+    "39.1%"
+   ],
+   "legendB": [
+    "125.8 BTC",
+    "72.7 BTC",
+    "1,421 BTC",
+    "1,038 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 coin volume moved, BTC \u00b7 total 2,658 BTC \u00b7 STH: >24h old coins only",
+   "top": 6500,
+   "ticks": [
+    "0",
+    "1k",
+    "2k",
+    "3k",
+    "4k",
+    "5k",
+    "6k"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 2160,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 972,
+   "first": "2026-09-08T14",
+   "legendA": [
+    "56.5%",
+    "16.1%",
+    "19.5%",
+    "7.9%"
+   ],
+   "legendB": [
+    "$5.6M",
+    "$1.6M",
+    "$1.9M",
+    "$780,288"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $9.9M \u00b7 STH: >24h old coins only",
+   "top": 100000000,
+   "ticks": [
+    "$0",
+    "$20M",
+    "$40M",
+    "$60M",
+    "$80M",
+    "$100M"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 2160,
+   "shown": [
+    "LP",
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 972,
+   "first": "2026-09-08T14",
+   "legendA": [
+    "4.7%",
+    "2.7%",
+    "53.5%",
+    "39.1%"
+   ],
+   "legendB": [
+    "125.8 BTC",
+    "72.7 BTC",
+    "1,421 BTC",
+    "1,038 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 coin volume moved, BTC \u00b7 total 2,658 BTC \u00b7 STH: >24h old coins only",
+   "top": 10000,
+   "ticks": [
+    "0",
+    "2k",
+    "4k",
+    "6k",
+    "8k",
+    "10k"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "off",
+    "37.1%",
+    "44.8%",
+    "18.2%"
+   ],
+   "legendB": [
+    "off",
+    "$1.6M",
+    "$1.9M",
+    "$780,288"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $4.3M \u00b7 STH: >24h old coins only",
+   "top": 80000000,
+   "ticks": [
+    "$0",
+    "$20M",
+    "$40M",
+    "$60M",
+    "$80M"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LL",
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "off",
+    "0.1%",
+    "98.0%",
+    "1.9%"
+   ],
+   "legendB": [
+    "off",
+    "15.3 BTC",
+    "14,119 BTC",
+    "277.7 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, BTC \u00b7 total 14,412 BTC",
+   "top": 200000,
+   "ticks": [
+    "0",
+    "50k",
+    "100k",
+    "150k",
+    "200k"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "off",
+    "off",
+    "71.1%",
+    "28.9%"
+   ],
+   "legendB": [
+    "off",
+    "off",
+    "$1.9M",
+    "$780,288"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $2.7M \u00b7 STH: >24h old coins only",
+   "top": 70000000,
+   "ticks": [
+    "$0",
+    "$10M",
+    "$20M",
+    "$30M",
+    "$40M",
+    "$50M",
+    "$60M",
+    "$70M"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "SP",
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "off",
+    "off",
+    "98.1%",
+    "1.9%"
+   ],
+   "legendB": [
+    "off",
+    "off",
+    "14,119 BTC",
+    "277.7 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, BTC \u00b7 total 14,396 BTC",
+   "top": 200000,
+   "ticks": [
+    "0",
+    "50k",
+    "100k",
+    "150k",
+    "200k"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "77.8%",
+    "22.2%",
+    "off",
+    "off"
+   ],
+   "legendB": [
+    "$5.6M",
+    "$1.6M",
+    "off",
+    "off"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $7.2M \u00b7 STH: >24h old coins only",
+   "top": 55000000,
+   "ticks": [
+    "$0",
+    "$10M",
+    "$20M",
+    "$30M",
+    "$40M",
+    "$50M"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "LP",
+    "LL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T02",
+   "legendA": [
+    "75.0%",
+    "25.0%",
+    "off",
+    "off"
+   ],
+   "legendB": [
+    "45.9 BTC",
+    "15.3 BTC",
+    "off",
+    "off"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, BTC \u00b7 total 61.2 BTC",
+   "top": 35000,
+   "ticks": [
+    "0",
+    "5k",
+    "10k",
+    "15k",
+    "20k",
+    "25k",
+    "30k",
+    "35k"
+   ]
+  },
+  {
+   "measure": "pnl",
+   "exclude": "x24",
+   "smoothing": 24,
+   "span": 720,
+   "shown": [
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-18T15",
+   "legendA": [
+    "off",
+    "off",
+    "off",
+    "100.0%"
+   ],
+   "legendB": [
+    "off",
+    "off",
+    "off",
+    "$780,288"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 24-hour mean \u00b7 realized gain / loss, USD \u00b7 total $780,288 \u00b7 STH: >24h old coins only",
+   "top": 12000000,
+   "ticks": [
+    "$0",
+    "$2M",
+    "$4M",
+    "$6M",
+    "$8M",
+    "$10M",
+    "$12M"
+   ]
+  },
+  {
+   "measure": "volb",
+   "exclude": "",
+   "smoothing": 1,
+   "span": 720,
+   "shown": [
+    "SL"
+   ],
+   "rows": 720,
+   "first": "2026-09-19T01",
+   "legendA": [
+    "off",
+    "off",
+    "off",
+    "100.0%"
+   ],
+   "legendB": [
+    "off",
+    "off",
+    "off",
+    "277.7 BTC"
+   ],
+   "price": "$82,363",
+   "foot": "19 Oct 2026 \u00b7 05:00 UTC \u00b7 no smoothing \u00b7 coin volume moved, BTC \u00b7 total 277.7 BTC",
+   "top": 160000,
+   "ticks": [
+    "0",
+    "50k",
+    "100k",
+    "150k"
+   ]
+  }
+ ]
+}

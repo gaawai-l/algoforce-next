@@ -22,7 +22,7 @@
 三个页面共 **16 张图、2 张表**，另有 Analyst Take（人工撰写的文字）、alpha-vol 两页页头的周期状态，以及 onchain-seller 的 Supplementary 标签页（见下）。
 
 目前本地做了：
-- **8 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的图 7（刻度轨版本）；
+- **10 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的图 1A、1B 和图 7（刻度轨版本）；
 - **页头周期**（cycle badge），对应 onchain-seller、perp-squeeze 的页头；
 - **1 张表**：state-report 的表 2；
 - **perp-squeeze 的表 1**：已实现，但因为缺清算数据显示不出来。
@@ -31,8 +31,8 @@
 
 | 图表 | 需要的数据 | 缺数据？ | 本地现状 |
 |---|---|---|---|
-| 图 1A Sell Side Breakdown by LTH & STH · Relative | BRK hour1：`{sth,lth}_realized_{profit,loss}_cumulative`、`{sth,lth}_transfer_volume_in_{profit,loss}_cumulative`（含 `_usd`），<1h 和 1h–1d 群体用于剔除 | 不缺 | **没做**（用户急需） |
-| 图 1B 同上 · Absolute | 同上 | 不缺 | **没做**（用户急需） |
+| 图 1A Sell Side Breakdown by LTH & STH · Relative | BRK hour1：`{sth,lth}_realized_{profit,loss}_cumulative`、`{sth,lth}_transfer_volume_in_{profit,loss}_cumulative`（含 `_usd`），<1h 和 1h–1d 群体用于剔除 | 不缺 | **已做**（2026-10-19，Flows → Sell side），见 [PLAN-SELL-SIDE.md](PLAN-SELL-SIDE.md) |
+| 图 1B 同上 · Absolute | 同上 | 不缺 | **已做**（同上） |
 | 图 2 Sell Side by All Age Cohorts | BRK hour1：23 个币龄群体的已实现盈亏，合并成 12 档或 6 档 | 不缺 | 没做（P1 spec 划出范围） |
 | 图 3 Buy & Sell Side By Cost Basis | BRK URPD：all/sth/lth 今天与 1/7/30/90 天前的快照，STH 用 lin200，All 和 LTH 用 lin500 | 不缺 | **没做，也不在 spec 的"不做"清单里，是漏掉的** |
 | 图 4 同上 · Age Breakdown | BRK 分币龄的 URPD，day1 最高/最低价约 5600 天 | 不缺 | 没做（spec 划出范围） |

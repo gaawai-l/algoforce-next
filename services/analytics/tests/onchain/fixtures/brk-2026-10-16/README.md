@@ -12,7 +12,7 @@ data). Replayed by `../../onchain_fixture.py`; do not edit the JSON by hand.
   different times (see `stamp`), so those last points are not one consistent snapshot.
 - Every `hour1_*.json` is a single-series response: `start` 153338 (2026-07-06T02:00Z), `end`
   155938 (exclusive, so the last point is position 155937 = 2026-10-16T09:00Z), 2,600 points, the
-  last one not `null`. All 11 files have the same 11 `null`s: hours in which no block was mined
+  last one not `null`. All hour1 files have the same 11 `null`s: hours in which no block was mined
   (positions 153394, 153501, 153521, 153572, 153695, 153715, 154243, 154384, 154682, 155630 and
   155634). The captures were taken at 10:01Z to 10:02Z, so the 09:00 hour was already closed.
 - Responses keep fields the client models ignore: `type` on series, `weight` on URPD.
@@ -63,6 +63,14 @@ data). Replayed by `../../onchain_fixture.py`; do not edit the JSON by hand.
   `../brk-2026-10-16T1829Z/`.
 - Version mismatch: none to report. The two fetched items have no earlier sample to compare
   with, and the fetched series has the same `start`/`end` as the samples.
+- The 18 hour1 series the sell-side chart adds (`SELL_SIDE_SERIES` in `brk.py`: the transfer
+  volumes of STH and LTH in BTC and USD, the under-1h cohort's transfer volumes, and every
+  realized and transfer cumulative of `utxos_1h_to_1d_old`) were fetched on 2026-10-19 07:54Z with
+  `GET /api/series/bulk?series=<6 names>&index=hour1&start=153338&end=155938`, three requests, each
+  item saved unchanged. They cover the same positions as the other hour1 files and have the same
+  11 `null`s. In the same minute `utxos_under_1h_old_realized_loss_cumulative` and
+  `lth_realized_loss_cumulative` were fetched again over that window and matched the 10-16 files
+  value for value and in `version`, so BRK had not revised that window since the capture.
 
 ## How the fake BRK replays them
 

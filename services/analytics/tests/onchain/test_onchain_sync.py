@@ -23,6 +23,7 @@ from wheelhouse_service.onchain.brk import (
     DAY1_SERIES,
     HOUR1_BACKFILL,
     HOUR1_SERIES,
+    SELL_SIDE_SERIES,
     START,
     BrkClient,
     SeriesData,
@@ -32,6 +33,7 @@ from wheelhouse_service.onchain.cycle import Cycle
 from wheelhouse_service.onchain.levels import median_cost
 from wheelhouse_service.onchain.models import closed_day
 from wheelhouse_service.onchain.pressure import Pressure, lookback
+from wheelhouse_service.onchain.sellside import SellSide
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import URPD_SET, OnchainSync, closed_days
 from wheelhouse_service.rules import Rules
@@ -41,6 +43,8 @@ LINES = {"true_mean", "short_term", "average", "long_term", "median"}
 # The cost-basis golden sample: unlike the P1 fixtures, it has its own snapshot for each past day.
 GOLDEN = Path(__file__).parent / "fixtures" / "brk-2026-10-16T1829Z"
 D = date(2026, 10, 16)
+# Every hour1 series the sync fetches: the seller pressure's, then those only the sell side needs.
+HOUR1 = (*HOUR1_SERIES, *SELL_SIDE_SERIES)
 
 
 def instant(value: str | None) -> datetime:
@@ -178,7 +182,7 @@ def test_first_run_backfills_and_derives(tmp_path: Path):
     assert calls[0][0] == "/version"
     assert all(params["start"] == START.isoformat() for params in day1_calls(calls))
     assert requested(day1_calls(calls)) == set(DAY1_SERIES)
-    assert requested(hour1_calls(calls)) == set(HOUR1_SERIES)
+    assert requested(hour1_calls(calls)) == set(HOUR1)
     cycle = cycle_of(store)
     assert (cycle.state, cycle.as_of) == ("breakout", date(2026, 10, 16))
     levels = levels_of(store)
@@ -532,9 +536,9 @@ def test_first_run_backfills_hour1_from_minus_3000(tmp_path: Path):
 
     hour1 = hour1_calls(calls)
     assert all(params["start"] == str(-HOUR1_BACKFILL) for params in hour1)
-    assert requested(hour1) == set(HOUR1_SERIES)
-    # 11 series of 3,000 points are over the weight cap in one request, so they are split in two.
-    assert len(hour1) == 2
+    assert requested(hour1) == set(HOUR1)
+    # 29 series of 3,000 points are over the weight cap in one request: 6 fit in each.
+    assert len(hour1) == 5
     assert [store.last_position(name, "hour1") for name in HOUR1_SERIES] == [155937] * 11
     pressure = pressure_of(store)
     assert pressure.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
@@ -564,7 +568,7 @@ def test_hour1_added_to_existing_day1_store_does_not_refetch_day1(tmp_path: Path
 
     assert all(params["start"] != START.isoformat() for params in day1_calls(calls))
     assert all(params["start"] == str(-HOUR1_BACKFILL) for params in hour1_calls(calls))
-    assert requested(hour1_calls(calls)) == set(HOUR1_SERIES)
+    assert requested(hour1_calls(calls)) == set(HOUR1)
     assert {name: store.read_series(name, "day1") for name in DAY1_SERIES} == day1
     assert pressure_of(store).last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
     assert instant(store.state()["last_success_at"]) == later
@@ -584,7 +588,7 @@ def test_incremental_hour1_starts_three_back(tmp_path: Path):
             "UPDATE series SET value=NULL WHERE series='price_close' AND idx='hour1' "
             "AND position>155934"
         )
-    starts = {name: store.last_position(name, "hour1") - 3 for name in HOUR1_SERIES}
+    starts = {name: store.last_position(name, "hour1") - 3 for name in HOUR1}
     assert starts["sth_supply_in_loss"] == 155927
     assert starts["price_close"] == 155934
     assert starts["sth_supply_in_profit"] == 155934
@@ -594,7 +598,7 @@ def test_incremental_hour1_starts_three_back(tmp_path: Path):
     assert run(store, incremental, later) is True
 
     hour1 = hour1_calls(calls)
-    assert requested(hour1) == set(HOUR1_SERIES)
+    assert requested(hour1) == set(HOUR1)
     for params in hour1:
         for name in params["series"].split(","):
             assert params["start"] == str(starts[name])
@@ -1049,6 +1053,60 @@ def test_costbasis_failure_still_derives_the_pressure(
     assert strings(state["reasons"]) == []
     assert "code=costbasis_failed" in caplog.text
     assert "secret" not in caplog.text
+
+
+def test_sell_side_is_derived_with_the_pressure(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    assert run(store, transport, NOW) is True
+
+    derived = store.derived("sellside")
+    assert derived is not None and derived[1] == NOW
+    sell_side = SellSide.model_validate_json(derived[0])
+    assert sell_side.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
+    assert sell_side.rules == []
+
+
+def test_sell_side_failure_still_derives_everything_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("sellside") is not None
+
+    def boom(*args: object) -> None:
+        raise RuntimeError("secret value 123")
+
+    monkeypatch.setattr("wheelhouse_service.onchain.sync.sell_side", boom)
+    second = NOW + timedelta(hours=1)
+    again, _ = brk_transport()
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, again, second) is True
+
+    assert store.derived("sellside") is None
+    for kind in ("cycle", "levels", "costbasis", "pressure"):
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == second
+    state = store.state()
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == second
+    assert strings(state["reasons"]) == []
+    assert "code=sellside_failed" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_a_missing_sell_side_series_keeps_the_pressure(tmp_path: Path):
+    gap = "lth_transfer_volume_in_loss_cumulative_usd"
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={gap})
+    assert run(store, partial, NOW) is True
+
+    state = store.state()
+    assert strings(state["missing_series"]) == [f"hour1:{gap}"]
+    assert strings(state["reasons"]) == [f"series_missing:hour1:{gap}"]
+    assert store.derived("sellside") is None
+    assert pressure_of(store).last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
 
 
 def test_hour1_failure_still_derives_costbasis(tmp_path: Path):
@@ -1800,8 +1858,11 @@ def test_o2_reaches_the_derived_pressure(tmp_path: Path, monkeypatch: pytest.Mon
     o2_rules: Rules = frozenset({"O2"})
     (v1, v1_lengths), (o2, o2_lengths) = derived(frozenset()), derived(o2_rules)
 
-    assert v1_lengths == [lookback(frozenset()) + 1] * len(HOUR1_SERIES) == [2601] * 11
-    assert o2_lengths == [lookback(o2_rules) + 1] * len(HOUR1_SERIES) == [2882] * 11
+    # The pressure reads first; the sell side then reads its 25 series over the v1 lookback.
+    pressure_v1, pressure_o2 = v1_lengths[: len(HOUR1_SERIES)], o2_lengths[: len(HOUR1_SERIES)]
+    assert pressure_v1 == [lookback(frozenset()) + 1] * len(HOUR1_SERIES) == [2601] * 11
+    assert pressure_o2 == [lookback(o2_rules) + 1] * len(HOUR1_SERIES) == [2882] * 11
+    assert len(v1_lengths) == len(o2_lengths) == 11 + 25
     assert (v1.rules, o2.rules) == ([], ["O2"])
     assert v1.last_at == o2.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
     # Each point carries its own thresholds and level under O2 only.

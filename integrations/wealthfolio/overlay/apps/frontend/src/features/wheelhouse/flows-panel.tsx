@@ -3,11 +3,18 @@ import type { Stream } from "./client";
 import { useWheelhouseText } from "./i18n";
 import { PerpStates } from "./perp-states";
 import { SellerCharts } from "./seller-charts";
+import { SellSideCharts } from "./sell-side-charts";
 
-type Flow = "seller" | "perp";
-const flows: Flow[] = ["seller", "perp"];
+type Flow = "seller" | "sellside" | "perp";
+const flows: Flow[] = ["seller", "sellside", "perp"];
+const LABELS = {
+  seller: "flows.seller",
+  sellside: "flows.sellside",
+  perp: "flows.perp",
+} as const;
 
-// Two views of BTC flows, chosen with the `flow` parameter: seller pressure and perp states.
+// Three views of BTC flows, chosen with the `flow` parameter: seller pressure, the sell side and
+// perp states.
 export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
   const { text } = useWheelhouseText();
   const [search, setSearch] = useSearchParams();
@@ -36,11 +43,17 @@ export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
             aria-pressed={item === flow}
             onClick={() => setFlow(item)}
           >
-            {text(item === "seller" ? "flows.seller" : "flows.perp")}
+            {text(LABELS[item])}
           </button>
         ))}
       </div>
-      {flow === "seller" ? <SellerCharts /> : <PerpStates />}
+      {flow === "seller" ? (
+        <SellerCharts />
+      ) : flow === "sellside" ? (
+        <SellSideCharts />
+      ) : (
+        <PerpStates />
+      )}
     </div>
   );
 }

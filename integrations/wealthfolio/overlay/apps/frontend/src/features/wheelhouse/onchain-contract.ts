@@ -5,6 +5,7 @@ export type CycleView = components["schemas"]["CycleView"];
 export type LevelsView = components["schemas"]["LevelsView"];
 export type SellerPressureView = components["schemas"]["SellerPressureView"];
 export type CostBasisView = components["schemas"]["CostBasisView"];
+export type SellSideView = components["schemas"]["SellSideView"];
 export type BucketCostBasis = components["schemas"]["BucketCostBasis"];
 
 const time = z.string().datetime({ offset: true });
@@ -211,6 +212,46 @@ export const sellerPressureSchema: z.ZodType<
   share_run: z.number().int().nullable(),
   supply_run: z.number().int().nullable(),
 });
+
+const sellSideLegs = z.object({
+  lth_profit: z.array(z.number()),
+  lth_loss: z.array(z.number()),
+  sth_profit: z.array(z.number()),
+  sth_loss: z.array(z.number()),
+  sth_profit_x1: z.array(z.number()),
+  sth_loss_x1: z.array(z.number()),
+  sth_profit_x24: z.array(z.number()),
+  sth_loss_x24: z.array(z.number()),
+});
+
+// Columns, one entry per kept hour; a column of another length would misplace every value after
+// its gap, so the payload is refused rather than drawn.
+export const sellSideSchema: z.ZodType<SellSideView, z.ZodTypeDef, unknown> = z
+  .object({
+    data_state: pressureDataState,
+    reasons: z.array(z.string()),
+    refreshing: z.boolean(),
+    forming_at: time.nullable(),
+    last_at: time.nullable(),
+    at: z.array(time),
+    price: z.array(z.number()),
+    pnl: sellSideLegs,
+    volb: sellSideLegs,
+    volu: sellSideLegs,
+    xgap: z.number().int().nullable(),
+    qc: z.array(z.literal("intraday_legs")),
+    brk_version: z.string().nullable(),
+    rules,
+    rules_pending: z.boolean(),
+  })
+  .refine(
+    (view) =>
+      view.price.length === view.at.length &&
+      [view.pnl, view.volb, view.volu].every((legs) =>
+        Object.values(legs).every((column) => column.length === view.at.length),
+      ),
+    { message: "sell-side columns differ in length" },
+  );
 
 // Hand-written payloads shared by contract and view tests. The cycle components and the
 // breakout episode follow the 2026-10-16 fixture result: depth = 100*ln(W/TMM), spread =

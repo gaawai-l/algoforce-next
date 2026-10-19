@@ -531,7 +531,9 @@ def test_derive_command_rederives_a_copy_without_brk(
         name: [] for name in ROUTES
     }
     # Each view with the rules its payload recorded, not the rules asked for.
-    assert capsys.readouterr().out == "derived cycle=O1 levels=O1 costbasis=O1 pressure=O1,O3\n"
+    assert capsys.readouterr().out == (
+        "derived cycle=O1 levels=O1 costbasis=O1 pressure=O1,O3 sellside=v1\n"
+    )
 
     # Without --rules, WHEELHOUSE_RULES decides.
     monkeypatch.setenv("WHEELHOUSE_RULES", "v1")
@@ -540,7 +542,9 @@ def test_derive_command_rederives_a_copy_without_brk(
     assert {name: payload["rules"] for name, (payload, _) in copied.items()} == {
         name: [] for name in ROUTES
     }
-    assert capsys.readouterr().out == "derived cycle=v1 levels=v1 costbasis=v1 pressure=v1\n"
+    assert capsys.readouterr().out == (
+        "derived cycle=v1 levels=v1 costbasis=v1 pressure=v1 sellside=v1\n"
+    )
     assert requests == []
 
 

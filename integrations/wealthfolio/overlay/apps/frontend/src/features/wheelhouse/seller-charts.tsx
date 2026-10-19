@@ -97,7 +97,7 @@ const known = (points: { t: number; v: number | null }[]): Pt[] =>
   points.flatMap(({ t, v }) => (v == null ? [] : [{ t, v }]));
 
 // Consecutive points exactly one hour apart stay in one run; any other step breaks the line.
-function runs(points: Pt[]) {
+export function runs(points: Pt[]) {
   const out: Pt[][] = [];
   for (const point of points) {
     const run = out[out.length - 1];
@@ -120,7 +120,7 @@ function niceTicks(lo: number, hi: number, count: number) {
 }
 
 // UTC midnights inside the range, thinned so the labels fit; short ranges fall back to the ends.
-function timeTicks(t0: number, t1: number, room: number): [number, string][] {
+export function timeTicks(t0: number, t1: number, room: number): [number, string][] {
   const first = Math.ceil(t0 / DAY) * DAY;
   const midnights = first <= t1 ? Math.floor((t1 - first) / DAY) + 1 : 0;
   if (!midnights)
@@ -469,7 +469,7 @@ const Layer = memo(function Layer({
   );
 });
 
-function useChartWidth() {
+export function useChartWidth() {
   const ref = useRef<SVGSVGElement>(null);
   const [width, setWidth] = useState(720);
   useEffect(() => {

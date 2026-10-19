@@ -40,6 +40,29 @@ HOUR1_SERIES = (
     "utxos_under_1h_old_supply_in_loss",
     "utxos_under_1h_old_supply_in_profit",
 )
+# The hour1 series the sell-side chart needs beyond HOUR1_SERIES: the spent volumes in BTC and USD,
+# and the cohorts it takes out of the STH legs. Kept apart so that one of them going missing never
+# takes the seller pressure down with it.
+SELL_SIDE_SERIES = (
+    "sth_transfer_volume_in_profit_cumulative",
+    "sth_transfer_volume_in_loss_cumulative",
+    "lth_transfer_volume_in_profit_cumulative",
+    "lth_transfer_volume_in_loss_cumulative",
+    "sth_transfer_volume_in_profit_cumulative_usd",
+    "sth_transfer_volume_in_loss_cumulative_usd",
+    "lth_transfer_volume_in_profit_cumulative_usd",
+    "lth_transfer_volume_in_loss_cumulative_usd",
+    "utxos_under_1h_old_transfer_volume_in_profit_cumulative",
+    "utxos_under_1h_old_transfer_volume_in_loss_cumulative",
+    "utxos_under_1h_old_transfer_volume_in_profit_cumulative_usd",
+    "utxos_under_1h_old_transfer_volume_in_loss_cumulative_usd",
+    "utxos_1h_to_1d_old_realized_profit_cumulative",
+    "utxos_1h_to_1d_old_realized_loss_cumulative",
+    "utxos_1h_to_1d_old_transfer_volume_in_profit_cumulative",
+    "utxos_1h_to_1d_old_transfer_volume_in_loss_cumulative",
+    "utxos_1h_to_1d_old_transfer_volume_in_profit_cumulative_usd",
+    "utxos_1h_to_1d_old_transfer_volume_in_loss_cumulative_usd",
+)
 # First fill and full refetch of hour1 ask for the last N points (`start=-N`), never for `START`.
 HOUR1_BACKFILL = 3000
 URPD_COHORT = "all"

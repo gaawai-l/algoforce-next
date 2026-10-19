@@ -47,7 +47,7 @@
 | 4 | 在 1440px 和 390px 宽度下浏览器核验：无横向溢出，键盘能切换 tab，控制台无报错 |
 
 **不做**
-- state-report 的图 2、4、5、6、8 和图 1 的多种口径。
+- state-report 的图 2、4、5、6、8。图 1A/1B（含三种口径）于 2026-10-19 按用户要求纳入，做法见 [PLAN-SELL-SIDE.md](PLAN-SELL-SIDE.md)。
 - onchain-pulse 的 Exp1–6，以及人工解读。
 - ETH 和 MU 的链上指标，因为 BRK 只覆盖比特币。
 - 任何交易能力，以及链上 as-known 回放（理由见 §7）。

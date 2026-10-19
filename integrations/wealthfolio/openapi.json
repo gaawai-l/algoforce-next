@@ -1183,6 +1183,27 @@
         }
       }
     },
+    "/api/wheelhouse/v1/onchain/sell-side": {
+      "get": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Sell Side",
+        "operationId": "sell_side_api_wheelhouse_v1_onchain_sell_side_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SellSideView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/perps/states": {
       "get": {
         "tags": [
@@ -6516,6 +6537,222 @@
           "setup9_at"
         ],
         "title": "SecondSetup"
+      },
+      "SellSideLegs": {
+        "properties": {
+          "lth_profit": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Lth Profit"
+          },
+          "lth_loss": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Lth Loss"
+          },
+          "sth_profit": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Sth Profit"
+          },
+          "sth_loss": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Sth Loss"
+          },
+          "sth_profit_x1": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Sth Profit X1"
+          },
+          "sth_loss_x1": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Sth Loss X1"
+          },
+          "sth_profit_x24": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Sth Profit X24"
+          },
+          "sth_loss_x24": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Sth Loss X24"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lth_profit",
+          "lth_loss",
+          "sth_profit",
+          "sth_loss",
+          "sth_profit_x1",
+          "sth_loss_x1",
+          "sth_profit_x24",
+          "sth_loss_x24"
+        ],
+        "title": "SellSideLegs",
+        "description": "One measure's legs, one value per kept hour, lined up with `SellSide.at`."
+      },
+      "SellSideView": {
+        "properties": {
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "refreshing": {
+            "type": "boolean",
+            "title": "Refreshing"
+          },
+          "forming_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forming At"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last At"
+          },
+          "at": {
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "type": "array",
+            "title": "At"
+          },
+          "price": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Price"
+          },
+          "pnl": {
+            "$ref": "#/components/schemas/SellSideLegs"
+          },
+          "volb": {
+            "$ref": "#/components/schemas/SellSideLegs"
+          },
+          "volu": {
+            "$ref": "#/components/schemas/SellSideLegs"
+          },
+          "xgap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xgap"
+          },
+          "qc": {
+            "items": {
+              "type": "string",
+              "const": "intraday_legs"
+            },
+            "type": "array",
+            "title": "Qc"
+          },
+          "brk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brk Version"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data_state",
+          "reasons",
+          "refreshing",
+          "forming_at",
+          "last_at",
+          "at",
+          "price",
+          "pnl",
+          "volb",
+          "volu",
+          "xgap",
+          "qc",
+          "brk_version",
+          "rules",
+          "rules_pending"
+        ],
+        "title": "SellSideView"
       },
       "SellerPressureView": {
         "properties": {

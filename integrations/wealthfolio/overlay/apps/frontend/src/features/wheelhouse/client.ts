@@ -5,6 +5,7 @@ import {
   cycleViewSchema,
   levelsViewSchema,
   sellerPressureSchema,
+  sellSideSchema,
 } from "./onchain-contract";
 import {
   perpStatesViewSchema,
@@ -216,6 +217,8 @@ export const getSellerPressure = (signal?: AbortSignal) =>
   query("/onchain/seller-pressure", sellerPressureSchema, { signal });
 export const getCostBasis = (signal?: AbortSignal) =>
   query("/onchain/cost-basis", costBasisViewSchema, { signal });
+export const getSellSide = (signal?: AbortSignal) =>
+  query("/onchain/sell-side", sellSideSchema, { signal });
 export const getPerpStates = (
   exchange: PerpStatesView["exchange"],
   window: PerpStatesView["window"],

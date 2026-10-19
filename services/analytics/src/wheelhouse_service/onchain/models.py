@@ -11,6 +11,7 @@ from .costbasis import BucketCostBasis
 from .cycle import Component, CycleState, Episode
 from .levels import ModelLine
 from .pressure import PressureLevels, PressureLossPoint, PressurePoint, QcCode
+from .sellside import SellSideLegs
 
 DataState = Literal["fresh", "stale", "unavailable"]
 # Hourly data adds `delayed`: late, but not yet old enough to call stale.
@@ -158,3 +159,24 @@ class SellerPressureView(Model):
     loss_run: int | None
     share_run: int | None
     supply_run: int | None
+
+
+class SellSideView(Model):
+    data_state: HourState
+    reasons: list[str]
+    refreshing: bool
+    # The time of the in-progress row, when the last row was still open when it was computed.
+    forming_at: AwareDatetime | None
+    last_at: AwareDatetime | None
+    # One entry per kept hour, oldest first; each leg below is lined up with it. Empty when there
+    # is no data: an absent hour is never sent as a zero.
+    at: list[AwareDatetime]
+    price: list[float]
+    pnl: SellSideLegs
+    volb: SellSideLegs
+    volu: SellSideLegs
+    xgap: int | None
+    qc: list[Literal["intraday_legs"]]
+    brk_version: str | None
+    rules: list[Rule]
+    rules_pending: bool

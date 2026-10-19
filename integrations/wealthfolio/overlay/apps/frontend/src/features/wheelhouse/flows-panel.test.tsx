@@ -3,18 +3,21 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { FlowsPanel } from "./flows-panel";
-import { pressureSample } from "./onchain-contract";
+import { pressureSample, sellSideSchema } from "./onchain-contract";
+import sellSideRaw from "./sell-side-sample.json";
 import { perpStatesSample } from "./perps-contract";
 import type { Stream } from "./client";
 
 const mocks = vi.hoisted(() => ({
   pressure: vi.fn(),
+  sellSide: vi.fn(),
   perpStates: vi.fn(),
   perpStatus: vi.fn(),
 }));
 vi.mock("./client", async (original) => ({
   ...(await original<typeof import("./client")>()),
   getSellerPressure: mocks.pressure,
+  getSellSide: mocks.sellSide,
   getPerpStates: mocks.perpStates,
   getPerpStatus: mocks.perpStatus,
 }));
@@ -26,6 +29,7 @@ afterEach(() => {
 
 const chartOne = "Chart 1 — Total realized loss by cohorts (USD)";
 const perpTable = "Table 1 — Perp states";
+const sellSideA = "Chart 1 — Sell Side Breakdown by LTH & STH · Relative (A)";
 
 function Where() {
   return <output data-testid="where">{useLocation().search}</output>;
@@ -88,6 +92,17 @@ it("shows the perp states view for flow=perp and does not query seller pressure"
   ).toBe("true");
 });
 
+it("shows the sell side for flow=sellside and queries nothing else", async () => {
+  mocks.sellSide.mockResolvedValue(sellSideSchema.parse(sellSideRaw));
+  show("?flow=sellside");
+  expect(await screen.findByText(sellSideA)).toBeTruthy();
+  expect(mocks.pressure).not.toHaveBeenCalled();
+  expect(mocks.perpStates).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole("button", { name: "Sell side" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+});
+
 it("falls back to seller pressure for an unknown flow value", async () => {
   mocks.pressure.mockResolvedValue(pressureSample());
   show("?flow=nonsense");
@@ -133,6 +148,7 @@ it.each(["ETHUSDT", "MUUSDT"] as const)(
     expect(container.querySelector("svg")).toBeNull();
     expect(container.textContent ?? "").not.toMatch(/\d/);
     expect(mocks.pressure).not.toHaveBeenCalled();
+    expect(mocks.sellSide).not.toHaveBeenCalled();
     expect(mocks.perpStates).not.toHaveBeenCalled();
     expect(mocks.perpStatus).not.toHaveBeenCalled();
   },

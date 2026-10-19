@@ -480,6 +480,7 @@ def test_capability_and_get_only_schema(tmp_path: Path):
         f"{PREFIX}/cycle",
         f"{PREFIX}/levels",
         f"{PREFIX}/seller-pressure",
+        f"{PREFIX}/sell-side",
         f"{PREFIX}/cost-basis",
     }
     assert all(methods == {"get"} for methods in onchain.values())
@@ -1133,3 +1134,69 @@ def test_o1_without_a_final_day_shows_urpd_not_final(tmp_path: Path):
     # D itself is current: the snapshots are there, just not final.
     assert (urpd["data_state"], urpd["reasons"]) == ("fresh", ["urpd_not_final"])
     assert day1["reasons"] == hour1["reasons"] == cycle["reasons"] == []
+
+
+def test_sell_side_unavailable_with_200_and_no_zero(tmp_path: Path):
+    with TestClient(router_app(tmp_path / "m.sqlite")) as http:
+        response = http.get(f"{PREFIX}/sell-side")
+    view = response.json()
+
+    assert response.status_code == 200
+    assert view["data_state"] == "unavailable"
+    assert view["reasons"] == ["brk_unavailable"]
+    assert (view["forming_at"], view["last_at"], view["xgap"]) == (None, None, None)
+    # Missing data is empty columns, never zero-filled ones.
+    assert view["at"] == view["price"] == []
+    for measure in ("pnl", "volb", "volu"):
+        assert all(values == [] for values in view[measure].values())
+    assert (view["qc"], view["rules"], view["rules_pending"]) == ([], [], False)
+
+
+def test_sell_side_view_after_sync(tmp_path: Path):
+    path = synced(tmp_path, at=HOUR1_SYNC)
+    with TestClient(router_app(path, datetime(2026, 10, 16, 9, 30, tzinfo=UTC))) as http:
+        view = http.get(f"{PREFIX}/sell-side").json()
+
+    assert view["data_state"] == "fresh"
+    assert view["reasons"] == []
+    assert datetime.fromisoformat(view["forming_at"]) == LAST_ROW
+    assert datetime.fromisoformat(view["last_at"]) == LAST_ROW
+    assert datetime.fromisoformat(view["at"][-1]) == LAST_ROW
+    # Every column is lined up with `at`: the whole v1 lookback that was kept, not a tail.
+    count = len(view["at"])
+    assert 2500 < count < 2600
+    assert len(view["price"]) == count
+    for measure in ("pnl", "volb", "volu"):
+        assert {len(values) for values in view[measure].values()} == {count}
+    assert (view["xgap"], view["qc"], view["rules"]) == (0, [], [])
+    assert view["brk_version"] == "0.12.2"
+
+
+def test_a_sell_side_series_gap_leaves_the_seller_pressure_alone(tmp_path: Path):
+    gap = "utxos_1h_to_1d_old_realized_loss_cumulative"
+    path = synced(tmp_path, at=HOUR1_SYNC, missing={gap})
+    with TestClient(router_app(path, datetime(2026, 10, 16, 9, 30, tzinfo=UTC))) as http:
+        sell_side = http.get(f"{PREFIX}/sell-side").json()
+        pressure = http.get(f"{PREFIX}/seller-pressure").json()
+        _, _, hour1 = http.get(f"{PREFIX}/status").json()["datasets"]
+
+    assert sell_side["data_state"] == "unavailable"
+    assert sell_side["reasons"] == [f"series_missing:hour1:{gap}"]
+    assert sell_side["at"] == []
+    assert pressure["data_state"] == "fresh"
+    assert pressure["reasons"] == []
+    assert len(pressure["loss"]) == PAYLOAD_POINTS
+    assert hour1["reasons"] == []
+
+
+def test_a_seller_pressure_series_gap_leaves_the_sell_side_alone(tmp_path: Path):
+    gap = "sth_supply_in_loss"
+    path = synced(tmp_path, at=HOUR1_SYNC, missing={gap})
+    with TestClient(router_app(path, datetime(2026, 10, 16, 9, 30, tzinfo=UTC))) as http:
+        sell_side = http.get(f"{PREFIX}/sell-side").json()
+        pressure = http.get(f"{PREFIX}/seller-pressure").json()
+
+    assert pressure["data_state"] == "unavailable"
+    assert sell_side["data_state"] == "fresh"
+    assert sell_side["reasons"] == []
+    assert datetime.fromisoformat(sell_side["last_at"]) == LAST_ROW

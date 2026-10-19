@@ -497,6 +497,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/onchain/sell-side": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sell Side */
+        get: operations["sell_side_api_wheelhouse_v1_onchain_sell_side_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/perps/states": {
         parameters: {
             query?: never;
@@ -2260,6 +2277,61 @@ export interface components {
             /** Setup9 At */
             setup9_at: string | null;
         };
+        /**
+         * SellSideLegs
+         * @description One measure's legs, one value per kept hour, lined up with `SellSide.at`.
+         */
+        SellSideLegs: {
+            /** Lth Profit */
+            lth_profit: number[];
+            /** Lth Loss */
+            lth_loss: number[];
+            /** Sth Profit */
+            sth_profit: number[];
+            /** Sth Loss */
+            sth_loss: number[];
+            /** Sth Profit X1 */
+            sth_profit_x1: number[];
+            /** Sth Loss X1 */
+            sth_loss_x1: number[];
+            /** Sth Profit X24 */
+            sth_profit_x24: number[];
+            /** Sth Loss X24 */
+            sth_loss_x24: number[];
+        };
+        /** SellSideView */
+        SellSideView: {
+            /**
+             * Data State
+             * @enum {string}
+             */
+            data_state: "fresh" | "delayed" | "stale" | "unavailable";
+            /** Reasons */
+            reasons: string[];
+            /** Refreshing */
+            refreshing: boolean;
+            /** Forming At */
+            forming_at: string | null;
+            /** Last At */
+            last_at: string | null;
+            /** At */
+            at: string[];
+            /** Price */
+            price: number[];
+            pnl: components["schemas"]["SellSideLegs"];
+            volb: components["schemas"]["SellSideLegs"];
+            volu: components["schemas"]["SellSideLegs"];
+            /** Xgap */
+            xgap: number | null;
+            /** Qc */
+            qc: "intraday_legs"[];
+            /** Brk Version */
+            brk_version: string | null;
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
+        };
         /** SellerPressureView */
         SellerPressureView: {
             /**
@@ -3617,6 +3689,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SellerPressureView"];
+                };
+            };
+        };
+    };
+    sell_side_api_wheelhouse_v1_onchain_sell_side_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SellSideView"];
                 };
             };
         };

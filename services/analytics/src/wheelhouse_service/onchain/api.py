@@ -24,10 +24,12 @@ from .models import (
     LevelsView,
     OnchainStatus,
     SellerPressureView,
+    SellSideView,
     day1_state,
     hour1_state,
 )
 from .pressure import HOUR, SHOWN_HOURS, Pressure
+from .sellside import INPUTS, SellSide, SellSideLegs
 from .store import OnchainStore
 from .sync import CYCLE_SERIES, OnchainSync
 
@@ -35,6 +37,7 @@ from .sync import CYCLE_SERIES, OnchainSync
 DAY1_REASONS = (*(f"series_missing:{name}" for name in DAY1_SERIES), "brk_unavailable")
 URPD_REASONS = ("urpd_missing", "urpd_not_final", "brk_unavailable")
 PRESSURE_REASONS = (*(f"series_missing:hour1:{name}" for name in HOUR1_SERIES), "brk_unavailable")
+SELL_SIDE_REASONS = (*(f"series_missing:hour1:{name}" for name in INPUTS), "brk_unavailable")
 CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unavailable")
 
 
@@ -159,6 +162,10 @@ def create_router(
     def stored_pressure() -> tuple[Pressure, datetime] | None:
         derived = db().derived("pressure")
         return None if derived is None else (Pressure.model_validate_json(derived[0]), derived[1])
+
+    def stored_sell_side() -> tuple[SellSide, datetime] | None:
+        derived = db().derived("sellside")
+        return None if derived is None else (SellSide.model_validate_json(derived[0]), derived[1])
 
     @router.get("/status", response_model=OnchainStatus)
     def status() -> OnchainStatus:
@@ -401,6 +408,51 @@ def create_router(
             loss_run=result.loss_run,
             share_run=result.share_run,
             supply_run=result.supply_run,
+        )
+
+    @router.get("/sell-side", response_model=SellSideView)
+    def sell_side() -> SellSideView:
+        now = clock()
+        state = db().state()
+        reasons = only(stored_reasons(state), SELL_SIDE_REASONS)
+        refreshing = state["refreshing"] == "true"
+        stored = stored_sell_side()
+        if stored is None:
+            empty = SellSideLegs.model_validate({leg: [] for leg in SellSideLegs.model_fields})
+            return SellSideView(
+                data_state="unavailable",
+                reasons=reasons or ["brk_unavailable"],
+                refreshing=refreshing,
+                forming_at=None,
+                last_at=None,
+                at=[],
+                price=[],
+                pnl=empty,
+                volb=empty,
+                volu=empty,
+                xgap=None,
+                qc=[],
+                brk_version=state["brk_version"],
+                rules=[],
+                rules_pending=False,
+            )
+        result, computed_at = stored
+        return SellSideView(
+            data_state=hour1_state(result.latest_at, now),
+            reasons=reasons,
+            refreshing=refreshing,
+            forming_at=result.last_at if computed_at < result.last_at + HOUR else None,
+            last_at=result.last_at,
+            at=result.at,
+            price=result.price,
+            pnl=result.pnl,
+            volb=result.volb,
+            volu=result.volu,
+            xgap=result.xgap,
+            qc=result.qc,
+            brk_version=state["brk_version"],
+            rules=result.rules,
+            rules_pending=pending("sellside", result.rules),
         )
 
     return router

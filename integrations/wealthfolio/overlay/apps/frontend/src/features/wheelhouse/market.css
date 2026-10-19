@@ -1585,6 +1585,91 @@
   }
 }
 
+/* Sell side: Charts 1A and 1B share one set of controls and legs. Blue is long-term, rose
+   short-term; the deep tone is profit, the light tone loss, as on the original. */
+.wh-sellside {
+  --wh-ss-lp: #3f7fb3;
+  --wh-ss-ll: var(--wh-sky);
+  --wh-ss-sp: #c4577c;
+  --wh-ss-sl: var(--wh-rose);
+}
+.wh-ss-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+.wh-ss-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.wh-ss-label {
+  color: var(--wh-muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wh-ss-control .wh-seller-span {
+  flex-wrap: wrap;
+}
+.wh-sellside .wh-ss-both,
+.wh-sellside .wh-ss-note,
+.wh-sellside .wh-ss-foot {
+  margin: 4px 0 0;
+  color: var(--wh-muted);
+  font:
+    11px/1.6 "JetBrains Mono",
+    monospace;
+}
+.wh-sellside .wh-ss-note {
+  color: #efc18d;
+}
+.wh-ss-bar--LP,
+.wh-ss-swatch--LP {
+  fill: var(--wh-ss-lp);
+  background: var(--wh-ss-lp);
+}
+.wh-ss-bar--LL,
+.wh-ss-swatch--LL {
+  fill: var(--wh-ss-ll);
+  background: var(--wh-ss-ll);
+}
+.wh-ss-bar--SP,
+.wh-ss-swatch--SP {
+  fill: var(--wh-ss-sp);
+  background: var(--wh-ss-sp);
+}
+.wh-ss-bar--SL,
+.wh-ss-swatch--SL {
+  fill: var(--wh-ss-sl);
+  background: var(--wh-ss-sl);
+}
+/* Each leg in the legend is its own switch. */
+.wh-market .wh-ss-leg {
+  min-height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.wh-market .wh-ss-leg:hover {
+  background: #19303a;
+}
+.wh-market .wh-ss-leg[aria-pressed="false"] {
+  opacity: 0.5;
+}
+@media (max-width: 600px) {
+  .wh-market .wh-ss-leg {
+    min-height: 44px;
+  }
+}
+
 /* Perp states: notices, the parameters, Table 1 and Charts 1–4, each with its notes. */
 .wh-perp {
   --wh-moss: #7fc98a;
