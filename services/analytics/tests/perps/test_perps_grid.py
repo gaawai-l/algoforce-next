@@ -450,6 +450,38 @@ def test_composite_rest_gap_at_window_end_uncovers_the_window(store: PerpsStore)
     assert second.oi_close is None and second.imputed.doi
 
 
+def test_composite_oi_gap_at_window_start_keeps_the_window(store: PerpsStore):
+    last = W + 2 * H4 - STEP  # two closed windows, W0 and W1
+    w1 = W + H4
+    rest(store, last)
+    store.upsert_cz("oi", H4, "okx", [point(W, 300.0, 310.0), point(w1, 320.0, 330.0)])
+    store.upsert_cz("oi", H4, "hyperliquid", [point(W, 400.0, 410.0), point(w1, 420.0, 440.0)])
+    for venue in VIEW_VENUES["all"]:
+        cz(store, "liq", venue, H4, W, w1, 1.0, 2.0)
+    # Binance's REST OI is missing at W1's first bucket only (bucket w1 reads the row at w1 + 10m).
+    store.upsert_oi("binance", [OiPoint(t=w1 + STEP, oi=None, source="hist")])
+
+    grid = grid_of(store, "all")
+    w0_end, w1_end = 1000.0 + 500.0 + 310.0, 1000.0 + 500.0 + 330.0
+    # The gap at W1's start does not clear it: its end bucket still holds all three venues.
+    assert grid.oi[:24] == [1000.0 + 500.0 + 300.0] + [None] * 22 + [w0_end]
+    assert grid.oi[24:] == [None] * 23 + [w1_end]
+
+    first, second = compute_states(grid, "4h", rules=V1).blocks
+    assert first.oi_close == w0_end and not first.imputed.doi
+    assert second.oi_close == w1_end
+    # The block's dOI needs its first bucket, which is None, so it is imputed as in P4.
+    assert second.imputed.doi and second.doi == 0.0
+    (both,) = compute_states(grid, "8h", rules=V1).blocks
+    assert both.oi_close == w1_end and not both.imputed.doi
+
+    # Hyperliquid: All's OI exists at W1's end, so the estimate has a share and W1 is covered.
+    hl = grid_of(store, "hyperliquid")
+    assert all(hl.liq_covered)
+    assert hl.long_liq[24:] == [0.0] * 23 + [pytest.approx(3.0 * 440.0 / w1_end)]
+    assert hl.short_liq[24:] == [0.0] * 23 + [pytest.approx(6.0 * 440.0 / w1_end)]
+
+
 def test_estimate_liquidations():
     longs, shorts, cov = estimate_liquidations(
         [0.0, 4.0, 4.0, None, 4.0, 4.0],

@@ -279,20 +279,18 @@ def _total(parts: Sequence[float | None]) -> float | None:
 def _combine(columns: Sequence[Placed], start: int, last: int, *, oi: bool = False) -> Placed:
     """The venues' columns of one input summed (proposal §3.3, review C2): bucket by bucket, None
     or uncovered wherever one venue is; then, in a window some venue placed whole, the whole
-    window is None and uncovered when the sum is None at its last bucket, or for OI None when
-    the sum is at its first or last bucket. A single venue's column goes through the same."""
+    window is None, and uncovered unless it is OI, when the sum is None at its last bucket. A
+    single venue's column goes through the same."""
     values = [_total(parts) for parts in zip(*(c.values for c in columns), strict=True)]
     covered = [all(parts) for parts in zip(*(c.covered for c in columns), strict=True)]
     whole = [any(parts) for parts in zip(*(c.whole for c in columns), strict=True)]
     for w in range(start, last - H4 + STEP + 1, H4):
         first = (w - start) // STEP
         end = first + WINDOW - 1
-        if oi:
-            if (whole[first] or whole[end]) and (values[first] is None or values[end] is None):
-                values[first : end + 1] = [None] * WINDOW
-        elif whole[end] and values[end] is None:
+        if whole[end] and values[end] is None:
             values[first : end + 1] = [None] * WINDOW
-            covered[first : end + 1] = [False] * WINDOW
+            if not oi:
+                covered[first : end + 1] = [False] * WINDOW
     return Placed(values, covered, whole)
 
 
