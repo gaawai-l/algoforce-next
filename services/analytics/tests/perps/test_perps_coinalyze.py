@@ -288,6 +288,31 @@ def test_open_bars_are_dropped_before_the_zero_fill_not_filled():
     assert points == [CzPoint(t=1_792_368_000, a=1.5, b=2.5)]
 
 
+@pytest.mark.parametrize("kind", ["liq", "ohlcv"])
+def test_a_bar_that_closes_during_the_request_is_neither_returned_nor_filled(kind: CzKind):
+    # The 07:40 bar closes at 07:45. The request starts at 07:44:59 and is answered at 07:45:10,
+    # so whatever the server said about that bar it said while the bar was still open.
+    started = datetime(2026, 10, 19, 7, 44, 59, tzinfo=UTC)
+    clock = Clock(started)
+    open_bar = 1_792_395_600
+    first = KIND_VENUES[kind][0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        clock.now = started + timedelta(seconds=11)
+        body = [entry(SYMBOLS[first], point(kind, open_bar - M5), point(kind, open_bar))]
+        return httpx.Response(200, json=body)
+
+    cz, _, _ = build(handler, clock)
+
+    got = cz.history(kind, "5min", open_bar - M5, int(started.timestamp()))
+
+    assert clock.now > datetime(2026, 10, 19, 7, 45, tzinfo=UTC)  # the bar closed meanwhile
+    assert [p.t for p in got[first]] == [open_bar - M5]
+    assert all(p.t != open_bar for points in got.values() for p in points)
+    if kind == "liq":  # every venue is filled up to the bar that was closed at the start
+        assert all([p.t for p in points] == [open_bar - M5] for points in got.values())
+
+
 # --- The key. ---
 
 

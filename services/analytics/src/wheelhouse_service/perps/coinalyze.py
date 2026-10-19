@@ -81,8 +81,10 @@ class Coinalyze:
         }
         if kind in IN_COINS:
             params["convert_to_usd"] = "false"
-        body = self._rest.coinalyze(PATHS[kind], params, key)
+        # Taken before the request: a bar that closes while it is in flight was still open when
+        # the server answered, so it is neither kept nor zero-filled.
         now = self._clock().timestamp()
+        body = self._rest.coinalyze(PATHS[kind], params, key)
         found = _closed_points(body, kind, step, now)
         if kind == "liq":
             first = -(-frm // step) * step  # frm rounded up to the interval grid
