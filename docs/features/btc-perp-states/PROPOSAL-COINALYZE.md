@@ -41,6 +41,30 @@ P4 的清算和 Bybit 主动买卖差，只能从开始采集起用 WebSocket �
 6. 单位是否为 BTC；`l`、`s` 的方向用我们 10-17 起自采的事件核对（Binance 的 SELL 表示多头被强平）。
 7. Binance 的清算是否同样只有每秒一条快照，即只能算下限。
 
+### 2.1 V1 部分实测（2026-10-19，免费 key 已生效）
+
+- 鉴权：key 放在请求头 `api_key` 里即可。新生成的 key 刚开始返回 401，过几分钟后变成 200。
+- `/exchanges` 返回 28 家，代码对应：Binance=A、Bybit=6、Hyperliquid=H、OKX=3、BitMEX=0。
+- BTC 永续 symbol：
+
+| 交易所 | symbol | 单位 | 主动买卖量 |
+|---|---|---|---|
+| Binance USDT | `BTCUSDT_PERP.A` | BASE_ASSET | 有 |
+| Bybit USDT | `BTCUSDT.6` | BASE_ASSET | 有 |
+| Hyperliquid | `BTC.H` | BASE_ASSET | 有 |
+
+- `/liquidation-history`：
+  - 4hour 的 `t` 落在 UTC 4 小时整点上（例如 1792224000 是 10-16 08:00），与我们的 4h 块对齐；
+  - 2 天返回 12 个点；
+  - 最新一个点是还没收盘的当前 4 小时，所以"只存已收盘的点"这条规则是必须的；
+  - 同时请求 `BTC.H` 时**没有返回 Hyperliquid 的清算**，说明 Coinalyze 不提供 Hyperliquid 清算。原站对 Hyperliquid 的清算本来也是估算的。
+- `/ohlcv-history`：5min 三家都有 `v`、`bv`、`tx`、`btx`。
+- 仍待实测：
+  - 没有清算的区间是返回 0 还是不返回；
+  - 单次响应的点数上限；
+  - 已收盘窗口里，48 个 5min 点之和是否等于 4hour 值；
+  - `l`、`s` 的方向，要与自采事件对照确认。
+
 ## 3. 方案
 
 ### 3.1 数据怎么取
