@@ -278,9 +278,9 @@ def _total(parts: Sequence[float | None]) -> float | None:
 
 def _combine(columns: Sequence[Placed], start: int, last: int, *, oi: bool = False) -> Placed:
     """The venues' columns of one input summed (proposal §3.3, review C2): bucket by bucket, None
-    or uncovered wherever one venue is; then, in a window some venue placed whole, the whole
-    window is None, and uncovered unless it is OI, when the sum is None at its last bucket. A
-    single venue's column goes through the same."""
+    or uncovered wherever one venue is. Then, in a window some venue placed whole, if the sum is
+    None at the window's last bucket, the whole window is None, and uncovered too unless the
+    input is OI. A single venue's column goes through the same."""
     values = [_total(parts) for parts in zip(*(c.values for c in columns), strict=True)]
     covered = [all(parts) for parts in zip(*(c.covered for c in columns), strict=True)]
     whole = [any(parts) for parts in zip(*(c.whole for c in columns), strict=True)]
