@@ -1,21 +1,23 @@
 import { useSearchParams } from "react-router-dom";
 import { AgeCohortChart } from "./age-cohort-chart";
 import type { Stream } from "./client";
+import { CostFlowCharts } from "./cost-flow-charts";
 import { useWheelhouseText } from "./i18n";
 import { PerpStates } from "./perp-states";
 import { SellerCharts } from "./seller-charts";
 import { SellSideCharts } from "./sell-side-charts";
 
-type Flow = "seller" | "sellside" | "perp";
-const flows: Flow[] = ["seller", "sellside", "perp"];
+type Flow = "seller" | "sellside" | "costbasis" | "perp";
+const flows: Flow[] = ["seller", "sellside", "costbasis", "perp"];
 const LABELS = {
   seller: "flows.seller",
   sellside: "flows.sellside",
+  costbasis: "flows.costbasis",
   perp: "flows.perp",
 } as const;
 
-// Three views of BTC flows, chosen with the `flow` parameter: seller pressure, the sell side and
-// perp states.
+// Four views of BTC flows, chosen with the `flow` parameter: seller pressure, the sell side, the
+// buying and selling by cost basis, and perp states.
 export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
   const { text } = useWheelhouseText();
   const [search, setSearch] = useSearchParams();
@@ -55,6 +57,8 @@ export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
           <SellSideCharts />
           <AgeCohortChart />
         </>
+      ) : flow === "costbasis" ? (
+        <CostFlowCharts />
       ) : (
         <PerpStates />
       )}

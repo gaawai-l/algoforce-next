@@ -1304,6 +1304,7 @@
 }
 .wh-flows-switch {
   display: inline-flex;
+  flex-wrap: wrap;
   max-width: 100%;
   border: 1px solid var(--wh-edge);
   border-radius: 6px;
@@ -1350,10 +1351,13 @@
   .wh-flows-switch {
     display: flex;
   }
+  /* When the four views do not fit one row, the buttons keep their labels on one line and
+     wrap to a second row instead of overflowing. */
   .wh-market .wh-flows-switch button {
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 44px;
     padding-inline: 8px;
+    white-space: nowrap;
   }
 }
 
@@ -2171,5 +2175,379 @@
   /* The three notes stay expanded and stack one above the other. */
   .wh-perp-read {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Cost basis: Chart 3 (and Chart 4) drawn sideways, price up and BTC across, buys right and sells
+   left. Moss and rust as in perp states; the deep tones (KDE lines and K dots) are new, the bell
+   tones are the original's dark --mix-pos/--mix-neg (H:65). */
+.wh-costflow {
+  --wh-moss: #7fc98a;
+  --wh-rust: #e0805c;
+  --wh-moss-deep: #5fae6b;
+  --wh-rust-deep: #c8623f;
+  --wh-mix-pos: #adcf88;
+  --wh-mix-neg: #f08c63;
+}
+.wh-costflow .wh-cf-span {
+  margin: 8px 0 0;
+  color: var(--wh-muted);
+  font:
+    11px/1.6 "JetBrains Mono",
+    monospace;
+}
+.wh-cf-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 6px;
+  touch-action: pan-y;
+}
+.wh-cf-bar--pos {
+  fill: var(--wh-moss);
+}
+.wh-cf-bar--neg {
+  fill: var(--wh-rust);
+}
+/* Aging is an inference, so it is drawn hollow in the hue of its side (H:289-291). */
+.wh-cf-bar--aging-pos,
+.wh-cf-bar--aging-neg {
+  fill-opacity: 0.16;
+  stroke-width: 1;
+  stroke-opacity: 0.9;
+  shape-rendering: crispEdges;
+}
+.wh-cf-bar--aging-pos {
+  fill: var(--wh-moss);
+  stroke: var(--wh-moss);
+}
+.wh-cf-bar--aging-neg {
+  fill: var(--wh-rust);
+  stroke: var(--wh-rust);
+}
+.wh-cf-zero {
+  stroke: #e5edf6;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.wh-cf-spotline {
+  stroke: var(--wh-muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 22 7;
+}
+.wh-cf-spot {
+  fill: var(--wh-muted);
+  font:
+    600 9.5px "JetBrains Mono",
+    monospace;
+}
+.wh-cf-kde,
+.wh-cf-mix {
+  fill: none;
+  stroke-linejoin: round;
+}
+.wh-cf-kde {
+  stroke-width: 1.8;
+}
+.wh-cf-kde--pos {
+  stroke: var(--wh-moss-deep);
+}
+.wh-cf-kde--neg {
+  stroke: var(--wh-rust-deep);
+}
+.wh-cf-mix {
+  stroke-width: 1.9;
+  stroke-dasharray: 4 3;
+  stroke-linecap: round;
+}
+.wh-cf-mix--pos {
+  stroke: var(--wh-mix-pos);
+}
+.wh-cf-mix--neg {
+  stroke: var(--wh-mix-neg);
+}
+.wh-cf-dot {
+  stroke: var(--wh-surface);
+  stroke-width: 1.2;
+}
+.wh-cf-dot--pos {
+  fill: var(--wh-moss-deep);
+}
+.wh-cf-dot--neg {
+  fill: var(--wh-rust-deep);
+}
+.wh-cf-label {
+  fill: #e5edf6;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+}
+.wh-cf-label--m-pos {
+  fill: var(--wh-mix-pos);
+}
+.wh-cf-label--m-neg {
+  fill: var(--wh-mix-neg);
+}
+.wh-cf-cursor {
+  fill: var(--wh-cyan);
+  fill-opacity: 0.14;
+  pointer-events: none;
+}
+.wh-cf-captions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  color: var(--wh-muted);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.wh-cf-captions span:last-child {
+  margin-left: auto;
+}
+.wh-cf-swatch--pos {
+  background: var(--wh-moss);
+}
+.wh-cf-swatch--neg {
+  background: var(--wh-rust);
+}
+.wh-cf-swatch--hollow.wh-cf-swatch--pos {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--wh-moss);
+}
+.wh-cf-swatch--hollow.wh-cf-swatch--neg {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--wh-rust);
+}
+.wh-cf-aging {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--wh-edge);
+}
+.wh-cf-note {
+  flex: 1 1 220px;
+  color: var(--wh-muted);
+  font-size: 11px;
+}
+/* The two sides' controls: sell on the left, buy on the right; one column below 640 px (H:414). */
+.wh-cf-sides {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.wh-cf-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--wh-edge);
+  border-radius: 6px;
+}
+.wh-cf-eyebrow {
+  flex: 1 0 100%;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-align: right;
+  text-transform: uppercase;
+}
+.wh-cf-eyebrow--pos {
+  color: var(--wh-moss-deep);
+}
+.wh-cf-eyebrow--neg {
+  color: var(--wh-rust-deep);
+}
+.wh-market .wh-cf-gear {
+  min-height: 32px;
+  padding: 3px 10px;
+  border: 1px solid var(--wh-edge);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wh-muted);
+  font-size: 11px;
+}
+.wh-market .wh-cf-gear:hover,
+.wh-market .wh-cf-gear[aria-expanded="true"] {
+  background: #19303a;
+  color: #e5edf6;
+}
+.wh-cf-chip {
+  font-family: "JetBrains Mono", monospace;
+}
+/* The fine tuning opens in the side's own box, so it never reaches past the page's edge. */
+.wh-cf-fine {
+  flex: 1 0 100%;
+  display: grid;
+  gap: 6px;
+  padding: 8px 0 0;
+  border-top: 1px dashed var(--wh-edge);
+}
+.wh-cf-fine-title {
+  color: var(--wh-muted);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.wh-cf-slider {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  color: var(--wh-muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wh-market .wh-cf-slider input {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--wh-cyan);
+}
+.wh-cf-slider input:disabled {
+  opacity: 0.4;
+}
+.wh-cf-slider output {
+  color: #e5edf6;
+  font-family: "JetBrains Mono", monospace;
+  text-align: right;
+  text-transform: none;
+}
+.wh-costflow .wh-cf-readout {
+  min-height: 1.6em;
+  margin-top: 8px;
+  color: var(--wh-muted);
+  font:
+    11px/1.6 "JetBrains Mono",
+    monospace;
+}
+.wh-costflow .wh-cf-readout p {
+  margin: 0;
+}
+.wh-costflow .wh-cf-readout p:first-child {
+  color: #e5edf6;
+}
+/* Each table scrolls in its own box; the grid track can shrink below the table's width. */
+.wh-cf-tables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--wh-edge);
+}
+.wh-cf-fit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.wh-market .wh-cf-fit-head h4 {
+  margin: 0;
+  color: #e5edf6;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.wh-cf-fit-meta {
+  color: var(--wh-muted);
+  font-size: 11px;
+}
+.wh-cf-table-wrap {
+  overflow-x: auto;
+}
+.wh-cf-table {
+  width: 100%;
+  margin-top: 4px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.wh-cf-table th,
+.wh-cf-table td {
+  padding: 5px 8px;
+  border-bottom: 1px dashed #1c2532;
+  color: var(--wh-muted);
+  font-weight: 400;
+  text-align: right;
+  white-space: nowrap;
+}
+.wh-cf-table th:first-child,
+.wh-cf-table td:nth-child(2) {
+  text-align: left;
+}
+.wh-cf-table thead th {
+  border-bottom: 1px solid var(--wh-edge);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.wh-cf-table thead th:nth-child(2) {
+  text-align: left;
+}
+.wh-cf-table .wh-cf-rank {
+  color: #e5edf6;
+  font-weight: 700;
+}
+.wh-cf-table .wh-cf-num {
+  color: #e5edf6;
+  font:
+    12px "JetBrains Mono",
+    monospace;
+}
+.wh-cf-table .wh-cf-empty {
+  padding: 12px;
+  font-style: italic;
+  text-align: center;
+  white-space: normal;
+}
+.wh-cf-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #e5edf6;
+}
+.wh-cf-pill .wh-cf-swatch--pos,
+.wh-cf-pill .wh-cf-swatch--neg {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.wh-cf-tag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.wh-cf-tag--support {
+  background: rgba(127, 201, 138, 0.14);
+  color: var(--wh-moss);
+}
+.wh-cf-tag--resistance {
+  background: rgba(224, 128, 92, 0.14);
+  color: var(--wh-rust);
+}
+@media (max-width: 640px) {
+  .wh-cf-sides {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .wh-market .wh-cf-gear {
+    min-height: 44px;
   }
 }

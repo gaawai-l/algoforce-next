@@ -1,11 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { FlowsPanel } from "./flows-panel";
 import ageCohortsRaw from "./age-cohorts-sample.json";
+import costFlowRaw from "./cost-flow-sample.json";
 import {
   ageCohortsSchema,
+  costFlowSchema,
   pressureSample,
   sellSideSchema,
 } from "./onchain-contract";
@@ -17,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   pressure: vi.fn(),
   sellSide: vi.fn(),
   ageCohorts: vi.fn(),
+  costFlow: vi.fn(),
   perpStates: vi.fn(),
   perpStatus: vi.fn(),
 }));
@@ -25,6 +28,7 @@ vi.mock("./client", async (original) => ({
   getSellerPressure: mocks.pressure,
   getSellSide: mocks.sellSide,
   getAgeCohorts: mocks.ageCohorts,
+  getCostFlow: mocks.costFlow,
   getPerpStates: mocks.perpStates,
   getPerpStatus: mocks.perpStatus,
 }));
@@ -115,6 +119,31 @@ it("shows the sell side for flow=sellside and queries nothing else", async () =>
   ).toBe("true");
 });
 
+it("offers the flows in order and opens Cost basis from the URL", async () => {
+  mocks.costFlow.mockResolvedValue(costFlowSchema.parse(costFlowRaw));
+  show("?flow=costbasis");
+  expect(
+    await screen.findByText("Chart 3 — Buy & Sell Side By Cost Basis"),
+  ).toBeTruthy();
+  expect(
+    within(screen.getByRole("group", { name: "Flows view" }))
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Seller pressure", "Sell side", "Cost basis", "Perp states"]);
+  expect(
+    screen.getByRole("button", { name: "Cost basis" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(mocks.costFlow).toHaveBeenCalledTimes(1);
+  for (const other of [
+    mocks.pressure,
+    mocks.sellSide,
+    mocks.ageCohorts,
+    mocks.perpStates,
+    mocks.perpStatus,
+  ])
+    expect(other).not.toHaveBeenCalled();
+});
+
 it("falls back to seller pressure for an unknown flow value", async () => {
   mocks.pressure.mockResolvedValue(pressureSample());
   show("?flow=nonsense");
@@ -162,6 +191,7 @@ it.each(["ETHUSDT", "MUUSDT"] as const)(
     expect(mocks.pressure).not.toHaveBeenCalled();
     expect(mocks.sellSide).not.toHaveBeenCalled();
     expect(mocks.ageCohorts).not.toHaveBeenCalled();
+    expect(mocks.costFlow).not.toHaveBeenCalled();
     expect(mocks.perpStates).not.toHaveBeenCalled();
     expect(mocks.perpStatus).not.toHaveBeenCalled();
   },

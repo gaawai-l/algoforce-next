@@ -556,3 +556,42 @@ export function ageTip(text: TextFn, r: AgeRow, step: number, w: Window): string
   lines.push(text("costflow.age.tipFoot", { window: w }));
   return lines;
 }
+
+// The plot's frame at a chart width, shared by Charts 3 and 4. Below 500 px the margins, tick
+// counts and K/M labels shrink so the plot keeps at least 200 px at 330; the spot label is
+// right-aligned at spotX, inside the right margin, clear of the buy side's K labels.
+export interface Frame {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  plotW: number;
+  xTicks: number;
+  yTicks: number;
+  labelPx: number;
+  spotX: number;
+}
+export function plotFrame(width: number): Frame {
+  const narrow = width < 500;
+  const left = narrow ? 44 : 64;
+  const right = narrow ? 76 : 96;
+  return {
+    left,
+    right,
+    top: narrow ? 8 : 10,
+    bottom: narrow ? 34 : 36,
+    plotW: width - left - right,
+    xTicks: narrow ? 3 : 7,
+    yTicks: narrow ? 6 : 10,
+    labelPx: narrow ? 10 : 11,
+    spotX: width - 2,
+  };
+}
+
+// Where a K or M label is anchored: 8 px off its point, away from zero (A:1709, A:1740), kept
+// inside the plot. A label is at most 3 characters, about 0.62 em each; a sell label ends at the
+// x returned, a buy label starts there.
+export function labelX(x: number, side: Side, f: Frame): number {
+  const w = Math.ceil(3 * 0.62 * f.labelPx);
+  return side === "neg" ? Math.max(x - 8, f.left + w) : Math.min(x + 8, f.left + f.plotW - w);
+}

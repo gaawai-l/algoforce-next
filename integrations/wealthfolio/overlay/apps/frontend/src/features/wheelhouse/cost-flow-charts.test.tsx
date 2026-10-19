@@ -1,0 +1,752 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { ClustersTable, CostFlowCharts } from "./cost-flow-charts";
+import { DEFAULT_SIDE, fitSide } from "./cost-flow-engine";
+import {
+  clusters,
+  gridFor,
+  labelX,
+  plotFrame,
+  sideWeights,
+  udiff,
+  type Side,
+} from "./cost-flow";
+import s2raw from "./cost-flow-sample.json";
+import { costFlowSchema, type CostFlowView } from "./onchain-contract";
+
+const mocks = vi.hoisted(() => ({ costFlow: vi.fn() }));
+vi.mock("./client", async (original) => ({
+  ...(await original<typeof import("./client")>()),
+  getCostFlow: mocks.costFlow,
+}));
+// The real engine, counted: hover, the keyboard readout and a resize must never reach it.
+vi.mock("./cost-flow-engine", async (orig) => {
+  const m = await orig<typeof import("./cost-flow-engine")>();
+  return { ...m, fitSide: vi.fn(m.fitSide) };
+});
+const fits = vi.mocked(fitSide);
+
+// requestAnimationFrame as a queue the tests drain by hand.
+let frames = new Map<number, FrameRequestCallback>();
+let lastFrame = 0;
+const cancelFrame = vi.fn((id: number) => frames.delete(id));
+beforeEach(() => {
+  frames = new Map();
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    lastFrame += 1;
+    frames.set(lastFrame, callback);
+    return lastFrame;
+  });
+  vi.stubGlobal("cancelAnimationFrame", cancelFrame);
+});
+const flush = () =>
+  act(() => {
+    const due = [...frames.values()];
+    frames.clear();
+    for (const callback of due) callback(0);
+  });
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+});
+
+// S2: the 06:04 snapshot of 19 Oct 2026, the page's own snapshot; it has no $200 grid.
+const s2 = costFlowSchema.parse(s2raw);
+const TITLE3 = "Chart 3 — Buy & Sell Side By Cost Basis";
+
+function show(view: CostFlowView = s2) {
+  mocks.costFlow.mockResolvedValue(view);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <CostFlowCharts />
+    </QueryClientProvider>,
+  );
+}
+
+// The chart's width as useChartWidth reads it; `initial` is reported as soon as it is observed.
+function stubWidth(initial?: number) {
+  const fires: ((width: number) => void)[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe() {
+        const fire = (width: number) =>
+          this.callback(
+            [{ contentRect: { width } } as ResizeObserverEntry],
+            this as unknown as ResizeObserver,
+          );
+        fires.push(fire);
+        if (initial) fire(initial);
+      }
+      disconnect() {}
+    },
+  );
+  return (width: number) => act(() => fires.forEach((fire) => fire(width)));
+}
+
+const chart3 = () => document.querySelector<HTMLElement>('[data-chart="costflow-3"]')!;
+const svg3 = () => chart3().querySelector<SVGSVGElement>("svg.wh-cf-svg");
+const side = (which: Side) => chart3().querySelector<HTMLElement>(`[data-side="${which}"]`)!;
+const pick = (scope: HTMLElement, group: string, name: string) =>
+  fireEvent.click(
+    within(within(scope).getByRole("group", { name: group })).getByRole("button", { name }),
+  );
+const buttons = (scope: HTMLElement, group: string) =>
+  within(within(scope).getByRole("group", { name: group }))
+    .getAllByRole("button")
+    .map((button) => button.textContent);
+const legend = () =>
+  [...chart3().querySelectorAll(".wh-cf-legend .wh-seller-key")].map((key) => key.textContent);
+const readout = () =>
+  [...chart3().querySelectorAll(".wh-cf-readout p")].map((line) => line.textContent);
+const table = (name: "clusters" | "components") =>
+  chart3().querySelector<HTMLElement>(`[data-table="${name}"]`)!;
+const tableRows = (name: "clusters" | "components") =>
+  [...table(name).querySelectorAll("tbody tr")].map((row) =>
+    [...(row as HTMLTableRowElement).cells].map((cell) => cell.textContent),
+  );
+const line = (cells: (string | null)[]) => cells.join(" | ");
+const labels = (kind: "k" | "m", which: Side) =>
+  [...svg3()!.querySelectorAll(`text.wh-cf-label--${kind}-${which}`)].map(
+    (label) => label.textContent,
+  );
+const gear = (which: Side) => side(which).querySelector<HTMLButtonElement>(".wh-cf-gear")!;
+const chip = (which: Side) => side(which).querySelector(".wh-cf-chip")!.textContent;
+const slider = (which: Side, name: "width" | "peak cutoff") =>
+  within(side(which)).getByRole<HTMLInputElement>("slider", { name });
+
+// A path's points and a bar's edges, in the svg's units.
+const points = (d: string) =>
+  [...d.matchAll(/[ML]([\d.-]+),([\d.-]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+const edges = (rect: Element) => {
+  const x = Number(rect.getAttribute("x"));
+  const y = Number(rect.getAttribute("y"));
+  return {
+    left: x,
+    right: x + Number(rect.getAttribute("width")),
+    top: y,
+    bottom: y + Number(rect.getAttribute("height")),
+  };
+};
+const zeroX = () => Number(svg3()!.querySelector(".wh-cf-zero")!.getAttribute("x1"));
+// How far a side reaches from zero: its widest bar, or its curves' farthest point.
+const barReach = (which: Side) =>
+  Math.max(
+    ...[...svg3()!.querySelectorAll(`.wh-cf-bar--${which}`)].map((bar) =>
+      which === "pos" ? edges(bar).right - zeroX() : zeroX() - edges(bar).left,
+    ),
+  );
+const curveReach = (kind: "kde" | "mix", which: Side) =>
+  Math.max(
+    ...[...svg3()!.querySelectorAll(`path.wh-cf-${kind}--${which}`)].flatMap((path) =>
+      points(path.getAttribute("d")!).map(([x]) => (which === "pos" ? x - zeroX() : zeroX() - x)),
+    ),
+  );
+
+// The rows and the sell side's weights of 30d All Zoom All, as the chart draws them.
+const defaultRows = () => {
+  const found = udiff(gridFor(s2, "all")!, "30d", "all", false, 0, s2.spot!);
+  if (!found.ok) throw new Error("no rows");
+  return found.value;
+};
+
+it("plotFrame keeps the plot and the spot label inside 330 px", async () => {
+  const f = plotFrame(330);
+  expect(f).toEqual({
+    left: 44,
+    right: 76,
+    top: 8,
+    bottom: 34,
+    plotW: 210,
+    xTicks: 3,
+    yTicks: 6,
+    labelPx: 10,
+    spotX: 328,
+  });
+  expect(f.plotW).toBeGreaterThanOrEqual(200);
+  expect(f.left + f.plotW).toBeLessThan(f.spotX);
+  expect(f.spotX).toBeLessThanOrEqual(330);
+  expect(plotFrame(1100)).toEqual({
+    left: 64,
+    right: 96,
+    top: 10,
+    bottom: 36,
+    plotW: 940,
+    xTicks: 7,
+    yTicks: 10,
+    labelPx: 11,
+    spotX: 1098,
+  });
+  // The wide frame starts at 500 px.
+  expect(plotFrame(499).left).toBe(44);
+  expect(plotFrame(500).left).toBe(64);
+  // Drawn at 330 px: 300 px high (the floor of the height), the spot label right-aligned in the
+  // right margin, and every tick label inside the chart.
+  stubWidth(330);
+  show();
+  await screen.findByText(TITLE3);
+  expect(svg3()!.getAttribute("viewBox")).toBe("0 0 330 300");
+  const spot = svg3()!.querySelector("text.wh-cf-spot")!;
+  expect(spot.getAttribute("x")).toBe("328");
+  expect(spot.getAttribute("text-anchor")).toBe("end");
+  const xTicks = [...svg3()!.querySelectorAll("text.wh-cf-tick--x")];
+  expect(xTicks.length).toBeGreaterThanOrEqual(2);
+  expect(xTicks.length).toBeLessThanOrEqual(5);
+  for (const tick of xTicks) {
+    const x = Number(tick.getAttribute("x"));
+    expect(x).toBeGreaterThanOrEqual(f.left);
+    expect(x).toBeLessThanOrEqual(f.left + f.plotW);
+  }
+  for (const tick of svg3()!.querySelectorAll("text.wh-cf-tick--y"))
+    expect(Number(tick.getAttribute("x"))).toBe(f.left - 6);
+});
+
+it("labelX keeps K and M labels inside the plot", async () => {
+  const f = plotFrame(330);
+  expect(labelX(46, "neg", f)).toBe(63);
+  expect(labelX(250, "pos", f)).toBe(235);
+  // Away from the edges a label sits 8 px off its point.
+  expect(labelX(150, "neg", f)).toBe(142);
+  expect(labelX(150, "pos", f)).toBe(158);
+  // 11 px labels are ceil(3 × 0.62 × 11) = 21 px wide.
+  const wide = plotFrame(1100);
+  expect(labelX(70, "neg", wide)).toBe(85);
+  expect(labelX(1000, "pos", wide)).toBe(983);
+  // Drawn at 330 px with the bells on: every K and M label stays between the plot's edges.
+  stubWidth(330);
+  show();
+  await screen.findByText(TITLE3);
+  pick(side("pos"), "Bell curves", "On");
+  pick(side("neg"), "Bell curves", "On");
+  const drawn = [...svg3()!.querySelectorAll("text.wh-cf-label")];
+  expect(drawn.map((label) => label.textContent).sort()).toEqual(
+    ["K1", "K2", "K3", "K4", "K5", "M1", "M1", "M2", "M3", "M4"].sort(),
+  );
+  let clamped = 0;
+  for (const label of drawn) {
+    const x = Number(label.getAttribute("x"));
+    expect(label.getAttribute("font-size")).toBe("10");
+    if (label.getAttribute("text-anchor") === "end") {
+      expect(x - 19).toBeGreaterThanOrEqual(f.left);
+      expect(x).toBeLessThanOrEqual(f.left + f.plotW);
+      if (x === f.left + 19) clamped += 1;
+    } else {
+      expect(label.getAttribute("text-anchor")).toBe("start");
+      expect(x).toBeGreaterThanOrEqual(f.left);
+      expect(x + 19).toBeLessThanOrEqual(f.left + f.plotW);
+      if (x === f.left + f.plotW - 19) clamped += 1;
+    }
+  }
+  // The tallest peaks sit near the plot's edges, so some labels are pulled in.
+  expect(clamped).toBeGreaterThan(0);
+});
+
+it("never calls the engine for hover or the keyboard readout", async () => {
+  const resize = stubWidth();
+  show();
+  await screen.findByText(TITLE3);
+  // One fit per side on the first render.
+  const count = fits.mock.calls.length;
+  expect(count).toBe(2);
+  const svg = svg3()!;
+  // 720 wide by default and 440 high.
+  svg.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width: 720, height: 440, right: 720, bottom: 440 }) as DOMRect;
+  const read = new Set<string | null>();
+  for (let i = 0; i < 20; i += 1) {
+    fireEvent.pointerMove(svg, { clientX: 300, clientY: 40 + i * 8, pointerType: "mouse" });
+    read.add(readout()[0]);
+  }
+  // Every move reads another bucket.
+  expect(read.size).toBe(20);
+  expect(fits.mock.calls.length).toBe(count);
+  fireEvent.pointerLeave(svg, { pointerType: "mouse" });
+  expect(readout()).toEqual([]);
+  for (let i = 0; i < 20; i += 1) {
+    fireEvent.keyDown(svg, { key: "ArrowUp" });
+    read.add(readout()[0]);
+  }
+  expect(read.size).toBeGreaterThan(20);
+  expect(fits.mock.calls.length).toBe(count);
+  resize(330);
+  expect(svg.getAttribute("viewBox")).toBe("0 0 330 300");
+  expect(fits.mock.calls.length).toBe(count);
+});
+
+it("coalesces ten slider inputs into one recompute", async () => {
+  const { unmount } = show();
+  await screen.findByText(TITLE3);
+  pick(side("neg"), "Smoothing", "Manual");
+  fireEvent.click(gear("neg"));
+  const cutoff = slider("neg", "peak cutoff");
+  const before = fits.mock.calls.length;
+  const values = Array.from({ length: 10 }, (_, i) => (6 + i) / 100);
+  for (const value of values) fireEvent.input(cutoff, { target: { value: String(value) } });
+  // Nothing is fitted until the frame runs, but the slider already reads the last value.
+  expect(fits.mock.calls.length).toBe(before);
+  expect(cutoff.value).toBe("0.15");
+  expect(side("neg").querySelector(`output[for="${cutoff.id}"]`)!.textContent).toBe("0.15");
+  expect(frames.size).toBe(1);
+  const timed = performance.getEntriesByName("costflow-fit").length;
+  flush();
+  expect(fits.mock.calls.length).toBe(before + 1);
+  const [centers, weights, setting] = fits.mock.calls[before];
+  const rows = defaultRows();
+  expect(centers).toEqual(rows.map((row) => row.price));
+  expect(weights).toEqual(sideWeights(rows, "all", false, "neg"));
+  expect(setting).toEqual({ ...DEFAULT_SIDE, smoothing: "kde", minProm: 0.15 });
+  // The fit is timed for the browser check.
+  expect(performance.getEntriesByName("costflow-fit").length).toBe(timed + 1);
+  expect(chip("neg")).toBe("0.020 / 0.15");
+  // A frame still pending when the chart goes away is cancelled.
+  fireEvent.input(cutoff, { target: { value: "0.2" } });
+  expect(frames.size).toBe(1);
+  const [pending] = frames.keys();
+  unmount();
+  expect(cancelFrame).toHaveBeenCalledWith(pending);
+  expect(frames.size).toBe(0);
+});
+
+it("draws Chart 3 with the original's default readings", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  // page-recorded (05:55 sweep, "30d all zoomAll" and "restored defaults", the S2 snapshot).
+  expect(legend()).toEqual([
+    "Net Buy (Accumulation) +1,134,837 BTC",
+    "Net Sell (Distribution) −1,121,241 BTC",
+  ]);
+  expect(svg3()!.getAttribute("data-rows")).toBe("252");
+  expect(svg3()!.querySelectorAll(".wh-cf-bar--pos")).toHaveLength(12);
+  expect(svg3()!.querySelectorAll(".wh-cf-bar--neg")).toHaveLength(240);
+  expect(svg3()!.querySelectorAll(".wh-cf-bar--aging-pos, .wh-cf-bar--aging-neg")).toHaveLength(
+    0,
+  );
+  expect(table("clusters").querySelector(".wh-cf-fit-meta")!.textContent).toBe(
+    "5 clusters · 1 in · 4 out",
+  );
+  expect(tableRows("clusters").map(line)).toEqual([
+    "K1 | Net Sell (Distribution) | $41,750 | $6,768 | 34,546 BTC | 3.1% | 7% | 49.3% below",
+    "K2 | Net Sell (Distribution) | $63,750 | $8,413 | 258,016 BTC | 23.0% | 30% | 22.6% below",
+    "K3 | Net Sell (Distribution) | $77,750 | $6,960 | 490,118 BTC | 43.7% | 99% | 5.6% below",
+    "K4 | Net Buy (Accumulation) | $83,750 | $6,773 | 1,134,837 BTC | 100.0% | 100% | 1.7% above",
+    "K5 | Net Sell (Distribution) | $91,250 | $41,110 | 668,265 BTC | 59.6% | 7% | 10.8% above",
+  ]);
+  // The vs-spot tag: support below spot, resistance above.
+  const tags = [...table("clusters").querySelectorAll(".wh-cf-tag")].map((tag) =>
+    tag.classList.contains("wh-cf-tag--support") ? "support" : "resistance",
+  );
+  expect(tags).toEqual(["support", "support", "support", "resistance", "resistance"]);
+  expect(tableRows("components")).toEqual([
+    ["Bell curves are off. Turn them on for either side above."],
+  ]);
+  expect(table("components").querySelector(".wh-cf-fit-meta")!.textContent).toBe("");
+  // The chart numbers its K marks as the table does (U4).
+  expect(labels("k", "pos")).toEqual(["K4"]);
+  expect(labels("k", "neg")).toEqual(["K1", "K2", "K3", "K5"]);
+  expect(svg3()!.querySelectorAll("path.wh-cf-kde")).toHaveLength(2);
+  expect(svg3()!.querySelectorAll("path.wh-cf-mix")).toHaveLength(0);
+  // A:1694-1696: each side's KDE peaks at 92% of its tallest bar (one bar per row for All).
+  for (const which of ["pos", "neg"] as const)
+    expect(curveReach("kde", which) / barReach(which)).toBeCloseTo(0.92, 2);
+  expect(svg3()!.querySelector("text.wh-cf-spot")!.textContent).toBe("spot $82,361");
+  expect(chart3().querySelector(".wh-cf-captions")!.textContent).toBe(
+    "BTC ← Net Sell (Distribution)Net Buy (Accumulation) → BTC",
+  );
+  expect(chart3().querySelector(".wh-cf-note")!.textContent).toBe(
+    "All-cohort diff nets aging out by construction, so this toggle changes nothing here. $500 bins.",
+  );
+  // The defaults: 30d, All, Zoom All, Aging Hide; both sides Auto, Bells Off, How many auto.
+  for (const [group, name] of [
+    ["Window", "30d"],
+    ["Holders", "All"],
+    ["Zoom", "All"],
+    ["Aging", "Hide"],
+  ])
+    expect(
+      within(within(chart3()).getByRole("group", { name: group }))
+        .getByRole("button", { name })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+  for (const which of ["pos", "neg"] as const) {
+    expect(chip(which)).toBe("auto");
+    expect(buttons(side(which), "How many")).toEqual(["auto", "1", "2", "3", "4", "5"]);
+  }
+  // page-recorded ("1d all zoomAll"): a bucket that did not change draws no bar.
+  pick(chart3(), "Window", "1d");
+  expect(legend()).toEqual([
+    "Net Buy (Accumulation) +54,914 BTC",
+    "Net Sell (Distribution) −54,811 BTC",
+  ]);
+  expect(svg3()!.querySelectorAll(".wh-cf-bar--pos")).toHaveLength(1);
+  expect(svg3()!.querySelectorAll(".wh-cf-bar--neg")).toHaveLength(247);
+  const oneDay = udiff(gridFor(s2, "all")!, "1d", "all", false, 0, s2.spot!);
+  expect(oneDay.ok && oneDay.value.length).toBeGreaterThan(248);
+  expect(svg3()!.getAttribute("data-rows")).toBe(String(oneDay.ok && oneDay.value.length));
+});
+
+it("draws no vs-spot tag without a spot", () => {
+  const rows = defaultRows();
+  const pos = fitSide(
+    rows.map((row) => row.price),
+    sideWeights(rows, "all", false, "pos"),
+    DEFAULT_SIDE,
+  );
+  render(<ClustersTable rows={clusters(pos, null)} spot={0} empty="none" />);
+  const cells = [...document.querySelectorAll("tbody tr td, tbody tr th")].map(
+    (cell) => cell.textContent,
+  );
+  expect(cells.at(-1)).toBe("—");
+  expect(document.querySelector(".wh-cf-tag")).toBeNull();
+});
+
+it("fits bell curves on request", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  pick(side("pos"), "Bell curves", "On");
+  pick(side("neg"), "Bell curves", "On");
+  // page-recorded (05:55 sweep, "30d all zoomAll aging off bells on").
+  expect(table("components").querySelector(".wh-cf-fit-meta")!.textContent).toBe(
+    "in: 1 bell · out: 4 bells",
+  );
+  expect(tableRows("components").map(line)).toEqual([
+    "M1 | Net Sell (Distribution) | $26,743 | $16,723 | 7.9% | 88,021 BTC | 67.5% below",
+    "M2 | Net Sell (Distribution) | $63,489 | $1,764 | 19.8% | 222,267 BTC | 22.9% below",
+    "M3 | Net Sell (Distribution) | $77,733 | $1,248 | 40.0% | 447,953 BTC | 5.6% below",
+    "M1 | Net Buy (Accumulation) | $83,663 | $1,363 | 100.0% | 1,134,837 BTC | 1.6% above",
+    "M4 | Net Sell (Distribution) | $83,835 | $20,236 | 32.4% | 362,999 BTC | 1.8% above",
+  ]);
+  expect(buttons(side("pos"), "How many")[0]).toBe("auto · 1");
+  expect(buttons(side("neg"), "How many")[0]).toBe("auto · 4");
+  expect(labels("m", "pos")).toEqual(["M1"]);
+  expect(labels("m", "neg")).toEqual(["M1", "M2", "M3", "M4"]);
+  expect(svg3()!.querySelectorAll("path.wh-cf-mix--pos")).toHaveLength(1);
+  expect(svg3()!.querySelectorAll("path.wh-cf-mix--neg")).toHaveLength(4);
+  // A:1728-1730: a side's bells together peak at 85% of its tallest bar.
+  for (const which of ["pos", "neg"] as const)
+    expect(curveReach("mix", which) / barReach(which)).toBeCloseTo(0.85, 2);
+  // The clusters do not depend on the bells.
+  expect(tableRows("clusters")).toHaveLength(5);
+  // A manual k: three bells on the sell side, and auto reads plain "auto" again.
+  pick(side("neg"), "How many", "3");
+  expect(labels("m", "neg")).toEqual(["M1", "M2", "M3"]);
+  expect(buttons(side("neg"), "How many")[0]).toBe("auto");
+  expect(table("components").querySelector(".wh-cf-fit-meta")!.textContent).toBe(
+    "in: 1 bell · out: 3 bells",
+  );
+});
+
+it("tunes a side by hand", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  pick(side("neg"), "Smoothing", "Manual");
+  expect(chip("neg")).toBe("0.020 / 0.05");
+  fireEvent.click(gear("neg"));
+  expect(gear("neg").getAttribute("aria-expanded")).toBe("true");
+  const width = slider("neg", "width");
+  const cutoff = slider("neg", "peak cutoff");
+  for (const [input, min, max, step, value] of [
+    [width, "0.005", "0.10", "0.001", "0.02"],
+    [cutoff, "0.01", "0.40", "0.005", "0.05"],
+  ] as const) {
+    expect(input.disabled).toBe(false);
+    expect(input.getAttribute("min")).toBe(min);
+    expect(input.getAttribute("max")).toBe(max);
+    expect(input.getAttribute("step")).toBe(step);
+    expect(input.value).toBe(value);
+  }
+  fireEvent.input(cutoff, { target: { value: "0.40" } });
+  flush();
+  // derived from page values: only the sell peak of strength 99% (K3) clears a 0.40 cutoff.
+  const sells = tableRows("clusters").filter((row) => row[1] === "Net Sell (Distribution)");
+  expect(sells).toHaveLength(1);
+  expect(sells[0][2]).toBe("$77,750");
+  expect(chip("neg")).toBe("0.020 / 0.40");
+  // The buy side is untouched.
+  expect(tableRows("clusters").filter((row) => row[1] === "Net Buy (Accumulation)")).toHaveLength(
+    1,
+  );
+  // A value still waiting for its frame when the side leaves Manual is dropped, not committed
+  // onto Auto.
+  fireEvent.input(cutoff, { target: { value: "0.30" } });
+  expect(frames.size).toBe(1);
+  pick(side("neg"), "Smoothing", "Auto");
+  flush();
+  expect(chip("neg")).toBe("auto");
+  for (const [input, value] of [
+    [width, "0.02"],
+    [cutoff, "0.05"],
+  ] as const) {
+    expect(input.disabled).toBe(true);
+    expect(input.value).toBe(value);
+    expect(side("neg").querySelector(`output[for="${input.id}"]`)!.textContent).toBe("auto");
+  }
+  expect(tableRows("clusters")).toHaveLength(5);
+  // Off draws no curve on that side: no peaks, so its clusters go.
+  pick(side("neg"), "Smoothing", "Off");
+  expect(chip("neg")).toBe("raw");
+  expect(tableRows("clusters").map((row) => row[0])).toEqual(["K1"]);
+  expect(svg3()!.querySelectorAll("path.wh-cf-kde--neg")).toHaveLength(0);
+});
+
+it("shows the aging split for LTH", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  pick(chart3(), "Window", "90d");
+  pick(chart3(), "Holders", "LTH");
+  pick(chart3(), "Aging", "Show");
+  pick(side("neg"), "Bell curves", "On");
+  // page-recorded (05:55 sweep, "90d lth zoomAll aging on bells on").
+  expect(legend()).toEqual([
+    "Net Buy (Accumulation) +3,210,656 BTC",
+    "Net Sell (Distribution) −1,886,531 BTC",
+    "Aging STH→LTH 1,283,400 BTC · 40% of buy side",
+  ]);
+  // The aging row is drawn hollow, on the side it sits on.
+  const swatches = [...chart3().querySelectorAll(".wh-cf-legend .wh-seller-swatch")];
+  expect(swatches[2].className).toContain("wh-cf-swatch--pos");
+  expect(swatches[2].className).toContain("wh-cf-swatch--hollow");
+  expect(swatches[0].className).not.toContain("wh-cf-swatch--hollow");
+  expect(svg3()!.querySelectorAll(".wh-cf-bar--pos")).toHaveLength(28);
+  expect(svg3()!.querySelectorAll(".wh-cf-bar--neg")).toHaveLength(224);
+  expect(svg3()!.querySelectorAll(".wh-cf-bar--aging-pos")).toHaveLength(35);
+  // The axis spans ±1.08 × the widest stack, aging included (A:1592-1600): every bar stays in
+  // the plot, and the widest stack reaches 1/1.08 of the way to its edge.
+  const f = plotFrame(720);
+  const bars = [...svg3()!.querySelectorAll(".wh-cf-bar")].map(edges);
+  for (const bar of bars) {
+    expect(bar.left).toBeGreaterThanOrEqual(f.left);
+    expect(bar.right).toBeLessThanOrEqual(f.left + f.plotW);
+  }
+  const widest = Math.max(
+    ...bars.map((bar) => Math.max(bar.right - zeroX(), zeroX() - bar.left)),
+  );
+  expect(widest).toBeCloseTo(f.plotW / 2 / 1.08, 0);
+  expect(table("clusters").querySelector(".wh-cf-fit-meta")!.textContent).toBe(
+    "7 clusters · 1 in · 6 out",
+  );
+  expect(buttons(side("neg"), "How many")[0]).toBe("auto · 5 of 6");
+  expect(chart3().querySelector(".wh-cf-note")!.textContent).toBe(
+    "Real LTH buying and selling, plus the coins that arrived by ageing — both on the buy side. Aging is a lower bound. $500 bins.",
+  );
+  expect(chart3().querySelector(".wh-cf-span")!.textContent).toBe(
+    "90d · 21 Jul close → 19 Oct 06:04 UTC",
+  );
+});
+
+it("says a window is missing instead of drawing zeros", async () => {
+  const view = structuredClone(s2);
+  view.grids[0].windows = view.grids[0].windows.filter((found) => found.window !== "1d");
+  show(view);
+  await screen.findByText(TITLE3);
+  pick(chart3(), "Window", "1d");
+  expect(
+    within(chart3()).getByText("No 1d comparison: a snapshot it needs is missing."),
+  ).toBeTruthy();
+  expect(svg3()).toBeNull();
+  // Nothing that would read as a number: no legend, span, readout or tables.
+  for (const part of [".wh-cf-legend", ".wh-cf-span", ".wh-cf-readout", "[data-table]"])
+    expect(chart3().querySelector(part)).toBeNull();
+  // The controls stay, so another window can be chosen.
+  pick(chart3(), "Window", "7d");
+  expect(svg3()).not.toBeNull();
+  expect(chart3().querySelector(".wh-cf-span")!.textContent).toBe(
+    "7d · 12 Oct close → 19 Oct 06:04 UTC",
+  );
+  expect(screen.queryByText(/No 1d comparison/)).toBeNull();
+});
+
+it("says the $200 grid is missing", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  pick(chart3(), "Holders", "STH");
+  expect(within(chart3()).getByText("STH needs the $200 snapshots, which are missing.")).toBeTruthy();
+  expect(svg3()).toBeNull();
+  expect(chart3().querySelector(".wh-cf-legend")).toBeNull();
+  // The header names what is missing.
+  expect(
+    screen.getByText(
+      "All-holder URPD snapshot missing for the $200 bucket · STH URPD snapshot missing for the $200 bucket · LTH URPD snapshot missing for the $200 bucket",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText("Rules: original v1")).toBeTruthy();
+  pick(chart3(), "Holders", "All");
+  expect(svg3()!.getAttribute("data-rows")).toBe("252");
+});
+
+it("reads a bucket with the keyboard", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  const svg = svg3()!;
+  expect(chart3().querySelector(".wh-cf-readout")!.getAttribute("aria-live")).toBe("polite");
+  fireEvent.focus(svg);
+  fireEvent.keyDown(svg, { key: "ArrowUp" });
+  // page-recorded tooltip format; the first key reads the bucket that holds spot.
+  expect(readout()).toEqual([
+    "$82,000 – $82,500",
+    "Real net flow +220,010",
+    "LTH distribution +13,621",
+    "STH apparent +233,631",
+    "STH acquired at this cost basis · 30d window",
+  ]);
+  expect(svg.querySelector(".wh-cf-cursor")).not.toBeNull();
+  fireEvent.keyDown(svg, { key: "ArrowUp" });
+  expect(readout()[0]).toBe("$82,500 – $83,000");
+  fireEvent.keyDown(svg, { key: "ArrowDown" });
+  fireEvent.keyDown(svg, { key: "ArrowDown" });
+  expect(readout()[0]).toBe("$81,500 – $82,000");
+  fireEvent.keyDown(svg, { key: "Home" });
+  expect(readout()[0]).toBe("$0 – $500");
+  fireEvent.keyDown(svg, { key: "ArrowDown" });
+  expect(readout()[0]).toBe("$0 – $500");
+  fireEvent.keyDown(svg, { key: "End" });
+  expect(readout()[0]).toBe("$125,500 – $126,000");
+  fireEvent.keyDown(svg, { key: "Escape" });
+  expect(readout()).toEqual([]);
+  expect(svg.querySelector(".wh-cf-cursor")).toBeNull();
+  // A new window clears the reading.
+  fireEvent.keyDown(svg, { key: "ArrowDown" });
+  expect(readout()).toHaveLength(5);
+  pick(chart3(), "Window", "7d");
+  expect(readout()).toEqual([]);
+  // So do the holders, whose rows replace these.
+  fireEvent.keyDown(svg3()!, { key: "ArrowDown" });
+  expect(readout()).toHaveLength(5);
+  pick(chart3(), "Holders", "LTH");
+  expect(readout()).toEqual([]);
+});
+
+it("spans the BTC axis by the widest stack, not the net", async () => {
+  // Hand-built from S2: at $60,000–$60,500 over 30d, 3M BTC leave All while 3M leave STH by
+  // ageing. LTH with Aging Show draws a −3M real bar and a +3M aging bar on that row: the stack
+  // is 3M each way while the row's net is 0.
+  const view = structuredClone(s2);
+  const grid = view.grids[0];
+  const i = grid.floors.indexOf(60_000);
+  const then = grid.windows.find((found) => found.window === "30d")!.then;
+  then.all[i] = grid.now.all[i] + 3_000_000;
+  then.sth[i] = grid.now.sth[i] + 3_000_000;
+  then.lth[i] = grid.now.lth[i];
+  show(view);
+  await screen.findByText(TITLE3);
+  pick(chart3(), "Holders", "LTH");
+  pick(chart3(), "Aging", "Show");
+  const f = plotFrame(720);
+  const bars = [...svg3()!.querySelectorAll(".wh-cf-bar")].map(edges);
+  for (const bar of bars) {
+    expect(bar.left).toBeGreaterThanOrEqual(f.left);
+    expect(bar.right).toBeLessThanOrEqual(f.left + f.plotW);
+  }
+  // ±1.08 × 3M: the row's two bars reach 1/1.08 of the way to each edge.
+  expect(zeroX() - Math.min(...bars.map((bar) => bar.left))).toBeCloseTo(f.plotW / 2 / 1.08, 0);
+  expect(Math.max(...bars.map((bar) => bar.right)) - zeroX()).toBeCloseTo(f.plotW / 2 / 1.08, 0);
+});
+
+it("pads Zoom All and not a ±% zoom", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  const f = plotFrame(720);
+  const plotH = 440 - f.top - f.bottom;
+  const span = () => {
+    const bars = [...svg3()!.querySelectorAll(".wh-cf-bar")].map(edges);
+    return [Math.min(...bars.map((bar) => bar.top)), Math.max(...bars.map((bar) => bar.bottom))];
+  };
+  // Zoom All: 252 rows from $0 to $126,000, padded by 5% above; never below $0.
+  const [top, bottom] = span();
+  expect(bottom).toBeCloseTo(f.top + plotH, 0);
+  expect(top - f.top).toBeCloseTo((plotH * 0.05 * 126_000) / (126_000 * 1.05), 0);
+  // ±10%: the band itself, rows edge to edge.
+  pick(chart3(), "Zoom", "±10%");
+  const rows = Number(svg3()!.getAttribute("data-rows"));
+  expect(rows).toBe(33);
+  const [zTop, zBottom] = span();
+  const half = plotH / rows / 2;
+  expect(zTop - f.top).toBeCloseTo(half - (half * 2 - 1) / 2, 0);
+  expect(f.top + plotH - zBottom).toBeCloseTo(half - (half * 2 - 1) / 2, 0);
+});
+
+it("puts the three explanations under Chart 3", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  const read = chart3().querySelector(".wh-seller-read")!;
+  // Last in the panel, after the tables.
+  expect(chart3().lastElementChild).toBe(read);
+  expect([...read.querySelectorAll("h4")].map((heading) => heading.textContent)).toEqual([
+    "What it shows",
+    "What extreme values imply",
+    "How to read",
+  ]);
+  const bodies = [...read.querySelectorAll("p")].map((body) => body.textContent ?? "");
+  expect(bodies[0].startsWith("Where supply changed hands over the window, by cost basis.")).toBe(
+    true,
+  );
+  expect(
+    bodies[1].startsWith("A large Net Buy cluster at spot is a fresh cost base:"),
+  ).toBe(true);
+  expect(bodies[2].startsWith("Price runs up the vertical axis and BTC across:")).toBe(true);
+});
+
+it("marks the forming snapshot by its day", async () => {
+  show();
+  await screen.findByText(TITLE3);
+  expect(
+    screen.getByText("URPD snapshot 19 Oct 2026 · 06:04 UTC · Source Bitcoin Research Kit"),
+  ).toBeTruthy();
+  expect(screen.getByText("includes the forming snapshot of 19 Oct 2026")).toBeTruthy();
+  expect(chart3().querySelector(".wh-cf-span")!.textContent).toBe(
+    "30d · 19 Sep close → 19 Oct 06:04 UTC",
+  );
+  cleanup();
+  show({ ...s2, forming_at: null });
+  await screen.findByText(TITLE3);
+  expect(chart3().querySelector(".wh-cf-span")!.textContent).toBe("30d · 19 Sep close → 19 Oct close");
+  expect(screen.queryByText(/forming snapshot/)).toBeNull();
+});
+
+it("warns when the snapshot is out of date or fails QC", async () => {
+  show({
+    ...s2,
+    data_state: "stale",
+    qc: ["cohort_sum:lin500", "sold_negative:30d", "age_floor", "new_check"],
+  });
+  await screen.findByText(TITLE3);
+  expect(screen.getByText("Snapshot out of date · 19 Oct 2026")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "QC failed: STH + LTH ≠ All at $500, sold below zero in 30d, age floor contradicted, new_check",
+    ),
+  ).toBeTruthy();
+  // QC only warns; the chart is drawn.
+  expect(svg3()).not.toBeNull();
+});
+
+it("says the flows are unavailable without inventing numbers", async () => {
+  show({
+    ...s2,
+    data_state: "unavailable",
+    reasons: ["brk_unavailable"],
+    grids: [],
+    age: null,
+    spot: null,
+    now_day: null,
+    snapshot_at: null,
+    forming_at: null,
+  });
+  expect(await screen.findByText("Cost-basis flows unavailable")).toBeTruthy();
+  expect(screen.getByText("on-chain data source unavailable")).toBeTruthy();
+  expect(document.querySelector('[data-chart="costflow-3"]')).toBeNull();
+  cleanup();
+  mocks.costFlow.mockReturnValue(new Promise(() => {}));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { container } = render(
+    <QueryClientProvider client={client}>
+      <CostFlowCharts />
+    </QueryClientProvider>,
+  );
+  expect(screen.getByText("Loading the cost-basis flows…")).toBeTruthy();
+  expect(container.textContent ?? "").not.toMatch(/\d/);
+});
