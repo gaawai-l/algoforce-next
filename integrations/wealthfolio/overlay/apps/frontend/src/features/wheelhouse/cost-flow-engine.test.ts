@@ -80,10 +80,35 @@ describe("cost-flow engine", () => {
 
   // Stage A fitted the same rows with costbasis.py's GMM, a port of A:1460-1511 with the same
   // initialisation; neither has a random step, so a given k gives the same bells.
+  //
+  // Every other reference value below (mu, sigma, w) is costbasis.fit_gmm's output on the same
+  // rows, from services/analytics with ../../.venv-foundation/bin/python:
+  //   [[c.mu, c.sigma, c.share] for c in fit_gmm(xs, ws, k)[0]]
+  // with xs and ws as written, or, for manual k, the side's crosscheck rows with weight > 0.
   it("fits the page's GMM when asked for k", () => {
-    for (const [holders, name, win, aging] of [
-      ["all", "neg", "30d", "off"],
-      ["sth", "neg", "30d", "on"],
+    for (const [holders, name, win, aging, manualWant] of [
+      [
+        "all",
+        "neg",
+        "30d",
+        "off",
+        [
+          [30573.571081215458, 17697.390850602733, 0.09766983041577493],
+          [73890.54456746274, 8716.744482908629, 0.8018487293600716],
+          [105897.73703212851, 11010.891983082729, 0.1004814402241534],
+        ],
+      ],
+      [
+        "sth",
+        "neg",
+        "30d",
+        "on",
+        [
+          [63616.68947654511, 1451.895566518155, 0.13694530375029892],
+          [72265.16783783522, 29250.530334320072, 0.3288714102626095],
+          [77958.26140424814, 1477.3923977397235, 0.5341832859870915],
+        ],
+      ],
     ] as const) {
       const s = side(holders, name);
       const { xs, ws } = weighted(s.centers, s.weights);
@@ -114,6 +139,13 @@ describe("cost-flow engine", () => {
         raw: null,
         totalW: ws.reduce((a, w) => a + w, 0),
       });
+      expect(manual?.mix?.comps).toHaveLength(3);
+      manual?.mix?.comps.forEach((c, j) => {
+        const what = `${win} ${holders} ${name} manual M${j + 1}`;
+        near(c.mu, manualWant[j][0], 1e-9, `${what} mu`);
+        near(c.sigma, manualWant[j][1], 1e-9, `${what} sigma`);
+        near(c.w, manualWant[j][2], 1e-9, `${what} w`);
+      });
     }
 
     // Hand rows where the page's start decides the fit (M4). Two quantiles on one row start 1e-3
@@ -139,6 +171,28 @@ describe("cost-flow engine", () => {
       // A row so far from every bell that its density underflows to 0 is shared equally among
       // them, not divided by zero (A:1492).
       [[0, 1, 2, 1000], [1, 1, 1, 1e-9], [[1.0000003329999998, 0.8167002714853367, 1]]],
+      // Only a bell whose summed responsibility is at most 1e-12 is left as it was (A:1499): M2,
+      // on the far row, holds about 1e-4 of the weight and is still refitted every round.
+      [
+        [0, 1, 2, 3, 4, 50],
+        [1, 2, 3, 2, 1, 0.0009],
+        [
+          [1.9999999999999998, 1.1547005383792515, 0.9999000099990002],
+          [50, 0.0010420179208588628, 9.999000099990002e-5],
+        ],
+      ],
+      // M2 and M3 start 1e-3 and 2e-3 above the only weighted row, too narrow to reach it, so
+      // they are skipped every round; the weights sum to 1 only because they are divided by
+      // their sum (A:1504-1505).
+      [
+        [0, 1, 2],
+        [1, 1e-30, 1e-30],
+        [
+          [1e-30, 1e-9, 0.9917695473251029],
+          [0.001, 1e-6, 0.004115226337448564],
+          [0.002, 1e-6, 0.004115226337448564],
+        ],
+      ],
     ] as const) {
       const fit = fitGMM1D(xs, ws, want.length)!;
       expect(fit.comps).toHaveLength(want.length);
