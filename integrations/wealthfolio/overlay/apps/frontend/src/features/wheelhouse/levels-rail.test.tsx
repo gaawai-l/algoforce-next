@@ -69,6 +69,25 @@ describe("LevelsRail", () => {
     expect(num(item, "y") + num(item, "height")).toBe(y(88000));
   });
 
+  it("draws nothing for a band that covers the whole price range", () => {
+    draw([
+      band({ id: "sth-1", index: 1, price: 82000, low: 70000, high: 95000 }),
+      band({ id: "sth-2", index: 2, price: 85000, low: 80000, high: 90000 }),
+      // Touching one edge of the range still tells where the band ends.
+      band({ id: "sth-3", index: 3, price: 83000, low: 80000, high: 89000 }),
+      band({ id: "lth-1", cohort: "lth", index: 1, low: 79000, high: 89000 }),
+    ]);
+    const items = screen.getAllByRole("listitem");
+    expect(items.map((item) => item.getAttribute("aria-label"))).toEqual([
+      "STH K3 · $83,000",
+      "LTH K1 · $82,250",
+    ]);
+    expect(items.map((item) => item.getAttribute("aria-setsize"))).toEqual([
+      "2",
+      "2",
+    ]);
+  });
+
   it("keeps STH in the left lane and LTH in the right lane", () => {
     draw([band(), band({ id: "lth-1", cohort: "lth", index: 1 })]);
     const [sth, lth] = screen.getAllByRole("listitem");

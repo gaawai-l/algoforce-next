@@ -73,9 +73,15 @@ export function LevelsRail({
     report.current(band);
   }, []);
   const laneWidth = width / 2 - 1;
-  // Only the part inside the price range is drawn; the rail never widens the y-axis.
+  // Only the part inside the price range is drawn; the rail never widens the y-axis. A band that
+  // covers the whole range would draw as a solid bar saying nothing, so it is left out.
   const drawn = bands
-    .filter((band) => band.high > bottom && band.low < top)
+    .filter(
+      (band) =>
+        band.high > bottom &&
+        band.low < top &&
+        !(band.low <= bottom && band.high >= top),
+    )
     .map((band, i) => {
       const y1 = y(Math.min(band.high, top));
       return {

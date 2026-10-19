@@ -311,13 +311,14 @@ describe("on-chain overlays", () => {
   });
 
   describe("price rail", () => {
+    // Inside the priced bars' 81,900..82,500 range: a band wider than the range is not drawn.
     const sth2: RailBand = {
       id: "sth-2",
       cohort: "sth",
       index: 2,
       price: 82250,
-      low: 77264.5,
-      high: 87235.5,
+      low: 82050,
+      high: 82450,
       strength: 1,
       btc: 1910000,
       share: 0.521,
@@ -485,7 +486,7 @@ describe("on-chain overlays", () => {
       expect(view.container.querySelector(".wh-rail-spread")).not.toBeNull();
       const status = screen.getByRole("status");
       expect(status.textContent).toBe(
-        "STH K2 · $82,250 · width $9,971 · 1.91M BTC (52.1%) · strength 100%",
+        "STH K2 · $82,250 · width $400 · 1.91M BTC (52.1%) · strength 100%",
       );
       fireEvent.keyDown(item, { key: "ArrowLeft" });
       expect(ohlc(view.container)).toBe(selected);
