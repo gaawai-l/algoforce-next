@@ -1,6 +1,6 @@
 # 原站图表盘点与本地复刻现状
 
-日期：2026-10-19。原站线上版本于 2026-10-18 在已登录的 Chrome 中核对。
+日期：2026-10-19。原站线上版本于 2026-10-18 在已登录的 Chrome 中核对。2026-10-19 的逐图核对结果见 [CHART-VERIFICATION.md](CHART-VERIFICATION.md)，下表已按它更正。
 
 ## 原站
 
@@ -19,10 +19,11 @@
 
 ## 合计
 
-三个页面共 **16 张图、2 张表**，另有 Analyst Take（人工撰写的文字）和页头的周期状态。
+三个页面共 **16 张图、2 张表**，另有 Analyst Take（人工撰写的文字）、alpha-vol 两页页头的周期状态，以及 onchain-seller 的 Supplementary 标签页（见下）。
 
 目前本地做了：
-- **9 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的 2 张（图 7 的刻度轨版本、页头周期）；
+- **8 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的图 7（刻度轨版本）；
+- **页头周期**（cycle badge），对应 onchain-seller、perp-squeeze 的页头；
 - **1 张表**：state-report 的表 2；
 - **perp-squeeze 的表 1**：已实现，但因为缺清算数据显示不出来。
 
@@ -41,27 +42,27 @@
 | 图 8 Cost Basis Distribution, All Coins | BRK：365 个日快照（All 档 1461 个） | 不缺，但首次要取 365 次 | 没做（spec 划出范围） |
 | 表 2 Price Levels | BRK URPD | 不缺 | **已做**，与原站逐格一致 |
 | Analyst Take | 人工撰写；原站模板本身是空的 | — | 没做 |
-| 页头周期 | BRK day1 | 不缺 | **已做**（cycle badge） |
+| 页头周期 | — | — | state-report 线上**没有**周期元素（"周期"只是站名的一部分）；周期显示在 onchain-seller、perp-squeeze 的页头，本地已做（cycle badge），与两页逐日一致 |
 
 ## onchain-seller（数据：BRK）
 
 | 图表 | 缺数据？ | 本地现状（2026-10-18 13:00 那根，与原站对照） |
 |---|---|---|
-| 图 1 Total Realized Loss By Cohorts | 不缺 | 已做。阈值：原站 Extreme $32.8M / Warning $8.66M，本地 $32.6M / $8.66M（本地默认开 O2，阈值逐小时滚动） |
+| 图 1 Total Realized Loss By Cohorts | 不缺 | 已做。阈值：原站 Extreme $32.8M / Warning $8.66M，本地 $32.6M / $8.66M（本地默认开 O2，阈值逐小时滚动）；v1 下全精度一致 |
 | 图 2 STH Realized Loss Share of Sell Side | 不缺 | 已做。阈值：原站 56.7% / 22.5%，本地一致 |
-| 图 3 STH Supply in Loss | 不缺 | 已做。阈值：原站 34.3% / 26.4%，本地 34.3% / 26.2% |
-| Supplementary 标签页 | — | 原站这一页是空的 |
+| 图 3 STH Supply in Loss | 不缺 | 已做。阈值：原站 34.3% / 26.4%，本地 34.3% / 26.2%（开着 O1+O2）；v1 下全精度一致 |
+| Supplementary 标签页 | 不缺（BRK） | 原站**不是空页**：懒加载 `onchain-pulse.html`（Chart 1–6、表 2、Exp1–6，前 7 项与 state-report 同模板），点击后约 10 秒内是黑屏。本地没做 |
 
 ## perp-squeeze（原站数据：Glassnode）
 
 | 图表 | 缺数据？ | 本地现状 |
 |---|---|---|
 | Parameters（Exchange：All venues / Binance / Bybit / Hyperliquid；State window；Show） | 缺 Hyperliquid，以及多家交易所汇总的 All venues | 只有 Binance、Bybit 和两家相加 |
-| 表 1 Perp States | **缺历史清算**，以及 Bybit 的主动买卖差 | 已实现，采满 7 天才显示 |
+| 表 1 Perp States | **缺历史清算**，以及 Bybit 的主动买卖差 | 已实现；要 ≥42 个完整覆盖的 4h 块（8h 为 21 块）才显示，2026-10-19 时为 0 个（服务每次重启都会切碎覆盖） |
 | 图 1 Long/Short Squeezes & Unwinds | 同上 | 同上 |
 | 图 2 New Long/Short, Spot-led | 同上 | 同上 |
-| 图 3 Price vs OI | 不缺 | 已做，完整 |
-| 图 4 Volume Delta & Liquidations | 清算缺；Bybit 买卖差缺 | 只显示采集开始之后的部分 |
+| 图 3 Price vs OI | 不缺 | 已做；Bybit OI 取的单边字段，只有原站口径的一半，且只含 BTCUSDT |
+| 图 4 Volume Delta & Liquidations | 清算缺；Bybit 买卖差缺 | 已做。缺的部分画成斜线（未覆盖），不画成 0；2026-10-19 时 All/Bybit 视图全是斜线，Binance 视图只有 delta 柱 |
 
 缺的数据改由 Coinalyze 补，方案见 [PROPOSAL-COINALYZE.md](../btc-perp-states/PROPOSAL-COINALYZE.md)。
 
