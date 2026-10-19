@@ -1,3 +1,4 @@
+import { BANDS12 } from "./age-cohorts";
 import type { EnginePeak, GmmComp, SideCurves, SideSetting } from "./cost-flow-engine";
 import type { TextFn } from "./i18n";
 import type { CostFlowView, FlowGrid } from "./onchain-contract";
@@ -349,4 +350,209 @@ export function flowTip(text: TextFn, r: FlowRow, step: number, w: Window): stri
     `${text("costflow.tip.sth")} ${fmtSigned(r.sth)}`,
     text("costflow.tip.window", { verdict, window: w }),
   ];
+}
+
+// Chart 4, the Age Breakdown (A:3460-3845): the same window and zoom as Chart 3 on the $500 grid,
+// with the bought side split exactly by age group and the sold side grouped by the band of when
+// price last traded at the level, the youngest those coins can be. The legend's rows hide and show
+// their bars; the toggles are the plan's (U2, N1), not the page's (A:3491).
+
+// L:260-261: how many young groups, youngest first, are younger than each window.
+export const YOUNG: Record<Window, number> = { "1d": 1, "7d": 2, "30d": 3, "90d": 4 };
+
+// One $500 row: its floor, middle price and age-floor band (L:366-377), each cohort's change over
+// the window, the young groups' supply now (buy), their sum, and what left the bucket: its supply
+// at the window's start less what is still there and older than the window.
+export interface AgeRow {
+  b: number;
+  price: number;
+  band: number;
+  all: number;
+  sth: number;
+  lth: number;
+  buy: number[];
+  bought: number;
+  sold: number;
+}
+
+// Which bars are drawn: the four bought groups and the twelve sold bands. The page kept three
+// bought entries, so 90d hid its 1m–3m group from the start (A:3491); every group is on here.
+export interface Toggles {
+  bought: boolean[];
+  sold: boolean[];
+}
+export const ALL_ON: Toggles = {
+  bought: [true, true, true, true],
+  sold: [true, true, true, true, true, true, true, true, true, true, true, true],
+};
+
+// A:3498-3526. Zoom All keeps three rows either side of the first and last row where a cohort
+// moved more than half a coin; a ±% zoom keeps the rows priced in that band of spot. Spot is the
+// close of D's $500 snapshot, so without it the $500 grid is what is missing.
+export function ageRows(view: CostFlowView, w: Window, z: Zoom): Found<AgeRow[]> {
+  const grid = gridFor(view, "all");
+  const spot = view.spot;
+  if (!grid || spot === null) return { ok: false, missing: "grid" };
+  const age = view.age;
+  if (!age) return { ok: false, missing: "age" };
+  const then = grid.windows.find((found) => found.window === w)?.then;
+  if (!then) return { ok: false, missing: "window" };
+  const now = grid.now;
+  const half = grid.step / 2;
+  let rows = grid.floors.map((b, i) => {
+    const buy = age.groups.slice(0, YOUNG[w]).map((group) => group[i]);
+    const bought = buy.reduce((a, v) => a + v, 0);
+    const sold = then.all[i] - (now.all[i] - bought);
+    return {
+      b,
+      price: b + half,
+      band: age.band[i],
+      all: now.all[i] - then.all[i],
+      sth: now.sth[i] - then.sth[i],
+      lth: now.lth[i] - then.lth[i],
+      buy,
+      bought,
+      sold,
+    };
+  });
+  if (z > 0) {
+    const lo = spot * (1 - z / 100),
+      hi = spot * (1 + z / 100);
+    rows = rows.filter((r) => r.price >= lo && r.price <= hi);
+  } else {
+    const live = (r: AgeRow) =>
+      Math.abs(r.all) > 0.5 || Math.abs(r.sth) > 0.5 || Math.abs(r.lth) > 0.5;
+    let i = 0,
+      j = rows.length - 1;
+    while (i < j && !live(rows[i])) i++;
+    while (j > i && !live(rows[j])) j--;
+    rows = rows.slice(Math.max(0, i - 3), Math.min(rows.length, j + 4));
+  }
+  return { ok: true, value: rows };
+}
+
+// One bar: a bought group's ("a<group>") or the row's sold bar ("s<band>"), which is drawn negated.
+export interface AgeSeg {
+  v: number;
+  key: string;
+  band: number;
+  sold: boolean;
+}
+
+// A:3528-3536: each shown bought group, then the sold bar when its band is shown.
+export function ageSegments(r: AgeRow, t: Toggles): AgeSeg[] {
+  const segs: AgeSeg[] = [];
+  r.buy.forEach((v, g) => {
+    if (t.bought[g]) segs.push({ v, key: `a${g}`, band: g, sold: false });
+  });
+  if (t.sold[r.band]) segs.push({ v: -r.sold, key: `s${r.band}`, band: r.band, sold: true });
+  return segs;
+}
+
+// A:3549
+const ageTotal = (r: AgeRow, t: Toggles) => ageSegments(r, t).reduce((a, s) => a + s.v, 0);
+
+// A:3550: what each row weighs on one side, the size of its shown bars' sum on that side.
+export function ageWeights(rows: readonly AgeRow[], t: Toggles, side: Side): number[] {
+  return rows.map((r) => {
+    const v = ageTotal(r, t);
+    return side === "pos" ? Math.max(0, v) : Math.max(0, -v);
+  });
+}
+
+// Any of the 16 toggles off, whether or not its row is in the legend (N1, rule 4).
+export const anyHidden = (t: Toggles) => t.bought.some((on) => !on) || t.sold.some((on) => !on);
+
+// One legend row: band picks the colour of a bought or sold row (the net row has none, -1); on is
+// false for a hidden row, whose value reads "off".
+export interface AgeLegendRow {
+  key: string;
+  band: number;
+  label: string;
+  value: string;
+  on: boolean;
+  kind: "bought" | "sold" | "net";
+}
+
+// A:3705-3726: the window's young groups; the sold rows of every band with a bucket that lost more
+// than half a coin, by band; then the net of the drawn bars. Summed over Zoom All it is the coins
+// mined in the window, so it is named issuance only there with every toggle on (N1, rule 4).
+export function ageLegend(
+  text: TextFn,
+  rows: readonly AgeRow[],
+  young: number,
+  t: Toggles,
+  z: Zoom,
+): AgeLegendRow[] {
+  const off = text("costflow.age.off");
+  const legend: AgeLegendRow[] = [];
+  for (let g = 0; g < young; g++) {
+    const on = t.bought[g];
+    const sum = rows.reduce((a, r) => a + r.buy[g], 0);
+    legend.push({
+      key: `a${g}`,
+      band: g,
+      label: text("costflow.age.bought", { group: BANDS12[g] }),
+      value: on ? `+${fmtBtc(sum)}` : off,
+      on,
+      kind: "bought",
+    });
+  }
+  const byBand = new Map<number, number>();
+  for (const r of rows) if (r.sold > 0.5) byBand.set(r.band, (byBand.get(r.band) ?? 0) + r.sold);
+  for (const [band, sum] of [...byBand].sort((a, b) => a[0] - b[0])) {
+    const on = t.sold[band];
+    legend.push({
+      key: `s${band}`,
+      band,
+      label: text("costflow.age.sold", { group: BANDS12[band] }),
+      value: on ? `−${fmtBtc(sum)}` : off,
+      on,
+      kind: "sold",
+    });
+  }
+  const issuance = z === 0 && !anyHidden(t);
+  legend.push({
+    key: "net",
+    band: -1,
+    label: text(issuance ? "costflow.age.netIssuance" : "costflow.age.netShown"),
+    value: fmtSigned(rows.reduce((a, r) => a + ageTotal(r, t), 0)),
+    on: true,
+    kind: "net",
+  });
+  return legend;
+}
+
+// A:3743-3751: a click on a bought or sold row flips it, unless it is the last one shown. The
+// legend is the one drawn with t, as on the page.
+export function toggle(t: Toggles, key: string, legend: readonly AgeLegendRow[]): Toggles {
+  const row = legend.find((r) => r.key === key);
+  if (!row || row.kind === "net") return t;
+  const live = legend.filter((r) => r.kind !== "net" && r.on).length;
+  if (row.on && live <= 1) return t;
+  const flip = (ons: boolean[]) => ons.map((on, i) => (i === row.band ? !row.on : on));
+  return row.kind === "bought" ? { ...t, bought: flip(t.bought) } : { ...t, sold: flip(t.sold) };
+}
+
+// A zoom keeps the toggles (A:3824-3826), unless the new zoom's legend, built with them, shows no
+// bought or sold row; then every row is on again, so a legend of only "off" rows never appears.
+export function afterZoom(t: Toggles, legend: readonly AgeLegendRow[]): Toggles {
+  return legend.some((r) => r.kind !== "net" && r.on) ? t : ALL_ON;
+}
+
+// A:3788-3794: one bucket's tooltip: its price range, each young group above half a coin, the sold
+// coins (none below 0) with their band, the net, then the window. It reads every group, shown or
+// not.
+export function ageTip(text: TextFn, r: AgeRow, step: number, w: Window): string[] {
+  const lines = [`${fmtPrice(r.b)} – ${fmtPrice(r.b + step)}`];
+  r.buy.forEach((v, g) => {
+    if (v > 0.5)
+      lines.push(`${text("costflow.age.tipBought", { group: BANDS12[g] })} +${fmtBtc(v)}`);
+  });
+  lines.push(
+    `${text("costflow.age.tipSold", { group: BANDS12[r.band] })} −${fmtBtc(Math.max(0, r.sold))}`,
+  );
+  lines.push(`${text("costflow.age.tipNet")} ${fmtSigned(r.bought - r.sold)}`);
+  lines.push(text("costflow.age.tipFoot", { window: w }));
+  return lines;
 }

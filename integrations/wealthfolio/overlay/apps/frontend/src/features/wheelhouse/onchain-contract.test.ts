@@ -674,6 +674,21 @@ describe("on-chain cost-flow contract", () => {
     expect(costFlowSchema.safeParse({ ...s1, grids: [g200, g500], age }).success).toBe(true);
     expect(costFlowSchema.safeParse({ ...s1, grids: [g200], age }).success).toBe(false);
   });
+
+  // Chart 4 reads the first one to four young groups by the window, so the ages carry exactly the
+  // four the service groups (<1d, 1d–1w, 1w–1m, 1m–3m): another count is refused, never read as a
+  // group that is not there.
+  it("refuses ages without exactly four young groups", () => {
+    const age = s2.age;
+    expect(costFlowSchema.safeParse({ ...s2, age }).success).toBe(true);
+    expect(
+      costFlowSchema.safeParse({ ...s2, age: { ...age, groups: age.groups.slice(0, 3) } }).success,
+    ).toBe(false);
+    expect(
+      costFlowSchema.safeParse({ ...s2, age: { ...age, groups: [...age.groups, age.groups[0]] } })
+        .success,
+    ).toBe(false);
+  });
 });
 
 describe("on-chain rules label", () => {

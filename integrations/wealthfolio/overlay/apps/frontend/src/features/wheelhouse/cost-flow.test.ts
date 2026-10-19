@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_ON,
   WINDOWS,
+  YOUNG,
   ZOOMS3,
   ZOOMS4,
+  afterZoom,
+  ageLegend,
+  ageRows,
+  ageSegments,
+  ageTip,
+  ageWeights,
   agingNote,
+  anyHidden,
   barCounts,
   chip,
   clusterCells,
@@ -22,11 +31,14 @@ import {
   mixtureMeta,
   segments,
   sideWeights,
+  toggle,
   udiff,
   vsSpot,
+  type AgeRow,
   type FlowRow,
   type Holders,
   type Side,
+  type Toggles,
   type Window,
   type Zoom,
 } from "./cost-flow";
@@ -34,8 +46,8 @@ import { DEFAULT_SIDE, fitSide, type SideSetting } from "./cost-flow-engine";
 import expected from "./cost-flow-expected.json";
 import s1raw from "./cost-flow-sample-0512.json";
 import s2raw from "./cost-flow-sample.json";
-import { phrase, type TextFn } from "./i18n";
-import { costFlowSchema, type FlowGrid } from "./onchain-contract";
+import { phrase, type MessageKey, type TextFn } from "./i18n";
+import { costFlowSchema, type CostFlowView, type FlowGrid } from "./onchain-contract";
 import { reasonText } from "./onchain-text";
 
 // S1: the 05:12 snapshot, both grids, no age snapshots. S2: the 06:04 snapshot, $500 grid only.
@@ -713,5 +725,520 @@ describe("cost-flow chart 3 readings", () => {
       label: "Aging STH→LTH",
       value: "334,783 BTC · 23% of sell side",
     });
+  });
+});
+
+// Chart 4, the Age Breakdown (A:3460-3845), on S2: the 06:04 snapshot the page was read at.
+const PAGE4: Record<string, { legend: string[]; meta: string; clusters: string[] }> =
+  expected.chart4_page;
+
+const ageRowsOf = (view: CostFlowView, w: Window, z: Zoom): AgeRow[] => {
+  const found = ageRows(view, w, z);
+  if (!found.ok) throw new Error(`no rows: ${found.missing}`);
+  return found.value;
+};
+
+// The Clusters side pill names the side in Chart 3's legend words (A:1806-1809).
+const SIDE_NAME: Record<Side, MessageKey> = { pos: "costflow.buy", neg: "costflow.sell" };
+
+// One Chart 4 state in the page record's format (sr4/expected_c4.py): each legend row as
+// "<label> / <value>", the Clusters meta, then each Clusters row as its number, side and the
+// shipped cells joined by " | ". Both sides at the page's default smoothing. It only joins strings:
+// every value is formatted by cost-flow.ts.
+const chart4 = (w: Window, z: Zoom, t: Toggles) => {
+  const rows = ageRowsOf(s2, w, z);
+  const centers = rows.map((r) => r.price);
+  const pos = fitSide(centers, ageWeights(rows, t, "pos"), DEFAULT_SIDE);
+  const neg = fitSide(centers, ageWeights(rows, t, "neg"), DEFAULT_SIDE);
+  const cs = clusters(pos, neg);
+  return {
+    legend: ageLegend(en, rows, YOUNG[w], t, z).map((r) => `${r.label} / ${r.value}`),
+    meta: clusterMeta(en, cs),
+    clusters: cs.map((c) =>
+      [`K${c.n}`, en(SIDE_NAME[c.side]), ...tagged(clusterCells(en, c, s2.spot!))].join(" | "),
+    ),
+  };
+};
+
+// The plan's net label (N1, rule 4): "net (issuance)" only at Zoom All with all 16 toggles on;
+// the page wrote it in every state.
+const shownNet = (lines: readonly string[]) =>
+  lines.map((line) => line.replace(/^net \(issuance\) \/ /, "net of what is shown / "));
+
+// The net row's number: every drawn segment summed, row by row (A:3724-3726).
+const netOf = (rows: readonly AgeRow[], t: Toggles) =>
+  rows.reduce((a, r) => a + ageSegments(r, t).reduce((s, sg) => s + sg.v, 0), 0);
+
+describe("cost-flow chart 4", () => {
+  // page-recorded (06:04): expected.chart4_page["{1d,7d,30d} z{0,50,25}"] — legend lines
+  // "<label> / <value>", meta, cluster rows equal; at z50/z25 our net label is "net of what is shown".
+  it("matches the page's Chart 4 readings cell for cell", () => {
+    expect(Object.keys(PAGE4).sort()).toEqual(
+      WINDOWS.flatMap((w) => ZOOMS4.map((z) => `${w} z${z}`)).sort(),
+    );
+    expect(YOUNG).toEqual({ "1d": 1, "7d": 2, "30d": 3, "90d": 4 });
+    // page-recorded: the page wrote "net (issuance)" in all twelve states.
+    for (const [label, page] of Object.entries(PAGE4))
+      expect(page.legend[page.legend.length - 1], label).toMatch(/^net \(issuance\) \/ /);
+    for (const w of ["1d", "7d", "30d"] as const)
+      for (const z of ZOOMS4) {
+        const label = `${w} z${z}`;
+        const page = PAGE4[label];
+        const ours = chart4(w, z, ALL_ON);
+        expect(ours.legend, label).toEqual(z === 0 ? page.legend : shownNet(page.legend));
+        expect(ours.meta, label).toBe(page.meta);
+        expect(ours.clusters, label).toEqual(page.clusters);
+      }
+    // page-recorded (SR-4.md, the page's globals at Zoom All): 1d draws 250 rows, 30d all 252.
+    expect(ageRowsOf(s2, "1d", 0)).toHaveLength(250);
+    expect(ageRowsOf(s2, "30d", 0)).toHaveLength(252);
+    // page-recorded (SR-4.md): the four young groups summed over the grid.
+    const sums = [0, 1, 2, 3].map((g) =>
+      ageRowsOf(s2, "90d", 0)
+        .reduce((a, r) => a + r.buy[g], 0)
+        .toFixed(2),
+    );
+    expect(sums).toEqual(["110322.34", "433062.60", "901432.14", "1402425.23"]);
+
+    // The zh legend (brief's i18n table: A:3710-3717, A:948, A:950).
+    const zh30 = ageLegend(zh, ageRowsOf(s2, "30d", 0), 3, ALL_ON, 0);
+    expect(zh30.map((r) => `${r.label} / ${r.value}`).slice(0, 4)).toEqual([
+      "买入 <1d 前 / +110,322",
+      "买入 1d–1w 前 / +433,063",
+      "买入 1w–1m 前 / +901,432",
+      "卖出 · 该价位上次成交于 <1d 前 / −260,520",
+    ]);
+    expect(zh30[zh30.length - 1]).toEqual({
+      key: "net",
+      band: -1,
+      label: "净额（新增发行）",
+      value: "+13,597",
+      on: true,
+      kind: "net",
+    });
+    const zh25 = ageLegend(zh, ageRowsOf(s2, "30d", 25), 3, ALL_ON, 25);
+    expect(zh25[zh25.length - 1].label).toBe("所示部分净额");
+    const off = toggle(ALL_ON, "a0", zh30);
+    expect(ageLegend(zh, ageRowsOf(s2, "30d", 0), 3, off, 0)[0].value).toBe("关");
+  });
+
+  // page-recorded through the hide control: 90d with "bought 1m–3m ago" hidden -> legend values,
+  // meta and clusters equal expected.chart4_page["90d z{0,50,25}"] (the page's bOn state);
+  // net label "net of what is shown" where the page wrote "net (issuance)".
+  it("reproduces the page's 90d state when 1m–3m is hidden", () => {
+    const rows = ageRowsOf(s2, "90d", 0);
+    const legend = ageLegend(en, rows, 4, ALL_ON, 0);
+    expect(legend[3]).toEqual({
+      key: "a3",
+      band: 3,
+      label: "bought 1m–3m ago",
+      value: "+1,402,425",
+      on: true,
+      kind: "bought",
+    });
+    const hidden = toggle(ALL_ON, "a3", legend);
+    expect(hidden).toEqual({ bought: [true, true, true, false], sold: ALL_ON.sold });
+    expect(anyHidden(hidden)).toBe(true);
+    for (const z of ZOOMS4) {
+      const label = `90d z${z}`;
+      const page = PAGE4[label];
+      const ours = chart4("90d", z, hidden);
+      expect(ours.legend, label).toEqual(shownNet(page.legend));
+      expect(ours.meta, label).toBe(page.meta);
+      expect(ours.clusters, label).toEqual(page.clusters);
+    }
+    // page-recorded: the hidden row reads "off" and the net is the page's −1,361,700.
+    const z0 = chart4("90d", 0, hidden).legend;
+    expect(z0[3]).toBe("bought 1m–3m ago / off");
+    expect(z0[z0.length - 1]).toBe("net of what is shown / −1,361,700");
+    // The hidden group draws no bar and weighs nothing; its coins still count as bought in the
+    // row, so sold is unchanged (A:3506-3508).
+    for (const r of rows) {
+      expect(ageSegments(r, hidden).map((sg) => sg.key)).toEqual(["a0", "a1", "a2", `s${r.band}`]);
+      expect(r.bought).toBe(r.buy.reduce((a, v) => a + v, 0));
+    }
+  });
+
+  // 90d with every group drawn:
+  //   page-recorded (SR-4.md, after turning 1m–3m on): z0 "bought 1m–3m ago / +1,402,425",
+  //   "net (issuance) / +40,725", "7 clusters · 2 in · 5 out";
+  //   page-recorded (Chart 3's matching block: at z0 with nothing hidden each row weighs
+  //   bought − sold = all_d over the same 252 rows, so the clusters equal the sweep's
+  //   "90d all zoomAll"): K1 "Net Sell (Distribution) | $27,250 | $31,616 | 197,677 BTC | 10.5% | 6% |
+  //   66.9% below", K5 "Net Buy (Accumulation) | $82,250 | $8,534 | 1,581,751 BTC | 82.1% | 100% | 0.1% below",
+  //   K7 "Net Sell (Distribution) | $113,750 | $36,217 | 353,944 BTC | 18.8% | 10% | 38.1% above";
+  //   engine-computed: z50 "net of what is shown / +271,503", "6 clusters · 2 in · 4 out";
+  //   z25 "net of what is shown / +889,501", "5 clusters · 2 in · 3 out".
+  it("draws every 90d group by default", () => {
+    // The plan's bOn fix: four bought toggles, all on, beside the twelve sold ones.
+    expect(ALL_ON).toEqual({
+      bought: [true, true, true, true],
+      sold: [true, true, true, true, true, true, true, true, true, true, true, true],
+    });
+    expect(anyHidden(ALL_ON)).toBe(false);
+
+    const z0 = chart4("90d", 0, ALL_ON);
+    expect(z0.legend[3]).toBe("bought 1m–3m ago / +1,402,425");
+    expect(z0.legend[z0.legend.length - 1]).toBe("net (issuance) / +40,725");
+    expect(z0.meta).toBe("7 clusters · 2 in · 5 out");
+    expect([z0.clusters[0], z0.clusters[4], z0.clusters[6]]).toEqual([
+      "K1 | Net Sell (Distribution) | $27,250 | $31,616 | 197,677 BTC | 10.5% | 6% | 66.9% below",
+      "K5 | Net Buy (Accumulation) | $82,250 | $8,534 | 1,581,751 BTC | 82.1% | 100% | 0.1% below",
+      "K7 | Net Sell (Distribution) | $113,750 | $36,217 | 353,944 BTC | 18.8% | 10% | 38.1% above",
+    ]);
+    // page-recorded: Chart 3's block, every K row, its BUY/SELL pills in the Clusters table's words;
+    // its 28 + 224 bars are the same 252 rows.
+    const block = pageBlocks.get("90d all zoomAll aging off bells on")!;
+    expect(block).toContain("bars: pos 28 neg 224 agingPos 0 agingNeg 0");
+    expect(ageRowsOf(s2, "90d", 0)).toHaveLength(252);
+    expect(z0.clusters).toEqual(
+      block
+        .filter((line) => /^K\d+ \| /.test(line))
+        .map((line) =>
+          line
+            .replace(" | BUY | ", " | Net Buy (Accumulation) | ")
+            .replace(" | SELL | ", " | Net Sell (Distribution) | "),
+        ),
+    );
+
+    // engine-computed
+    const z50 = chart4("90d", 50, ALL_ON);
+    expect(z50.legend[z50.legend.length - 1]).toBe("net of what is shown / +271,503");
+    expect(z50.meta).toBe("6 clusters · 2 in · 4 out");
+    const z25 = chart4("90d", 25, ALL_ON);
+    expect(z25.legend[z25.legend.length - 1]).toBe("net of what is shown / +889,501");
+    expect(z25.meta).toBe("5 clusters · 2 in · 3 out");
+  });
+
+  // page-recorded (Chart 3's "30d all zoom 50" legend, 1,134,837 − 1,058,336): 30d z50 net "+76,501".
+  it("nets the ±50% rows", () => {
+    expect(fmtSigned(1134837 - 1058336)).toBe("+76,501");
+    const rows = ageRowsOf(s2, "30d", 50);
+    const legend = ageLegend(en, rows, 3, ALL_ON, 50);
+    expect(legend[legend.length - 1]).toEqual({
+      key: "net",
+      band: -1,
+      label: "net of what is shown",
+      value: "+76,501",
+      on: true,
+      kind: "net",
+    });
+    // Bought − sold is each row's change of the whole supply, so with nothing hidden Chart 4's net
+    // over the ±50% rows is Chart 3's buy − sell over the same rows.
+    const chart3 = s2Rows("30d", "all", false, 50);
+    expect(rows.map((r) => r.b)).toEqual(chart3.map((r) => r.b));
+    const t3 = flowTotals(chart3, "all", false);
+    near(netOf(rows, ALL_ON), t3.buy - t3.sell, 1e-9, "30d ±50% net");
+  });
+
+  it("never hides the last visible legend row", () => {
+    // page-recorded: 1d ±25% has six toggle rows, bought <1d and sold <1d, 1d–1w, 1w–1m, 1m–3m,
+    // 6m–1y.
+    const rows = ageRowsOf(s2, "1d", 25);
+    let t = ALL_ON;
+    let legend = ageLegend(en, rows, 1, t, 25);
+    const keys = legend.filter((r) => r.kind !== "net").map((r) => r.key);
+    expect(keys).toEqual(["a0", "s0", "s1", "s2", "s3", "s5"]);
+    for (const key of keys.slice(0, -1)) {
+      const next = toggle(t, key, legend);
+      expect(next, key).not.toBe(t);
+      t = next;
+      legend = ageLegend(en, rows, 1, t, 25);
+    }
+    expect(t).toEqual({
+      bought: [false, true, true, true],
+      sold: [false, false, false, false, true, true, true, true, true, true, true, true],
+    });
+    expect(legend.filter((r) => r.on && r.kind !== "net").map((r) => r.key)).toEqual(["s5"]);
+    expect(legend.slice(0, 5).map((r) => r.value)).toEqual(["off", "off", "off", "off", "off"]);
+    // A:3745-3747: the click that would leave nothing drawn does nothing.
+    expect(toggle(t, "s5", legend)).toBe(t);
+    // The net row, and a band with no row in the legend, are not toggles (A:3744), with one row
+    // visible or all of them.
+    expect(toggle(t, "net", legend)).toBe(t);
+    expect(toggle(ALL_ON, "net", ageLegend(en, rows, 1, ALL_ON, 25))).toBe(ALL_ON);
+    expect(toggle(t, "s11", legend)).toBe(t);
+    expect(toggle(t, "a1", legend)).toBe(t);
+    // A hidden row shows again, the last visible row then hides; ALL_ON is never written to.
+    const again = toggle(t, "a0", legend);
+    expect(again.bought[0]).toBe(true);
+    const swapped = toggle(again, "s5", ageLegend(en, rows, 1, again, 25));
+    expect(swapped.sold[5]).toBe(false);
+    expect(ALL_ON.bought.every(Boolean) && ALL_ON.sold.every(Boolean)).toBe(true);
+    // Only what is shown is drawn and netted: the 6m–1y sold bars.
+    const net = legend[legend.length - 1];
+    expect(net.label).toBe("net of what is shown");
+    expect(net.value).toBe(
+      fmtSigned(-rows.filter((r) => r.band === 5).reduce((a, r) => a + r.sold, 0)),
+    );
+  });
+
+  it("resets the toggles when a zoom leaves nothing visible", () => {
+    // Review Focus 3: 30d z0: hide the 3 bought rows and every sold row but "10y+"; afterZoom for
+    // z25 (no 10y+ sold row there) -> ALL_ON; the z25 legend is all on and the net reads "+253,707"
+    // (page-recorded value)
+    const z0 = ageRowsOf(s2, "30d", 0);
+    const z25 = ageRowsOf(s2, "30d", 25);
+    let t = ALL_ON;
+    let legend = ageLegend(en, z0, 3, t, 0);
+    const hide = legend.filter((r) => r.kind !== "net" && r.key !== "s11").map((r) => r.key);
+    expect(hide).toHaveLength(14);
+    for (const key of hide) {
+      t = toggle(t, key, legend);
+      legend = ageLegend(en, z0, 3, t, 0);
+    }
+    expect(t).toEqual({
+      bought: [false, false, false, true],
+      sold: [false, false, false, false, false, false, false, false, false, false, false, true],
+    });
+    // Zoom All keeps a visible row, so the toggles stay.
+    expect(afterZoom(t, legend)).toBe(t);
+    const kept = ageLegend(en, z25, 3, t, 25);
+    expect(kept.some((r) => r.key === "s11")).toBe(false);
+    expect(kept.filter((r) => r.kind !== "net" && r.on)).toEqual([]);
+    const reset = afterZoom(t, kept);
+    expect(reset).toBe(ALL_ON);
+    const shown = ageLegend(en, z25, 3, reset, 25);
+    expect(shown.every((r) => r.on)).toBe(true);
+    expect(shown[shown.length - 1]).toMatchObject({
+      label: "net of what is shown",
+      value: "+253,707",
+    });
+    // A zoom that keeps one visible row keeps the toggles (the page's behaviour).
+    const one = toggle(ALL_ON, "a0", ageLegend(en, z0, 3, ALL_ON, 0));
+    expect(afterZoom(one, ageLegend(en, z25, 3, one, 25))).toBe(one);
+  });
+
+  it("names the net by every toggle, not only the legend's", () => {
+    // a sold band hidden at z0 that has no row at z25 keeps anyHidden true -> "net of what is shown"
+    const z0 = ageRowsOf(s2, "30d", 0);
+    const z25 = ageRowsOf(s2, "30d", 25);
+    const t = toggle(ALL_ON, "s11", ageLegend(en, z0, 3, ALL_ON, 0));
+    expect(anyHidden(t)).toBe(true);
+    const at25 = ageLegend(en, z25, 3, t, 25);
+    expect(at25.some((r) => r.key === "s11")).toBe(false);
+    expect(at25.every((r) => r.on)).toBe(true);
+    expect(afterZoom(t, at25)).toBe(t);
+    expect(at25[at25.length - 1].label).toBe("net of what is shown");
+    const back = ageLegend(en, z0, 3, t, 0);
+    expect(back.find((r) => r.key === "s11")!.value).toBe("off");
+    expect(back[back.length - 1].label).toBe("net of what is shown");
+
+    // At Zoom All on hand rows: a band hidden with no row in the legend still names the net "of
+    // what is shown"; the page asked only the legend's bands (A:3723). Each of the 16 toggles counts.
+    const hand: AgeRow[] = [
+      { b: 0, price: 250, band: 0, all: 1, sth: 1, lth: 0, buy: [2], bought: 2, sold: 1 },
+    ];
+    expect(ageLegend(en, hand, 1, ALL_ON, 0).map((r) => [r.key, r.label])).toEqual([
+      ["a0", "bought <1d ago"],
+      ["s0", "sold · last traded <1d ago"],
+      ["net", "net (issuance)"],
+    ]);
+    for (let i = 0; i < 16; i++) {
+      const off: Toggles = {
+        bought: ALL_ON.bought.map((on, g) => on && g !== i),
+        sold: ALL_ON.sold.map((on, band) => on && band !== i - 4),
+      };
+      expect(anyHidden(off), `toggle ${i}`).toBe(true);
+      const legend = ageLegend(en, hand, 1, off, 0);
+      expect(legend[legend.length - 1].label, `toggle ${i}`).toBe("net of what is shown");
+    }
+    // Zoom All with every toggle on is the only issuance reading.
+    for (const z of [50, 25, 10] as const)
+      expect(ageLegend(en, hand, 1, ALL_ON, z)[2].label, `z${z}`).toBe("net of what is shown");
+  });
+
+  it("finds no ages in the 05:12 sample", () => {
+    // ageRows(S1, "30d", 0) -> { ok: false, missing: "age" }
+    expect(ageRows(s1, "30d", 0)).toEqual({ ok: false, missing: "age" });
+    expect(s1.reasons).toEqual(["age_urpd_missing"]);
+    // Chart 4 reads the $500 grid only, and its spot is that grid's close: without either the
+    // $500 snapshots are what is missing, whatever the ages; then a missing window.
+    expect(ageRows({ ...s2, grids: [], age: null }, "30d", 0)).toEqual({
+      ok: false,
+      missing: "grid",
+    });
+    expect(ageRows({ ...s1, grids: [s1.grids[1]] }, "30d", 0)).toEqual({
+      ok: false,
+      missing: "grid",
+    });
+    expect(ageRows({ ...s2, spot: null }, "30d", 0)).toEqual({ ok: false, missing: "grid" });
+    const [g500] = s2.grids;
+    const no90 = { ...g500, windows: g500.windows.filter((found) => found.window !== "90d") };
+    expect(ageRows({ ...s2, grids: [no90] }, "90d", 0)).toEqual({ ok: false, missing: "window" });
+    expect(ageRows({ ...s2, grids: [no90] }, "30d", 0).ok).toBe(true);
+    expect(ageRows({ ...s2, grids: [no90], age: null }, "90d", 0)).toEqual({
+      ok: false,
+      missing: "age",
+    });
+
+    // The service's reasons for no ages, in the brief's words.
+    expect(
+      ["age_urpd_missing", "age_urpd_mismatch", "age_floor_missing", "age_floor_stale"].map(
+        (code) => [reasonText(en, code), reasonText(zh, code)],
+      ),
+    ).toEqual([
+      ["Age-cohort snapshots missing", "缺少币龄群体快照"],
+      [
+        "Age-cohort snapshots are from another block than the whole supply",
+        "币龄群体快照与全体快照不是同一区块",
+      ],
+      ["Daily high and low missing", "缺少每日最高价和最低价"],
+      ["Daily high and low end before the snapshot day", "每日最高价和最低价早于快照日"],
+    ]);
+  });
+
+  // A:3498-3526 on a hand view: buy is the window's young groups, sold = then.all − (now.all −
+  // bought); a ±% zoom keeps the rows priced in the band, edges included; Zoom All trims to the
+  // first and last row where a cohort moved more than half a coin, then keeps three more rows on
+  // each side.
+  it("builds the rows of the young groups and trims them as the page does", () => {
+    const at = (values: Record<number, number>) =>
+      Array.from({ length: 12 }, (_, i) => values[i] ?? 0);
+    const now = { all: at({ 2: 0.5, 6: 1.25 }), sth: at({ 7: -0.51, 11: 0.5 }), lth: at({}) };
+    const grid: FlowGrid = {
+      step: 500,
+      floors: at({}).map((_, i) => i * 500),
+      now,
+      windows: [
+        {
+          window: "7d",
+          then_day: "2026-10-12",
+          then: { all: at({ 6: 2 }), sth: at({}), lth: at({}) },
+        },
+        {
+          window: "90d",
+          then_day: "2026-07-21",
+          then: { all: now.all, sth: now.sth, lth: at({ 1: 0.6, 9: 0.5 }) },
+        },
+      ],
+    };
+    const view: CostFlowView = {
+      ...s2,
+      spot: 3000,
+      grids: [grid],
+      age: {
+        groups: [at({ 6: 0.25 }), at({ 6: 0.5 }), at({ 6: 4 }), at({ 6: 8 })],
+        band: [11, 10, 9, 8, 7, 6, 3, 5, 4, 2, 1, 0],
+      },
+    };
+    const floors = (w: Window, z: Zoom) => ageRowsOf(view, w, z).map((r) => r.b);
+    // Live rows 6 (all −0.75) and 7 (sth −0.51); a move of exactly half a coin, all at row 2 and
+    // sth at row 11, is not live.
+    expect(floors("7d", 0)).toEqual([1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000]);
+    const r = ageRowsOf(view, "7d", 0)[3];
+    expect(r).toEqual({
+      b: 3000,
+      price: 3250,
+      band: 3,
+      all: -0.75,
+      sth: 0,
+      lth: 0,
+      buy: [0.25, 0.5],
+      bought: 0.75,
+      sold: 1.5,
+    });
+    // 90d: only row 1 moved (lth −0.6; row 9's −0.5 is not live); the three rows before it are cut
+    // at the grid's start.
+    expect(floors("90d", 0)).toEqual([0, 500, 1000, 1500, 2000]);
+    const r90 = ageRowsOf(view, "90d", 50).find((row) => row.b === 3000)!;
+    expect(r90).toMatchObject({ buy: [0.25, 0.5, 4, 8], bought: 12.75, sold: 12.75, all: 0 });
+    // ±25% of 3000 is 2250–3750, both edges priced; ±50% is 1500–4500; ±10% 2700–3300.
+    expect(floors("7d", 25)).toEqual([2000, 2500, 3000, 3500]);
+    expect(floors("7d", 50)).toEqual([1500, 2000, 2500, 3000, 3500, 4000]);
+    expect(floors("7d", 10)).toEqual([2500, 3000]);
+  });
+
+  // A:3528-3536 and A:3549-3550's side weights, on a hand row: a bar for each shown bought group,
+  // then the sold bar keyed by the row's band, negated; a side weighs a row by its bars' sum.
+  it("splits a bucket into its bought groups and the sold bar of its band", () => {
+    const r: AgeRow = {
+      b: 1000,
+      price: 1250,
+      band: 7,
+      all: -1,
+      sth: 0,
+      lth: 0,
+      buy: [0, 2, 3],
+      bought: 5,
+      sold: 6,
+    };
+    expect(ageSegments(r, ALL_ON)).toEqual([
+      { v: 0, key: "a0", band: 0, sold: false },
+      { v: 2, key: "a1", band: 1, sold: false },
+      { v: 3, key: "a2", band: 2, sold: false },
+      { v: -6, key: "s7", band: 7, sold: true },
+    ]);
+    const noSold: Toggles = { ...ALL_ON, sold: ALL_ON.sold.map((_, band) => band !== 7) };
+    expect(ageSegments(r, noSold).map((sg) => sg.key)).toEqual(["a0", "a1", "a2"]);
+    const noA1: Toggles = { ...ALL_ON, bought: [true, false, true, true] };
+    expect(ageSegments(r, noA1).map((sg) => sg.key)).toEqual(["a0", "a2", "s7"]);
+    // A sold band hidden elsewhere leaves this row's sold bar.
+    const other: Toggles = { ...ALL_ON, sold: ALL_ON.sold.map((_, band) => band !== 3) };
+    expect(ageSegments(r, other).map((sg) => sg.key)).toEqual(["a0", "a1", "a2", "s7"]);
+    // Negative sold draws on the buy side.
+    const back: AgeRow = { ...r, sold: -1, all: 6 };
+    expect(ageSegments(back, ALL_ON)[3]).toEqual({ v: 1, key: "s7", band: 7, sold: true });
+    expect(ageWeights([r, back], ALL_ON, "pos")).toEqual([0, 6]);
+    expect(ageWeights([r, back], ALL_ON, "neg")).toEqual([1, 0]);
+    expect(ageWeights([r, back], noSold, "pos")).toEqual([5, 5]);
+    expect(ageWeights([r, back], noSold, "neg")).toEqual([0, 0]);
+    // The legend groups sold above half a coin by band, in band order (A:3713-3719).
+    const rows: AgeRow[] = [
+      { ...r, band: 9, sold: 0.5 },
+      { ...r, band: 4, sold: 0.51 },
+      { ...r, band: 9, sold: 2.4 },
+      { ...r, band: 4, sold: 1.2 },
+    ];
+    expect(ageLegend(en, rows, 3, ALL_ON, 0).map((row) => `${row.key} ${row.value}`)).toEqual([
+      "a0 +0",
+      "a1 +8",
+      "a2 +12",
+      "s4 −2",
+      "s9 −2",
+      "net +15",
+    ]);
+  });
+
+  it("reads one bucket like the page's tooltip", () => {
+    // page-recorded: ageTip on S2's 30d row at 77,500 -> ["$77,500 – $78,000",
+    //  "sold from levels last traded 1m–3m ago −115,540", "net −115,540", "aging removed · 30d window"]
+    const row = ageRowsOf(s2, "30d", 0).find((r) => r.b === 77500)!;
+    // page-recorded (SR-4.md, the oracle's row): sold 115,540.48, band 1m–3m, bought 0.
+    expect([row.sold.toFixed(2), row.band, row.bought]).toEqual(["115540.48", 3, 0]);
+    expect(ageTip(en, row, 500, "30d")).toEqual([
+      "$77,500 – $78,000",
+      "sold from levels last traded 1m–3m ago −115,540",
+      "net −115,540",
+      "aging removed · 30d window",
+    ]);
+    // zh: the brief's i18n table.
+    expect(ageTip(zh, row, 500, "30d")).toEqual([
+      "$77,500 – $78,000",
+      "卖出，该价位上次成交于 1m–3m 前 −115,540",
+      "净额 −115,540",
+      "已剔除币龄迁移 · 30d 窗口",
+    ]);
+    // A:3790-3794 on a hand row: bought groups above half a coin, whatever the toggles; sold no
+    // lower than 0; net is bought − sold.
+    const hand: AgeRow = {
+      b: 1000,
+      price: 1250,
+      band: 11,
+      all: 3.5,
+      sth: 0,
+      lth: 0,
+      buy: [0.75, 0.5, 2],
+      bought: 3.25,
+      sold: -0.25,
+    };
+    expect(ageTip(en, hand, 500, "7d")).toEqual([
+      "$1,000 – $1,500",
+      "bought <1d ago +1",
+      "bought 1w–1m ago +2",
+      "sold from levels last traded 10y+ ago −0",
+      "net +4",
+      "aging removed · 7d window",
+    ]);
   });
 });

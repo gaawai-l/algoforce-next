@@ -378,6 +378,11 @@ const en = {
     "The {{cohort}} {{bucket}} snapshot is from another block; not used",
   "cycle.reason.urpdMismatchAll":
     "The all-holder {{bucket}} snapshot is from another block; not used",
+  "cycle.reason.age_urpd_missing": "Age-cohort snapshots missing",
+  "cycle.reason.age_urpd_mismatch":
+    "Age-cohort snapshots are from another block than the whole supply",
+  "cycle.reason.age_floor_missing": "Daily high and low missing",
+  "cycle.reason.age_floor_stale": "Daily high and low end before the snapshot day",
   "cycle.title": "Cycle",
   "cycle.loading": "Loading cycle…",
   "cycle.stateLabel": "State",
@@ -806,6 +811,15 @@ const en = {
     "No clusters. Turn smoothing on for a side, or lower its peak cutoff.",
   "costflow.bellsOff":
     "Bell curves are off. Turn them on for either side above.",
+  "costflow.age.bought": "bought {{group}} ago",
+  "costflow.age.sold": "sold · last traded {{group}} ago",
+  "costflow.age.off": "off",
+  "costflow.age.netIssuance": "net (issuance)",
+  "costflow.age.netShown": "net of what is shown",
+  "costflow.age.tipBought": "bought {{group}} ago",
+  "costflow.age.tipSold": "sold from levels last traded {{group}} ago",
+  "costflow.age.tipNet": "net",
+  "costflow.age.tipFoot": "aging removed · {{window}} window",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1169,6 +1183,10 @@ const zh: Record<MessageKey, string> = {
   "cycle.reason.windowMissing": "{{bucket}} 桶宽下无法比较 {{window}}：缺少所需的快照",
   "cycle.reason.urpdMismatch": "{{cohort}} 的 {{bucket}} 快照来自另一个区块，未使用",
   "cycle.reason.urpdMismatchAll": "全体持有者的 {{bucket}} 快照来自另一个区块，未使用",
+  "cycle.reason.age_urpd_missing": "缺少币龄群体快照",
+  "cycle.reason.age_urpd_mismatch": "币龄群体快照与全体快照不是同一区块",
+  "cycle.reason.age_floor_missing": "缺少每日最高价和最低价",
+  "cycle.reason.age_floor_stale": "每日最高价和最低价早于快照日",
   "cycle.title": "周期",
   "cycle.loading": "正在加载周期…",
   "cycle.stateLabel": "状态",
@@ -1578,6 +1596,15 @@ const zh: Record<MessageKey, string> = {
   "costflow.tip.window": "{{verdict}} · {{window}} 窗口",
   "costflow.noClusters": "没有聚类。请为某一侧打开平滑，或调低它的峰值阈值。",
   "costflow.bellsOff": "正态曲线已关闭。请在上方为任一侧打开。",
+  "costflow.age.bought": "买入 {{group}} 前",
+  "costflow.age.sold": "卖出 · 该价位上次成交于 {{group}} 前",
+  "costflow.age.off": "关",
+  "costflow.age.netIssuance": "净额（新增发行）",
+  "costflow.age.netShown": "所示部分净额",
+  "costflow.age.tipBought": "买入 {{group}} 前",
+  "costflow.age.tipSold": "卖出，该价位上次成交于 {{group}} 前",
+  "costflow.age.tipNet": "净额",
+  "costflow.age.tipFoot": "已剔除币龄迁移 · {{window}} 窗口",
 };
 
 export const messages = { en, zh };
