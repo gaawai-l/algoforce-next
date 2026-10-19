@@ -401,7 +401,7 @@ v4 把清算和买卖量改读 Coinalyze，并加入 Hyperliquid 视图：见 §
 
 ## v4（P6）：清算与买卖量改用 Coinalyze
 
-日期：2026-10-19。依据 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.2 和 [PLAN-P6](PLAN-P6.md)；代码范围是分支 `claude/coinalyze` 的 `f0f9d0c..8707fab`（含整分支终审的修复），核验记录见 [P6-VERIFICATION](P6-VERIFICATION.md)。
+日期：2026-10-19。依据 [PROPOSAL-COINALYZE](PROPOSAL-COINALYZE.md) v3.2 和 [PLAN-P6](PLAN-P6.md)；代码范围是分支 `claude/coinalyze` 的 `f0f9d0c..8707fab`（含整分支终审的修复，此后只有注释和文档改动），核验记录见 [P6-VERIFICATION](P6-VERIFICATION.md)。
 
 本节只写与 v3.2 不同的部分，其余仍然有效。小节标题里的 § 是 v3.2 的章节，被替代的条目在原章节首行有提示。本节描述的是代码实际做的事；与方案不同之处在小节里直接写明。
 
