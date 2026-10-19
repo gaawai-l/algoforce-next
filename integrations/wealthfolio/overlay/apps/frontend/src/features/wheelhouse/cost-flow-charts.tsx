@@ -1286,6 +1286,14 @@ function Chart4({
   );
 }
 
+// The toggles Chart 4 keeps for new rows (another zoom, or a refresh): the same ones, unless the
+// legend of those rows, drawn with them, would show no bought or sold row; then every row is on
+// again (afterZoom), so a legend of only "off" rows never appears (N1, rule 3).
+function keptToggles(text: TextFn, view: CostFlowView, w: Window, z: Zoom, t: Toggles): Toggles {
+  const found = ageRows(view, w, z);
+  return found.ok ? afterZoom(t, ageLegend(text, found.value, YOUNG[w], t, z)) : t;
+}
+
 function Charts({ view }: { view: CostFlowView }) {
   const { text } = useWheelhouseText();
   const [shared, setShared] = useState<Shared>(SHARED);
@@ -1295,20 +1303,24 @@ function Charts({ view }: { view: CostFlowView }) {
   // Chart 4's legend: which groups are drawn, and the one isolated by hover or focus.
   const [toggles, setToggles] = useState<Toggles>(ALL_ON);
   const [dim, setDim] = useState<string | null>(null);
+  // A refresh brings new rows: the toggles must still leave a row shown, and the isolated row may
+  // be gone (its button unmounts without a mouseleave). Adjusted while rendering, so no frame is
+  // drawn with the old state.
+  const [seen, setSeen] = useState(view);
+  if (seen !== view) {
+    setSeen(view);
+    setDim(null);
+    setToggles(keptToggles(text, view, shared.window, shared.zoom, toggles));
+  }
   // N1: a window button in either chart turns every group on again (A:3820-3823). A zoom keeps
-  // the toggles unless the new zoom's legend, drawn with them, would show no row (afterZoom).
+  // the toggles unless the new zoom's legend, drawn with them, would show no row.
   const onShared = (next: Partial<Shared>) => {
     setActive3(null);
     setActive4(null);
     setDim(null);
     if (next.window !== undefined) setToggles(ALL_ON);
-    if (next.zoom !== undefined) {
-      const found = ageRows(view, shared.window, next.zoom);
-      if (found.ok) {
-        const legend = ageLegend(text, found.value, YOUNG[shared.window], toggles, next.zoom);
-        setToggles(afterZoom(toggles, legend));
-      }
-    }
+    if (next.zoom !== undefined)
+      setToggles(keptToggles(text, view, shared.window, next.zoom, toggles));
     setShared((current) => ({ ...current, ...next }));
   };
   return (

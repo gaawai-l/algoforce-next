@@ -5,6 +5,7 @@ import { ClustersTable, CostFlowCharts } from "./cost-flow-charts";
 import { DEFAULT_SIDE, fitSide } from "./cost-flow-engine";
 import {
   ALL_ON,
+  ageLegend,
   ageRows,
   ageWeights,
   clusters,
@@ -18,6 +19,7 @@ import {
 import expected from "./cost-flow-expected.json";
 import s1raw from "./cost-flow-sample-0512.json";
 import s2raw from "./cost-flow-sample.json";
+import { phrase, type TextFn } from "./i18n";
 import { costFlowSchema, type CostFlowView } from "./onchain-contract";
 
 const mocks = vi.hoisted(() => ({ costFlow: vi.fn() }));
@@ -83,6 +85,14 @@ function show(view: CostFlowView = s2) {
     ),
   };
 }
+
+// A poll's result, as the 5-minute refetch delivers it (observers hear of it on the next tick).
+const poll = (client: QueryClient, view: CostFlowView) =>
+  act(async () => {
+    client.setQueryData(["wh", "onchain", "cost-flow"], view);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+const en: TextFn = (key, vars) => phrase("en", key, vars);
 
 // The chart's width as useChartWidth reads it; `initial` is reported as soon as it is observed.
 function stubWidth(initial?: number) {
@@ -841,25 +851,19 @@ it("does not refit when an option already on is picked again", async () => {
 it("drops a reading when a refresh changes the rows", async () => {
   const { client } = show();
   await screen.findByText(TITLE4);
-  // A poll's result, as the 5-minute refetch delivers it (observers hear of it on the next tick).
-  const poll = (view: CostFlowView) =>
-    act(async () => {
-      client.setQueryData(["wh", "onchain", "cost-flow"], view);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
   fireEvent.keyDown(svg3()!, { key: "ArrowUp" });
   fireEvent.keyDown(svg4()!, { key: "ArrowUp" });
   expect(readout()).toHaveLength(5);
   expect(readout(chart4())).toHaveLength(7);
   // The same payload again keeps the view, its rows and so both readings.
-  await poll(structuredClone(s2));
+  await poll(client, structuredClone(s2));
   expect(client.getQueryData(["wh", "onchain", "cost-flow"])).toBe(s2);
   expect(readout()).toHaveLength(5);
   expect(readout(chart4())).toHaveLength(7);
   // The next snapshot: the rows are new, and the readings, which name a row by its index, go.
   const next = structuredClone(s2);
   next.snapshot_at = "2026-10-19T07:04:42Z";
-  await poll(next);
+  await poll(client, next);
   expect(
     screen.getByText("URPD snapshot 19 Oct 2026 · 07:04 UTC · Source Bitcoin Research Kit"),
   ).toBeTruthy();
@@ -1152,6 +1156,67 @@ describe("Chart 4", () => {
     // page-recorded legend of 30d ±25%, all on; the net is "+253,707".
     expect(legend4()).toEqual(shownNet(PAGE4["30d z25"].legend));
     expect(legend4().at(-1)).toBe("net of what is shown / +253,707");
+  });
+
+  // I1: the next snapshot puts every 1w–1m level's last trade under a day, so band 2 leaves the
+  // 30d legend; with it the only row left shown.
+  const moved = () => {
+    const next = structuredClone(s2);
+    next.snapshot_at = "2026-10-19T07:04:42Z";
+    next.age!.band = next.age!.band.map((band) => (band === 2 ? 0 : band));
+    return next;
+  };
+  const pressedRows = () =>
+    [...chart4().querySelectorAll(".wh-cf-legend button")].filter(
+      (key) => key.getAttribute("aria-pressed") === "true",
+    );
+
+  it("turns every row on when a refresh leaves nothing shown", async () => {
+    const { client } = show();
+    await screen.findByText(TITLE4);
+    const keep = "sold · last traded 1w–1m ago";
+    for (const row of legend4().slice(0, -1)) {
+      const label = row.split(" / ")[0];
+      if (label !== keep) fireEvent.click(legendRow(label));
+    }
+    expect(pressedRows().map((key) => key.querySelector("span")!.textContent)).toEqual([keep]);
+    // Hovered when the refresh comes: its button goes, with no mouseleave. Every drawn bar is
+    // its own, so nothing is dimmed yet.
+    fireEvent.mouseEnter(legendRow(keep));
+    const next = moved();
+    await poll(client, next);
+    const found = ageRows(next, "30d", 0);
+    if (!found.ok) throw new Error(found.missing);
+    expect(found.value.some((r) => r.band === 2)).toBe(false);
+    // Every row on: the new snapshot's all-on legend, named issuance, and bars drawn.
+    expect(
+      [...chart4().querySelectorAll(".wh-cf-legend button")].every(
+        (key) => key.getAttribute("aria-pressed") === "true",
+      ),
+    ).toBe(true);
+    expect(legend4()).toEqual(
+      ageLegend(en, found.value, 3, ALL_ON, 0).map((row) => `${row.label} / ${row.value}`),
+    );
+    expect(legend4().at(-1)).toMatch(/^net \(issuance\) \/ /);
+    expect(svg4()!.querySelectorAll(".wh-cf-bar").length).toBeGreaterThan(0);
+    expect(svg4()!.querySelector(".wh-cf-dim")).toBeNull();
+    expect(meta4()).not.toBe("");
+  });
+
+  it("keeps the toggles across a refresh that leaves a row shown", async () => {
+    const { client } = show();
+    await screen.findByText(TITLE4);
+    fireEvent.click(legendRow("bought <1d ago"));
+    // The hovered row is the one the refresh removes.
+    fireEvent.mouseEnter(legendRow("sold · last traded 1w–1m ago"));
+    expect(svg4()!.querySelector(".wh-cf-dim")).not.toBeNull();
+    await poll(client, moved());
+    expect(legendRow("bought <1d ago").getAttribute("aria-pressed")).toBe("false");
+    expect(legendRow("bought <1d ago").querySelector("b")!.textContent).toBe("off");
+    expect(pressedRows()).toHaveLength(legend4().length - 2);
+    expect(legend4().at(-1)).toMatch(/^net of what is shown \/ /);
+    expect(barsOf("a0")).toHaveLength(0);
+    expect(svg4()!.querySelector(".wh-cf-dim")).toBeNull();
   });
 
   it("follows Chart 3's ±10% zoom with no pill pressed", async () => {

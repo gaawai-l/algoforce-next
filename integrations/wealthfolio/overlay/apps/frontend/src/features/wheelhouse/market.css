@@ -2446,6 +2446,10 @@
     11px/1.6 "JetBrains Mono",
     monospace;
 }
+/* Chart 4's reading runs to seven lines up to 30d (eight in 90d, with its fourth bought group). */
+[data-chart="costflow-4"] .wh-cf-readout {
+  min-height: 11.2em;
+}
 .wh-costflow .wh-cf-readout p {
   margin: 0;
 }
@@ -2604,9 +2608,10 @@
   stroke-dasharray: 2 2;
   stroke-opacity: 0.8;
 }
-/* Every bar but the hovered or focused legend row's (A:3607). */
+/* Every bar but the hovered or focused legend row's (A:3607), the sold bars' outline too. */
 .wh-cf-dim {
   fill-opacity: 0.12;
+  stroke-opacity: 0.12;
 }
 .wh-cf-swatch--bought,
 .wh-cf-swatch--sold {
