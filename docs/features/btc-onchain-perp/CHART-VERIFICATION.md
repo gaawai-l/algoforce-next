@@ -84,6 +84,7 @@
     - 图 7 和表 2：默认高亮 $1000，实际算的是 $500。本地已按 SPEC 修正。
     - 窄屏：state-report 把 SVG 等比缩到 1/3，字只有 4–6px；图 3、图 4 的表格把整页撑到 750px（`state-report.html:416` 的 `1fr` 应改为 `minmax(0,1fr)`）；perp-squeeze 把 `@media` 写成了 `media`，三栏说明在 390px 下仍挤成 3 列。本地都不要照搬。
 11. **原站的图表计算放在前端**（KDE/GMM、平滑、Relative 分母都随控件实时变），而 SPEC §2 规定读接口不现算。图 1、3、4、7 的控件要先定：后端预算默认组合，前端移植一份 TS，还是改 SPEC。
+    - 图 3、图 4 已定为方案 C：worker 只存输入，KDE/峰/GMM 在浏览器计算（2026-10-19）。
 
 ## 清单更正（已同步到 CHART-INVENTORY.md）
 
