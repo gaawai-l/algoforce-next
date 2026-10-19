@@ -2483,6 +2483,73 @@ def test_day1_stage_fetches_the_daily_range(tmp_path: Path):
     for name in ("price_high", "price_low"):
         assert len(store.read_series(name, "day1")) == 5037
 
+    # In a request of their own, so that it failing never holds up the day1 series.
+    again, calls = brk_transport()
+    assert run(store, again, NOW + timedelta(hours=1)) is True
+    assert [params["series"] for params in day1_calls(calls)] == [
+        ",".join(DAY1_SERIES),
+        "price_high,price_low",
+    ]
+
+    # A new BRK version rebuilds the range with the other day1 series.
+    bumped, calls = brk_transport(version="0.13.0")
+    assert run(store, bumped, NOW + timedelta(hours=2)) is True
+    ranges = [params for params in day1_calls(calls) if "price_high" in params["series"]]
+    assert [(params["series"], params["start"]) for params in ranges] == [
+        ("price_high,price_low", START.isoformat())
+    ]
+
+
+def test_a_failed_daily_range_only_takes_chart_4_down(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    ages = write_ages(tmp_path / "ages", GOLDEN_CLOSE)
+    inner, calls = brk_transport(urpd_dir=GOLDEN, age_dir=ages)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if bulk_names(request) & {"price_high", "price_low"}:
+            return httpx.Response(503)
+        return inner.handler(request)
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, httpx.MockTransport(handler), NOW) is True
+
+    assert caplog.text.count("onchain_day1_range_failed code=brk_unavailable") == 1
+    state = store.state()
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == NOW
+    assert strings(state["reasons"]) == []
+    assert strings(state["missing_series"]) == []
+    assert cycle_of(store).state == "breakout"
+    assert {line["name"] for line in levels_of(store)["lines"]} == LINES
+    assert bucket_widths(store) == [200, 500, 1000]
+    assert store.read_series("price_high", "day1") == []
+    flow = costflow_of(store)
+    assert [grid.step for grid in flow.grids] == [500, 200]
+    assert (flow.age, flow.reasons) == (None, ["age_floor_missing"])
+
+
+def test_a_failed_daily_range_keeps_what_the_last_run_found_missing(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={"price_high"})
+    assert run(store, partial, NOW) is True
+    assert strings(store.state()["reasons"]) == ["series_missing:price_high"]
+
+    # The next range request fails: it tells nothing new, so what the last run found stands.
+    inner, _ = brk_transport(missing={"price_high"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if bulk_names(request) & {"price_high", "price_low"}:
+            return httpx.Response(503)
+        return inner.handler(request)
+
+    assert run(store, httpx.MockTransport(handler), NOW + timedelta(hours=1)) is True
+
+    state = store.state()
+    assert state["last_error"] is None
+    assert strings(state["missing_series"]) == ["day1:price_high"]
+    assert strings(state["reasons"]) == ["series_missing:price_high"]
 
 
 def test_missing_daily_range_only_takes_chart_4_down(tmp_path: Path):

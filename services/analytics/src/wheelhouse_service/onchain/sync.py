@@ -54,7 +54,8 @@ CYCLE_SERIES = (
     "true_market_mean",
     "price_close",
 )
-# The day1 series fetched: the modules' own, then the daily range Chart 4's age floor reads.
+# The day1 series fetched: the modules' own, then, in a request of its own, the daily range
+# Chart 4's age floor reads.
 DAY1_FETCH = (*DAY1_SERIES, *AGE_FLOOR_SERIES)
 # Where a full fetch of each index starts. hour1 asks for its last points: from a date it would ask
 # for years of hourly data.
@@ -195,15 +196,17 @@ class OnchainSync:
         # take a day BRK could still revise for closed.
         closed = closed_day(at)
         version = self.client.version()
+        changed = version != self.store.state()["brk_version"]
         missing: set[str] = set()
-        if version != self.store.state()["brk_version"]:
+        if changed:
             # Every series is rebuilt in one transaction; the old data stays readable until then.
             self.store.set_state(refreshing="true")
-            self._replace(DAY1_FETCH, "day1", at, missing)
+            self._replace(DAY1_SERIES, "day1", at, missing)
         else:
-            self._increment(DAY1_FETCH, "day1", at, missing)
+            self._increment(DAY1_SERIES, "day1", at, missing)
         # The series stage is done, so nothing is being rebuilt any more.
         self.store.set_state(brk_version=version, refreshing="false")
+        range_missing = self._day1_range(at, full=changed)
 
         # hour1 follows its series' own versions rather than BRK's: any series that changed is
         # fetched again in full. A failure here leaves the day1 modules and URPD untouched.
@@ -247,7 +250,7 @@ class OnchainSync:
         # The age cohorts read the first stage's series too: they are derived only when both stages
         # fetched, and are as of the first, like the pressure.
         self._derive_age_cohorts(hour1_missing, None if age_error else hour1_done)
-        absent = [name for name in DAY1_FETCH if name in missing]
+        absent = [name for name in DAY1_FETCH if name in missing | range_missing]
         absent_hour1 = [
             name
             for name in (*HOUR1_SERIES, *SELL_SIDE_SERIES, *AGE_ONLY_SERIES)
@@ -308,6 +311,25 @@ class OnchainSync:
                     refetch.add(name)
         if refetch:
             self._replace([name for name in names if name in refetch], index, at, missing)
+
+    def _day1_range(self, at: datetime, *, full: bool) -> set[str]:
+        """Fetch Chart 4's daily range in a request of its own; return the names found missing.
+
+        `full` refetches it whole, as when BRK's version changed. A failure leaves the stored rows
+        as they are, which only the cost flow's age floor reads, so it never fails the run; what
+        the failed request could not tell stands as the last run recorded it.
+        """
+        missing: set[str] = set()
+        try:
+            if full:
+                self._replace(AGE_FLOOR_SERIES, "day1", at, missing)
+            else:
+                self._increment(AGE_FLOOR_SERIES, "day1", at, missing)
+        except BrkError as exc:
+            logger.warning("onchain_day1_range_failed code=%s", exc.code)
+            entries: list[str] = json.loads(self.store.state()["missing_series"] or "[]")
+            return {name for name in AGE_FLOOR_SERIES if f"day1:{name}" in entries}
+        return missing
 
     def _stored_hour1_missing(self) -> set[str]:
         """The hour1 series the last run found missing."""
