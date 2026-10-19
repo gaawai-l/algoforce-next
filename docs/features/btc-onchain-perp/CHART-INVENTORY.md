@@ -69,11 +69,14 @@
 
 - Claude 桌面应用会自动停掉它启动的预览服务。服务一停，数据就停在那一刻，或者页面整体显示不出来。2026-10-18 那次，服务被停了约 20 小时。
 - 本地默认开着 O1–O6，读数会和原站有细小差别。设 `WHEELHOUSE_RULES=v1` 时，计算与原站一致。
-- 用户反馈"已做好的页面完全显示不出来"，原因还要逐页排查。
+- 用户反馈"已做好的页面完全显示不出来"。2026-10-19 排查结论：代码和接口都正常（三页的接口返回全部通过前端 zod 校验，控制台无报错），原因是启动链路缺了 :8088 的 Wealthfolio 后端。
+  - `.claude/launch.json` 原来只启动 analytics 和 overlay，不启动 Wealthfolio 后端（Docker 容器）；只有 `make dev` 会拉起容器，而且 `make dev` 退出时会停掉它。
+  - 后端不在时，整个 Wealthfolio 外壳只显示 "Backend unavailable"，Market intelligence 根本不挂载；analytics 不在时，外壳在，但所有图都显示 "Python service unavailable"。
+  - 修复：新增 `python3 scripts/foundation.py overlay`，依次 sync、确认 Docker 在运行、拉起 Wealthfolio 容器并等它健康，再启动 Vite。Docker 没运行时直接报错退出，不会起一个打不开的页面。
 
 本机启动方式见 `.claude/launch.json`（不入库）：
 - analytics：`WHEELHOUSE_PORT=8787 … .venv-foundation/bin/python -m wheelhouse_service`；
-- overlay：先 `make sync`，再在 `.local/wealthfolio` 运行 pnpm 的 frontend dev，端口 1420，代理到 :8088 上的 Wealthfolio 后端和 :8787。
+- overlay：`python3 scripts/foundation.py overlay`，端口 1420，代理到 :8088 上的 Wealthfolio 后端和 :8787。不必再手动 `make sync`。
 
 ## 原站源码
 

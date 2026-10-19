@@ -122,11 +122,7 @@ def check_port(port: int) -> None:
             raise SystemExit(f"Port {port} is already in use; preserving that process")
 
 
-def dev() -> None:
-    sync_host()
-    check_port(1420)
-    check_port(8787)
-    run([*COMPOSE, "up", "-d", "--no-recreate", "wealthfolio"])
+def workspace_env() -> dict[str, str]:
     env = {
         **os.environ,
         "WF_ENABLE_VITE_PROXY": "true",
@@ -137,6 +133,47 @@ def dev() -> None:
         "WHEELHOUSE_API_TARGET": "http://127.0.0.1:8787",
     }
     env.pop("TAURI_DEV_HOST", None)
+    return env
+
+
+def wait_healthy(url: str, timeout: float = 60) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                if response.status == 200:
+                    return
+        except OSError:
+            pass
+        if time.monotonic() > deadline:
+            raise SystemExit(f"{url} did not become healthy; inspect the wealthfolio container")
+        time.sleep(1)
+
+
+def overlay() -> None:
+    """Serve only the overlay, for preview launchers that start it without make dev.
+
+    Without the Wealthfolio server the whole host shows "Backend unavailable", so bring
+    it up first; the Python service is started separately and may be absent."""
+    sync_host()
+    check_port(1420)
+    docker = subprocess.run(
+        ["docker", "info"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    if docker.returncode != 0:
+        raise SystemExit("Docker is not running; start Docker Desktop, then the overlay again")
+    run([*COMPOSE, "up", "-d", "--no-recreate", "wealthfolio"])
+    wait_healthy("http://127.0.0.1:8088/api/v1/healthz")
+    os.chdir(ROOT)
+    os.execvpe(PNPM[0], [*PNPM, "--filter", "frontend", "dev"], workspace_env())
+
+
+def dev() -> None:
+    sync_host()
+    check_port(1420)
+    check_port(8787)
+    run([*COMPOSE, "up", "-d", "--no-recreate", "wealthfolio"])
+    env = workspace_env()
     children: list[subprocess.Popen[bytes]] = []
 
     def interrupt(_signum: int, _frame: object) -> None:
@@ -228,7 +265,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=["setup", "sync", "dev", "check", "build", "doctor", "stop", "setup-broker"],
+        choices=[
+            "setup",
+            "sync",
+            "dev",
+            "overlay",
+            "check",
+            "build",
+            "doctor",
+            "stop",
+            "setup-broker",
+        ],
     )
     command = parser.parse_args().command
     if command == "build":
@@ -240,4 +287,11 @@ if __name__ == "__main__":
     elif command == "stop":
         run([*COMPOSE, "stop", "wealthfolio"])
     else:
-        {"setup": setup, "sync": sync_host, "dev": dev, "check": check, "doctor": doctor}[command]()
+        {
+            "setup": setup,
+            "sync": sync_host,
+            "dev": dev,
+            "overlay": overlay,
+            "check": check,
+            "doctor": doctor,
+        }[command]()
