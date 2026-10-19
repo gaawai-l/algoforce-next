@@ -24,12 +24,11 @@ from fastapi.testclient import TestClient
 
 from wheelhouse_service.http import create_app
 from wheelhouse_service.perps.api import (
-    VIEW_STREAMS,
-    collector_status,
     create_router,
     direction,
     states_view,
 )
+from wheelhouse_service.perps.coinalyze import MarketCheck
 from wheelhouse_service.perps.collector import STREAMS, Collectors
 from wheelhouse_service.perps.models import PerpStatesView, freshness
 from wheelhouse_service.perps.rows import Exchange, Stream
@@ -63,7 +62,7 @@ O1O6: Rules = frozenset({"O1", "O6"})
 STEP = 600
 DAY = 86_400
 W4 = 24  # buckets in a 4h block
-EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit")
+EXCHANGES: tuple[Exchange, ...] = ("all", "binance", "bybit", "hyperliquid")
 WINDOWS: tuple[Window, ...] = ("4h", "8h")
 SAMPLE = (
     Path(__file__).resolve().parents[4]
@@ -203,8 +202,8 @@ def synthetic_grid(start: datetime, last: datetime, seed: int = 20261017) -> Gri
 
 
 def sample_view(*, ruled: bool = False) -> PerpStatesView:
-    """The all-venues 4h view as the API would serve it at SAMPLE_NOW, every stream live: the v1
-    sample, or with `ruled` the O1 and O6 one."""
+    """The all-venues 4h view as the API would serve it at SAMPLE_NOW: the v1 sample, or with
+    `ruled` the O1 and O6 one."""
     start, rules = (RULED_START, O1O6) if ruled else (SAMPLE_START, V1)
     grid = synthetic_grid(start, SAMPLE_LAST)
     if ruled:
@@ -213,11 +212,8 @@ def sample_view(*, ruled: bool = False) -> PerpStatesView:
     stored = StoredStates(
         exchange="all", window="4h", start=start, reasons=[], states=states, rules=sorted(rules)
     )
-    now = SAMPLE_NOW.timestamp()
-    spans = [(start.timestamp(), now - 6.0)]
-    collectors = [collector_status(stream, spans, SAMPLE_NOW, {}) for stream in STREAMS]
     derived = (stored, SAMPLE_COMPUTED)
-    return states_view("all", "4h", derived, collectors, stored_hosts({}), SAMPLE_NOW, rules=rules)
+    return states_view("all", "4h", derived, stored_hosts({}), SAMPLE_NOW, rules=rules)
 
 
 def render_sample(*, ruled: bool = False) -> str:
@@ -252,6 +248,7 @@ def router_app(
     clock: Callable[[], datetime],
     *,
     start_worker: bool = False,
+    start_collectors: bool = False,
     http: httpx.Client | None = None,
     connect: Callable[..., Any] | None = None,
     rules: Rules = V1,
@@ -264,6 +261,7 @@ def router_app(
             http,
             rules=rules,
             start_worker=start_worker,
+            start_collectors=start_collectors,
             connect=connect,
             clock=clock,
             coinalyze_key=coinalyze_key,
@@ -381,23 +379,24 @@ def test_reason_codes(tmp_path: Path):
         synthetic_grid(SHORT_START, datetime(2026, 10, 17, 6, 50, tzinfo=UTC)), "4h", rules=V1
     )
     assert short.collecting and short.covered_days == pytest.approx(20 / 6)
-    save(store, "all", "4h", short, ["series_missing:bybit:oi"])
+    save(store, "all", "4h", short, ["series_missing:okx:oi", "coinalyze_units:okx"])
     save(store, "binance", "4h", short)
     save(store, "bybit", "4h", short)
+    save(store, "hyperliquid", "4h", short, ["series_missing:hyperliquid:oi"])
     store.set_state(
         hosts=json.dumps(
             {
                 BINANCE_HOST: host("418", now + timedelta(minutes=20)),
                 ARCHIVE_HOST: host("500"),
                 BYBIT_HOST: host("retcode:10006", now + timedelta(minutes=5)),
+                CZ_HOST: host("429", now + timedelta(minutes=1)),
             }
         )
     )
-    cover(store, "binance_liq", t - DAY, t - 10)
-    cover(store, "bybit_liq", t - DAY, t - 120)
-    cover(store, "bybit_trades", t - DAY, t - 10)
+    # The streams the collectors write are stale, which no view reports.
+    cover(store, "binance_liq", t - DAY, t - 600)
 
-    # Perps run in this process (their loops are never started), so a stale stream is down.
+    # Perps run in this process (their loops are never started).
     client, connect, seen = blocked()
     with perps_spied():
         app = router_app(path, Clock(now), start_worker=True, http=client, connect=connect)
@@ -406,23 +405,34 @@ def test_reason_codes(tmp_path: Path):
     assert seen == []
 
     assert views["all"]["reasons"] == [
-        "series_missing:bybit:oi",
+        "series_missing:okx:oi",
+        "coinalyze_units:okx",
         "rest_error:fapi.binance.com:418",
         "rest_error:data.binance.vision:500",
         "rest_error:api.bybit.com:retcode:10006",
-        "collector_down:bybit_liq",
+        "rest_error:api.coinalyze.net:429",
         "collecting:3.3",
     ]
-    # Each view only names the hosts and streams it reads; every view prices with Bybit spot.
+    # Each view only names the hosts it reads: every view prices with Bybit spot and reads its
+    # liquidations from Coinalyze, and Hyperliquid's reads All's OI as well.
     assert views["binance"]["reasons"] == [
         "rest_error:fapi.binance.com:418",
         "rest_error:data.binance.vision:500",
         "rest_error:api.bybit.com:retcode:10006",
+        "rest_error:api.coinalyze.net:429",
         "collecting:3.3",
     ]
     assert views["bybit"]["reasons"] == [
         "rest_error:api.bybit.com:retcode:10006",
-        "collector_down:bybit_liq",
+        "rest_error:api.coinalyze.net:429",
+        "collecting:3.3",
+    ]
+    assert views["hyperliquid"]["reasons"] == [
+        "series_missing:hyperliquid:oi",
+        "rest_error:fapi.binance.com:418",
+        "rest_error:data.binance.vision:500",
+        "rest_error:api.bybit.com:retcode:10006",
+        "rest_error:api.coinalyze.net:429",
         "collecting:3.3",
     ]
     assert all(view["collecting"] is True for view in views.values())
@@ -499,13 +509,11 @@ def test_unavailable_while_perps_are_off(tmp_path: Path):
         marker = get_states(http, "bybit")
 
     for (exchange, window), body in views.items():
-        streams = VIEW_STREAMS[exchange]
         assert body == {
             "exchange": exchange,
             "window": window,
             "data_state": "unavailable",
-            # No worker runs in this process, so nothing will be derived: not "not_derived", and
-            # no collector is down, since none is meant to run.
+            # No worker runs in this process, so nothing will be derived: not "not_derived".
             "reasons": ["perps_disabled"],
             "computed_at": None,
             "last": None,
@@ -517,7 +525,6 @@ def test_unavailable_while_perps_are_off(tmp_path: Path):
             "collecting": None,
             "qc": [],
             "series_missing": [],
-            "collectors": [{"stream": stream, **never} for stream in streams],
             "rules": [],
             "rules_pending": False,
         }
@@ -529,6 +536,7 @@ def test_unavailable_while_perps_are_off(tmp_path: Path):
             for name in (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST)
         ],
         "collectors": [{"stream": stream, **never} for stream in STREAMS],
+        "markets": [],
         "direction": "pending",
         "direction_check": None,
     }
@@ -542,20 +550,17 @@ def test_unavailable_while_perps_are_off(tmp_path: Path):
 def test_not_derived_before_the_first_round_while_perps_run(tmp_path: Path):
     path = tmp_path / "perps.sqlite"
     client, connect, seen = blocked()
-    # The worker and the collectors are made but never run: no round has derived anything.
+    # The worker is made but never run: no round has derived anything.
     with perps_spied() as (worker, collectors):
         app = router_app(path, Clock(SAMPLE_NOW), start_worker=True, http=client, connect=connect)
         with TestClient(app) as http:
             views = {exchange: get_states(http, exchange) for exchange in EXCHANGES}
     worker.assert_called_once()
-    collectors.assert_called_once()
+    collectors.assert_not_called()
 
-    for exchange, view in views.items():
+    for view in views.values():
         assert view["data_state"] == "unavailable"
-        assert view["reasons"] == [
-            "not_derived",
-            *(f"collector_down:{stream}" for stream in VIEW_STREAMS[exchange]),
-        ]
+        assert view["reasons"] == ["not_derived"]
     assert seen == []
 
 
@@ -600,7 +605,12 @@ def test_reads_with_perps_off_open_no_connection(tmp_path: Path, monkeypatch: py
 def test_start_perps_false_starts_nothing(tmp_path: Path):
     client, connect, seen = blocked()
 
-    for options in ({"start_perps": False}, {"start_perps": True, "start_worker": False}):
+    for options in (
+        {"start_perps": False},
+        {"start_perps": False, "perps_collectors": True},
+        {"start_perps": True, "start_worker": False},
+        {"start_perps": True, "start_worker": False, "perps_collectors": True},
+    ):
         with other_workers_held(), perps_spied() as (worker, collectors):
             app = create_app(
                 tmp_path / "m.sqlite", perps_http=client, perps_connect=connect, **options
@@ -635,13 +645,15 @@ def test_settings_perps_values(
         monkeypatch.setenv("WHEELHOUSE_PERPS", value)
     assert Settings.from_env().perps_enabled is enabled
 
-    # Without `start_perps`, the setting decides whether the app starts the worker.
+    # Without `start_perps`, the setting decides whether the app starts the worker; the
+    # collectors stay off unless their own setting turns them on.
     client, connect, seen = blocked()
     with other_workers_held(), perps_spied() as (worker, collectors):
         app = create_app(tmp_path / "m.sqlite", perps_http=client, perps_connect=connect)
         with TestClient(app):
             pass
-    assert worker.call_count == collectors.call_count == int(enabled)
+    assert worker.call_count == int(enabled)
+    collectors.assert_not_called()
     assert seen == []
 
 
@@ -651,12 +663,170 @@ def test_settings_perps_rejects_other_values(monkeypatch: pytest.MonkeyPatch):
         Settings.from_env()
 
 
+@pytest.mark.parametrize(
+    ("value", "enabled"),
+    [
+        (None, False),
+        ("1", True),
+        ("true", True),
+        ("on", True),
+        ("ON", True),
+        ("0", False),
+        ("false", False),
+        ("off", False),
+        ("False", False),
+    ],
+)
+def test_settings_perps_collectors_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str | None, enabled: bool
+):
+    if value is None:
+        monkeypatch.delenv("WHEELHOUSE_PERPS_COLLECTORS", raising=False)
+    else:
+        monkeypatch.setenv("WHEELHOUSE_PERPS_COLLECTORS", value)
+    assert Settings.from_env().perps_collectors is enabled
+
+    # Without `perps_collectors`, the setting decides; the worker runs either way.
+    client, connect, seen = blocked()
+    with other_workers_held(), perps_spied() as (worker, collectors):
+        app = create_app(
+            tmp_path / "m.sqlite", start_perps=True, perps_http=client, perps_connect=connect
+        )
+        with TestClient(app):
+            pass
+    worker.assert_called_once()
+    assert collectors.call_count == int(enabled)
+    assert seen == []
+
+
+def test_settings_perps_collectors_rejects_other_values(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("WHEELHOUSE_PERPS_COLLECTORS", "yes")
+    with pytest.raises(ValueError, match="WHEELHOUSE_PERPS_COLLECTORS"):
+        Settings.from_env()
+
+
+def test_the_perps_collectors_argument_beats_the_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    client, connect, seen = blocked()
+
+    def started(**options: Any) -> int:
+        with other_workers_held(), perps_spied() as (_, collectors):
+            app = create_app(
+                tmp_path / "m.sqlite",
+                start_perps=True,
+                perps_http=client,
+                perps_connect=connect,
+                **options,
+            )
+            with TestClient(app):
+                pass
+        return collectors.call_count
+
+    monkeypatch.delenv("WHEELHOUSE_PERPS_COLLECTORS", raising=False)
+    assert (started(), started(perps_collectors=True), started(perps_collectors=False)) == (0, 1, 0)
+    monkeypatch.setenv("WHEELHOUSE_PERPS_COLLECTORS", "on")
+    assert (started(), started(perps_collectors=True), started(perps_collectors=False)) == (1, 1, 0)
+    assert seen == []
+
+
+def test_collectors_do_not_start_by_default(tmp_path: Path):
+    client, connect, seen = blocked()
+    with (
+        patch("wheelhouse_service.perps.api.PerpsSync.start") as worker,
+        patch("wheelhouse_service.perps.api.Collectors") as collectors,
+    ):
+        app = router_app(
+            tmp_path / "perps.sqlite",
+            Clock(SAMPLE_NOW),
+            start_worker=True,
+            http=client,
+            connect=connect,
+        )
+        with TestClient(app) as http:
+            status = http.get(f"{PREFIX}/status").json()
+
+    worker.assert_called_once()
+    collectors.assert_not_called()  # not even constructed
+    # /perps/status still lists the streams, from stored coverage, with no problems counted.
+    assert [item["stream"] for item in status["collectors"]] == list(STREAMS)
+    assert all(item["problems"] == {} for item in status["collectors"])
+    assert seen == []
+
+
+def test_collectors_start_when_enabled(tmp_path: Path):
+    client, connect, seen = blocked()
+    with (
+        patch("wheelhouse_service.perps.api.PerpsSync.start") as worker,
+        patch("wheelhouse_service.perps.api.Collectors") as collectors,
+    ):
+        app = router_app(
+            tmp_path / "perps.sqlite",
+            Clock(SAMPLE_NOW),
+            start_worker=True,
+            start_collectors=True,
+            http=client,
+            connect=connect,
+        )
+        with TestClient(app):
+            collectors.return_value.start.assert_called_once()
+            collectors.return_value.stop.assert_not_called()
+
+    worker.assert_called_once()
+    collectors.assert_called_once()
+    assert collectors.call_args.kwargs["connect"] is connect
+    collectors.return_value.stop.assert_called_once()
+    assert seen == []
+
+
+def test_views_have_no_collectors_and_no_collector_down(tmp_path: Path):
+    path = tmp_path / "perps.sqlite"
+    store = PerpsStore(path)
+    now = SAMPLE_NOW
+    t = now.timestamp()
+    for exchange in EXCHANGES:
+        save(
+            store,
+            exchange,
+            "4h",
+            compute_states(synthetic_grid(SHORT_START, SAMPLE_LAST), "4h", rules=V1),
+        )
+    # Every stream is stale, and the collectors run in this process.
+    for stream in STREAMS:
+        cover(store, stream, t - DAY, t - 600)
+
+    client, connect, seen = blocked()
+    with perps_spied():
+        app = router_app(
+            path,
+            Clock(now),
+            start_worker=True,
+            start_collectors=True,
+            http=client,
+            connect=connect,
+        )
+        with TestClient(app) as http:
+            views = {exchange: get_states(http, exchange) for exchange in EXCHANGES}
+            status = http.get(f"{PREFIX}/status").json()
+
+    assert "collectors" not in PerpStatesView.model_fields
+    for view in views.values():
+        assert "collectors" not in view
+        assert not [reason for reason in view["reasons"] if reason.startswith("collector_down")]
+        assert view["reasons"] == ["collecting:3.5"]
+    # The comparison collectors are reported by /perps/status alone.
+    assert [item["stream"] for item in status["collectors"]] == list(STREAMS)
+    assert not any(item["live"] for item in status["collectors"])
+    assert seen == []
+
+
 def test_perps_run_only_while_the_app_runs(tmp_path: Path):
     client, connect, seen = blocked()
     app = router_app(
         tmp_path / "perps.sqlite",
         Clock(SAMPLE_NOW),
         start_worker=True,
+        start_collectors=True,
         http=client,
         connect=connect,
     )
@@ -696,6 +866,7 @@ def test_shutdown_tells_the_worker_before_stopping_the_collectors(tmp_path: Path
             tmp_path / "perps.sqlite",
             Clock(SAMPLE_NOW),
             start_worker=True,
+            start_collectors=True,
             http=client,
             connect=connect,
         )
@@ -713,6 +884,7 @@ def test_status_counts_the_running_collectors_problems(tmp_path: Path):
         tmp_path / "perps.sqlite",
         Clock(SAMPLE_NOW),
         start_worker=True,
+        start_collectors=True,
         http=client,
         connect=connect,
     )
@@ -726,12 +898,9 @@ def test_status_counts_the_running_collectors_problems(tmp_path: Path):
                 break
             assert time.monotonic() < deadline
             time.sleep(0.01)
-        bybit = get_states(http, "bybit")
 
     assert [item["stream"] for item in status["collectors"]] == list(STREAMS)
     assert all(set(item["problems"]) == {"connect_failed"} for item in status["collectors"])
-    assert [item["stream"] for item in bybit["collectors"]] == ["bybit_liq", "bybit_trades"]
-    assert all(item["problems"]["connect_failed"] >= 1 for item in bybit["collectors"])
 
 
 def test_collector_status_from_store(tmp_path: Path):
@@ -747,8 +916,6 @@ def test_collector_status_from_store(tmp_path: Path):
 
     with TestClient(router_app(path, Clock(SAMPLE_NOW))) as http:
         status = http.get(f"{PREFIX}/status").json()
-        binance = get_states(http, "binance")
-        bybit = get_states(http, "bybit")
 
     def at(seconds: float) -> str | None:
         return iso(datetime.fromtimestamp(seconds, UTC))
@@ -782,11 +949,6 @@ def test_collector_status_from_store(tmp_path: Path):
             "problems": {},
         },
     ]
-    # A view lists only the streams it reads; with perps off, none of them is reported down.
-    assert binance["collectors"] == status["collectors"][:1]
-    assert binance["reasons"] == ["perps_disabled"]
-    assert bybit["collectors"] == status["collectors"][1:]
-    assert bybit["reasons"] == ["perps_disabled"]
 
 
 def check(verdict: Verdict) -> DirectionCheck:
@@ -849,6 +1011,57 @@ def test_status_reports_hosts_and_direction(tmp_path: Path):
     assert direction(None) == "pending"
 
 
+def test_status_lists_market_checks(tmp_path: Path):
+    path = tmp_path / "perps.sqlite"
+    store = PerpsStore(path)
+
+    with TestClient(router_app(path, Clock(SAMPLE_NOW))) as http:
+        before = http.get(f"{PREFIX}/status").json()
+        checks = [
+            MarketCheck(
+                venue="binance",
+                symbol="BTCUSDT_PERP.A",
+                denominated="BASE_ASSET",
+                buy_sell=False,
+                ok=True,
+            ),
+            MarketCheck(
+                venue="okx", symbol="BTCUSDT_PERP.3", denominated="USD", buy_sell=True, ok=False
+            ),
+            MarketCheck(
+                venue="hyperliquid", symbol="BTC.H", denominated=None, buy_sell=None, ok=False
+            ),
+        ]
+        store.set_state(cz_markets=json.dumps([check.model_dump(mode="json") for check in checks]))
+        after = http.get(f"{PREFIX}/status").json()
+
+    # Nothing is listed until the worker has checked the markets.
+    assert before["markets"] == []
+    assert after["markets"] == [
+        {
+            "venue": "binance",
+            "symbol": "BTCUSDT_PERP.A",
+            "denominated": "BASE_ASSET",
+            "buy_sell": False,
+            "ok": True,
+        },
+        {
+            "venue": "okx",
+            "symbol": "BTCUSDT_PERP.3",
+            "denominated": "USD",
+            "buy_sell": True,
+            "ok": False,
+        },
+        {
+            "venue": "hyperliquid",
+            "symbol": "BTC.H",
+            "denominated": None,
+            "buy_sell": None,
+            "ok": False,
+        },
+    ]
+
+
 def test_hyperliquid_view_is_served(tmp_path: Path):
     path = tmp_path / "perps.sqlite"
     store = PerpsStore(path)
@@ -876,7 +1089,7 @@ def test_hyperliquid_view_is_served(tmp_path: Path):
     assert marker["reasons"][:2] == ["series_missing:bybit:oi", "coinalyze_units:okx"]
 
 
-def test_every_view_names_a_coinalyze_error(tmp_path: Path):
+def test_every_view_reports_coinalyze_errors(tmp_path: Path):
     path = tmp_path / "perps.sqlite"
     store = PerpsStore(path)
     for exchange in EXCHANGES:
@@ -887,6 +1100,7 @@ def test_every_view_names_a_coinalyze_error(tmp_path: Path):
         views = {exchange: get_states(http, exchange) for exchange in EXCHANGES}
 
     # Every view reads its liquidations from Coinalyze.
+    assert set(views) == {"all", "binance", "bybit", "hyperliquid"}
     for view in views.values():
         assert view["reasons"] == [f"rest_error:{CZ_HOST}:key_missing"]
 
@@ -944,6 +1158,7 @@ def test_views_carry_the_rules_of_their_payload(tmp_path: Path):
             "all": (["O1", "O6"], False),
             "binance": ([], True),
             "bybit": (["O1", "O6"], False),
+            "hyperliquid": ([], False),
         }
     )
     assert (
@@ -953,6 +1168,7 @@ def test_views_carry_the_rules_of_their_payload(tmp_path: Path):
             "all": (["O1", "O6"], True),
             "binance": ([], False),
             "bybit": (["O1", "O6"], True),
+            "hyperliquid": ([], False),
         }
     )
     # Either perps rule alone differs from the payloads derived under both.
@@ -963,6 +1179,7 @@ def test_views_carry_the_rules_of_their_payload(tmp_path: Path):
         "all": (["O1", "O6"], False),
         "binance": ([], False),
         "bybit": (["O1", "O6"], False),
+        "hyperliquid": ([], False),
     }
 
 
@@ -1105,10 +1322,10 @@ def test_sample_json_regenerates_identically(tmp_path: Path):
     assert (view.data_state, view.reasons, view.qc, view.collecting) == ("fresh", [], [], False)
     assert (view.rules, view.rules_pending) == ([], False)
     assert view.blocks[-1].forming and view.tail is None
-    assert all(status.live for status in view.collectors)
+    assert "collectors" not in json.loads(SAMPLE.read_text())
     assert SAMPLE.read_text() == render_sample()
 
-    # The route serves the same body from the same stored payload and coverage.
+    # The route serves the same body from the same stored payload.
     path = tmp_path / "perps.sqlite"
     store = PerpsStore(path)
     save(
@@ -1117,8 +1334,6 @@ def test_sample_json_regenerates_identically(tmp_path: Path):
         "4h",
         compute_states(synthetic_grid(SAMPLE_START, SAMPLE_LAST), "4h", rules=V1),
     )
-    for stream in STREAMS:
-        cover(store, stream, SAMPLE_START.timestamp(), SAMPLE_NOW.timestamp() - 6.0)
     with TestClient(router_app(path, Clock(SAMPLE_NOW))) as http:
         assert get_states(http, "all") == json.loads(SAMPLE.read_text())
 

@@ -571,17 +571,16 @@ const en = {
   "perp.loading": "Loading perp states…",
   "perp.unavailable": "Perp states unavailable",
   "perp.meta":
-    "Resolution 10m · Data through {{time}} UTC · Price Bybit spot · OI/flows Binance USDⓈ-M + Bybit linear (public) · liquidations collected since {{since}}",
-  "perp.coverage": "Collected in the last 90 days: {{list}}",
-  "perp.coverageDays": "{{name}} {{days}} d",
-  "perp.stream.binance_liq": "Binance liquidations",
-  "perp.stream.bybit_liq": "Bybit liquidations",
-  "perp.stream.bybit_trades": "Bybit trades",
+    "Resolution 10m · Data through {{time}} UTC · Price Bybit spot · OI Binance and Bybit (public), OKX and Hyperliquid (Coinalyze)",
+  "perp.source": "Liquidations and buy/sell volume (except Binance's):",
+  "perp.coverage": "Liquidation history: {{days}} d covered in the last 90",
   "perp.binanceNote":
     "Binance liquidations are a one-per-second snapshot (lower bound)",
-  "perp.collecting": "Collecting liquidations · {{days}} of 7 days (target 90)",
-  "perp.collectingTrades":
-    "Collecting liquidations (and Bybit trades) · {{days}} of 7 days (target 90)",
+  "perp.hlNote":
+    "Hyperliquid liquidations are estimated: All venues' liquidations scaled by Hyperliquid's OI relative to theirs",
+  "perp.estimated": "{{label}} (estimated)",
+  "perp.collecting":
+    "Liquidation history too short · {{days}} of 7 days (target 90)",
   "perp.delayed": "Data is delayed · data through {{time}} UTC",
   "perp.stale": "Data is stale · data through {{time}} UTC",
   "perp.qc": "QC {{count}} failed: {{list}}",
@@ -592,14 +591,20 @@ const en = {
   "perp.series.binanceOi": "Binance OI",
   "perp.series.binanceKline": "Binance taker volume",
   "perp.series.bybitOi": "Bybit OI",
+  "perp.series.okxOi": "OKX OI",
+  "perp.series.hyperliquidOi": "Hyperliquid OI",
   "perp.reason.notDerived":
     "Not derived yet: the worker has not finished its first round",
   "perp.reason.disabled": "Perp data collection is turned off in this service",
   "perp.reason.seriesMissing": "No {{series}} in the last 90 days",
   "perp.reason.restError": "{{host}} failing ({{code}}); older data kept",
   "perp.reason.restFailing": "{{host}} failing ({{code}})",
-  "perp.reason.collectorDown": "{{name}} collector down since {{time}} UTC",
-  "perp.reason.collectorNever": "{{name}} collector has not connected yet",
+  "perp.reason.keyMissing":
+    "Coinalyze API key not set: liquidations and Coinalyze flows unavailable",
+  "perp.reason.keyInvalid":
+    "Coinalyze rejected the API key: liquidations and Coinalyze flows unavailable",
+  "perp.reason.units":
+    "Coinalyze {{venue}} market check failed: its data is left out",
   "perp.params": "Parameters",
   "perp.exchange": "Exchange",
   "perp.exchange.all": "All venues",
@@ -1281,16 +1286,14 @@ const zh: Record<MessageKey, string> = {
   "perp.loading": "正在加载永续状态…",
   "perp.unavailable": "永续状态不可用",
   "perp.meta":
-    "分辨率 10m · 数据截至 {{time}} UTC · 价格 Bybit 现货 · OI/资金流 Binance USDⓈ-M + Bybit linear（公开数据） · 清算自 {{since}} 起采集",
-  "perp.coverage": "近 90 天的采集覆盖：{{list}}",
-  "perp.coverageDays": "{{name}} {{days}} 天",
-  "perp.stream.binance_liq": "Binance 清算",
-  "perp.stream.bybit_liq": "Bybit 清算",
-  "perp.stream.bybit_trades": "Bybit 成交",
+    "粒度 10m · 数据截至 {{time}} UTC · 价格 Bybit 现货 · OI：Binance、Bybit（公开接口），OKX、Hyperliquid（Coinalyze）",
+  "perp.source": "清算与主动买卖量（Binance 的买卖量除外）：",
+  "perp.coverage": "清算历史：近 90 天覆盖 {{days}} 天",
   "perp.binanceNote": "Binance 清算是每秒一条的快照（只能当下限）",
-  "perp.collecting": "正在采集清算 · 已覆盖 {{days}} / 7 天（目标 90 天）",
-  "perp.collectingTrades":
-    "正在采集清算（及 Bybit 成交） · 已覆盖 {{days}} / 7 天（目标 90 天）",
+  "perp.hlNote":
+    "Hyperliquid 的清算是估算值：全部交易所的清算 × Hyperliquid OI 与它们 OI 之比",
+  "perp.estimated": "{{label}}（估算）",
+  "perp.collecting": "清算历史不足 · 已覆盖 {{days}} / 7 天（目标 90 天）",
   "perp.delayed": "数据延迟 · 数据截至 {{time}} UTC",
   "perp.stale": "数据已过期 · 数据截至 {{time}} UTC",
   "perp.qc": "QC {{count}} 项未通过：{{list}}",
@@ -1301,13 +1304,18 @@ const zh: Record<MessageKey, string> = {
   "perp.series.binanceOi": "Binance OI",
   "perp.series.binanceKline": "Binance 主动成交量",
   "perp.series.bybitOi": "Bybit OI",
+  "perp.series.okxOi": "OKX OI",
+  "perp.series.hyperliquidOi": "Hyperliquid OI",
   "perp.reason.notDerived": "尚未派生：worker 还没有完成第一轮",
   "perp.reason.disabled": "本服务未开启永续数据采集",
   "perp.reason.seriesMissing": "近 90 天没有 {{series}}",
   "perp.reason.restError": "{{host}} 请求失败（{{code}}），保留旧数据",
   "perp.reason.restFailing": "{{host}} 请求失败（{{code}}）",
-  "perp.reason.collectorDown": "{{name}} 采集器自 {{time}} UTC 起中断",
-  "perp.reason.collectorNever": "{{name}} 采集器尚未连接",
+  "perp.reason.keyMissing":
+    "未设置 Coinalyze API key：清算和来自 Coinalyze 的数据不可用",
+  "perp.reason.keyInvalid":
+    "Coinalyze 拒绝了 API key：清算和来自 Coinalyze 的数据不可用",
+  "perp.reason.units": "Coinalyze 的 {{venue}} 市场核对未通过，已停用其数据",
   "perp.params": "参数",
   "perp.exchange": "交易所",
   "perp.exchange.all": "全部交易所",

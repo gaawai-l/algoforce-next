@@ -2297,35 +2297,6 @@
   "collecting": false,
   "qc": [],
   "series_missing": [],
-  "collectors": [
-    {
-      "stream": "binance_liq",
-      "live": true,
-      "last_proof": "2026-10-17T11:06:54Z",
-      "down_since": null,
-      "covered_days": 10.463125,
-      "since": "2026-10-07T00:00:00Z",
-      "problems": {}
-    },
-    {
-      "stream": "bybit_liq",
-      "live": true,
-      "last_proof": "2026-10-17T11:06:54Z",
-      "down_since": null,
-      "covered_days": 10.463125,
-      "since": "2026-10-07T00:00:00Z",
-      "problems": {}
-    },
-    {
-      "stream": "bybit_trades",
-      "live": true,
-      "last_proof": "2026-10-17T11:06:54Z",
-      "down_since": null,
-      "covered_days": 10.463125,
-      "since": "2026-10-07T00:00:00Z",
-      "problems": {}
-    }
-  ],
   "rules": [
     "O1",
     "O6"

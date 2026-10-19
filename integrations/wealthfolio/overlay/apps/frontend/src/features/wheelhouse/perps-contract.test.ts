@@ -13,7 +13,18 @@ const fullSample = () => perpStatesSample();
 // Taken before any test runs, to prove no sample or variant ever writes to the import.
 const pristine = structuredClone(raw);
 
-function status(view: PerpStatesView): PerpsStatus {
+// The streams the comparison collectors write: only /perps/status reports them now.
+const collector = (stream: PerpsStatus["collectors"][number]["stream"]) => ({
+  stream,
+  live: true,
+  last_proof: "2026-10-17T11:06:54Z",
+  down_since: null,
+  covered_days: 31.5,
+  since: "2026-09-16T00:00:00Z",
+  problems: {} as Record<string, number>,
+});
+
+function status(): PerpsStatus {
   const check = {
     verdict: "ok" as const,
     samples: 120,
@@ -38,13 +49,38 @@ function status(view: PerpStatesView): PerpsStatus {
       },
     ],
     // The service's counts since it started: the first stream rotated twice and stalled once.
-    collectors: view.collectors.map((collector, k) => ({
-      ...collector,
-      problems: (k === 0 ? { rotated: 2, stalled: 1 } : {}) as Record<
-        string,
-        number
-      >,
-    })),
+    collectors: (["binance_liq", "bybit_liq", "bybit_trades"] as const).map(
+      (stream, k) => ({
+        ...collector(stream),
+        problems: (k === 0 ? { rotated: 2, stalled: 1 } : {}) as Record<
+          string,
+          number
+        >,
+      }),
+    ),
+    markets: [
+      {
+        venue: "binance",
+        symbol: "BTCUSDT_PERP.A",
+        denominated: "BASE_ASSET",
+        buy_sell: false,
+        ok: true,
+      },
+      {
+        venue: "okx",
+        symbol: "BTCUSDT_PERP.3",
+        denominated: "USD",
+        buy_sell: true,
+        ok: false,
+      },
+      {
+        venue: "hyperliquid",
+        symbol: "BTC.H",
+        denominated: null,
+        buy_sell: null,
+        ok: false,
+      },
+    ],
     direction: "ok",
     direction_check: {
       binance: check,
@@ -71,11 +107,14 @@ describe("perp states contract", () => {
     expect(parsed.blocks).toHaveLength(181);
     expect(parsed.blocks.at(-1)?.forming).toBe(true);
     expect(parsed.tables.map((table) => table.show_days)).toEqual([7, 30]);
-    expect(parsed.collectors.map((c) => c.stream)).toEqual([
-      "binance_liq",
-      "bybit_liq",
-      "bybit_trades",
-    ]);
+    // The comparison collectors feed no view, so a view does not list them.
+    expect(raw).not.toHaveProperty("collectors");
+    expect(ruledRaw).not.toHaveProperty("collectors");
+  });
+
+  it("takes Hyperliquid as an exchange", () => {
+    const sample = { ...raw, exchange: "hyperliquid" };
+    expect(perpStatesViewSchema.parse(sample).exchange).toBe("hyperliquid");
   });
 
   it("accepts the checked-in O1 and O6 sample, judged in part", () => {
@@ -197,7 +236,6 @@ describe("perp states contract", () => {
     expect(bad({ window: "1h" })).toBe(false);
     expect(bad({ last: "2026-10-17T10:50:00" })).toBe(false);
     expect(bad({ computed_at: undefined })).toBe(false);
-    expect(bad({ collectors: undefined })).toBe(false);
     expect(bad({ rules: ["O7"] })).toBe(false);
     expect(bad({ rules_pending: undefined })).toBe(false);
     expect(
@@ -217,11 +255,6 @@ describe("perp states contract", () => {
             rows: [{ ...sample.tables[0].rows[0], share: 3.5 }],
           },
         ],
-      }),
-    ).toBe(false);
-    expect(
-      bad({
-        collectors: [{ ...sample.collectors[0], stream: "okx_liq" }],
       }),
     ).toBe(false);
   });
@@ -249,12 +282,7 @@ describe("perp states variants", () => {
     }
     expect(view.thresholds?.n_px).toBe(view.blocks.length);
     expect(view.thresholds?.n_oi).toBe(view.blocks.length);
-    // The streams started with the first block, so they cover what the view covers.
-    for (const collector of view.collectors) {
-      expect(collector.live).toBe(true);
-      expect(collector.covered_days).toBe(view.covered_days);
-      expect(collector.since).toBe(view.blocks[0].t0);
-    }
+    expect(perpStatesSample("collecting")).not.toHaveProperty("collectors");
   });
 
   it("uncovered: blocks without coverage stay unjudged and their sums null", () => {
@@ -275,23 +303,8 @@ describe("perp states variants", () => {
     }
     expect(view.blocks.filter((block) => block.covered)).toHaveLength(179);
     expect(view.collecting).toBe(false);
-    // Every stream went down inside the forming block, after a past gap over the oldest block:
-    // 32 h before the gap and 717.5 h after it.
-    expect(view.reasons).toEqual([
-      "collector_down:binance_liq",
-      "collector_down:bybit_liq",
-      "collector_down:bybit_trades",
-    ]);
-    const formingStart = Date.parse(uncovered[1].t0);
-    for (const collector of view.collectors) {
-      expect(collector.live).toBe(false);
-      expect(collector.down_since).toBe(collector.last_proof);
-      expect(Date.parse(collector.down_since ?? "")).toBeGreaterThan(
-        formingStart,
-      );
-      expect(collector.covered_days).toBeCloseTo(749.5 / 24, 10);
-      expect(collector.since).toBe(fullSample().collectors[0].since);
-    }
+    // Coinalyze, where every view reads its liquidations, answered 429.
+    expect(view.reasons).toEqual(["rest_error:api.coinalyze.net:429"]);
     // Recounted the way the service does: the forming block was the latest.
     expect(view.thresholds?.n_liq).toBe(187);
     expect(view.covered_days).toBeCloseTo(187 / 6, 10);
@@ -328,7 +341,7 @@ describe("perp states variants", () => {
 
 describe("perps status contract", () => {
   it("accepts the status payload", () => {
-    const parsed = perpsStatusSchema.parse(status(fullSample()));
+    const parsed = perpsStatusSchema.parse(status());
     expect(parsed.direction).toBe("ok");
     expect(parsed.hosts[1].backoff_until).toBe("2026-10-17T11:10:00Z");
     expect(parsed.direction_check?.okx.verdict).toBe("ok");
@@ -337,22 +350,35 @@ describe("perps status contract", () => {
     expect(parsed.collectors[1].problems).toEqual({});
   });
 
+  it("lists the market checks, with null where Coinalyze does not list the symbol", () => {
+    const parsed = perpsStatusSchema.parse(status());
+    expect(parsed.markets.map((check) => [check.venue, check.ok])).toEqual([
+      ["binance", true],
+      ["okx", false],
+      ["hyperliquid", false],
+    ]);
+    expect(parsed.markets[2].denominated).toBeNull();
+    expect(parsed.markets[2].buy_sell).toBeNull();
+  });
+
   it("keeps a round that has not run yet null", () => {
     const before: PerpsStatus = {
       last_run_at: null,
       last_error: null,
       hosts: [],
       collectors: [],
+      markets: [],
       direction: "pending",
       direction_check: null,
     };
     const parsed = perpsStatusSchema.parse(before);
     expect(parsed.last_run_at).toBeNull();
     expect(parsed.direction_check).toBeNull();
+    expect(parsed.markets).toEqual([]);
   });
 
   it("keeps an unchecked venue's long share null, not a failed check", () => {
-    const payload = status(fullSample());
+    const payload = status();
     if (!payload.direction_check) throw new Error("no direction check");
     payload.direction_check.okx = {
       verdict: "pending",
@@ -365,8 +391,17 @@ describe("perps status contract", () => {
     expect(parsed.direction_check?.okx.verdict).toBe("pending");
   });
 
-  it("rejects a verdict or a stream outside the contract", () => {
-    const payload = status(fullSample());
+  it("rejects a verdict, a stream or a market venue outside the contract", () => {
+    const payload = status();
+    expect(
+      perpsStatusSchema.safeParse({
+        ...payload,
+        markets: [{ ...payload.markets[0], venue: "deribit" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      perpsStatusSchema.safeParse({ ...payload, markets: undefined }).success,
+    ).toBe(false);
     expect(
       perpsStatusSchema.safeParse({ ...payload, direction: "flipped" }).success,
     ).toBe(false);

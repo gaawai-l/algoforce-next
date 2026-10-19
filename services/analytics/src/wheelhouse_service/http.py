@@ -60,14 +60,16 @@ def create_app(
     start_broker_worker: bool | None = None,
     brk_client: BrkClient | None = None,
     start_perps: bool | None = None,
+    perps_collectors: bool | None = None,
     perps_http: httpx.Client | None = None,
     perps_connect: Callable[..., Connection] | None = None,
     rules: Rules | None = None,
     coinalyze_key: str | None = None,
 ) -> FastAPI:
     """`start_perps` defaults to the WHEELHOUSE_PERPS setting; nothing starts without
-    `start_worker`. `rules` defaults to the WHEELHOUSE_RULES setting and `coinalyze_key` to
-    the WHEELHOUSE_COINALYZE_KEY one."""
+    `start_worker`. `perps_collectors` defaults to the WHEELHOUSE_PERPS_COLLECTORS one (off),
+    and the collectors start only while the perps worker does. `rules` defaults to the
+    WHEELHOUSE_RULES setting and `coinalyze_key` to the WHEELHOUSE_COINALYZE_KEY one."""
     repository: Repository | None = None
 
     def repo() -> Repository:
@@ -343,6 +345,12 @@ def create_app(
             perps_http,
             rules=configured,
             start_worker=run_perps,
+            start_collectors=run_perps
+            and (
+                Settings.from_env().perps_collectors
+                if perps_collectors is None
+                else perps_collectors
+            ),
             connect=perps_connect,
             coinalyze_key=key,
         )

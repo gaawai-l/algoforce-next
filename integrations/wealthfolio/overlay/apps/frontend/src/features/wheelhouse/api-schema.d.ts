@@ -1677,6 +1677,25 @@ export interface components {
             /** Opening Event Id */
             opening_event_id: string;
         };
+        /**
+         * MarketCheck
+         * @description What `/future-markets` says about one of the symbols read here.
+         */
+        MarketCheck: {
+            /**
+             * Venue
+             * @enum {string}
+             */
+            venue: "binance" | "bybit" | "okx" | "hyperliquid";
+            /** Symbol */
+            symbol: string;
+            /** Denominated */
+            denominated: string | null;
+            /** Buy Sell */
+            buy_sell: boolean | null;
+            /** Ok */
+            ok: boolean;
+        };
         /** MarketContext */
         MarketContext: {
             /**
@@ -1857,8 +1876,6 @@ export interface components {
             qc: string[];
             /** Series Missing */
             series_missing: string[];
-            /** Collectors */
-            collectors: components["schemas"]["CollectorStatus"][];
             /** Rules */
             rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
             /** Rules Pending */
@@ -1874,6 +1891,8 @@ export interface components {
             hosts: components["schemas"]["HostStatus"][];
             /** Collectors */
             collectors: components["schemas"]["CollectorStatus"][];
+            /** Markets */
+            markets: components["schemas"]["MarketCheck"][];
             /**
              * Direction
              * @enum {string}

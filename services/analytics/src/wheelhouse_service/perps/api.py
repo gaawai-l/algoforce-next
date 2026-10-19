@@ -1,5 +1,6 @@
-"""Read-only perps endpoints. They only read the private store: freshness, collector status and
-reason codes are worked out per request (spec §3.7, §4; P4-R10)."""
+"""Read-only perps endpoints. They only read the private store: freshness, host errors and
+reason codes are worked out per request, and collector status for /perps/status (spec §3.7, §4;
+P4-R10)."""
 
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -27,17 +28,12 @@ from .sync import (
     Verdict,
     derived_key,
     stored_hosts,
+    stored_markets,
 )
 
-# What each view reads; only these give it a `collector_down` or `rest_error` reason. Every view
-# prices with Bybit spot and reads its liquidations from Coinalyze; Binance's OI comes from its
-# history and its archive files. Hyperliquid's view reads All's OI and liquidations.
-VIEW_STREAMS: dict[Exchange, tuple[Stream, ...]] = {
-    "all": STREAMS,
-    "binance": ("binance_liq",),
-    "bybit": ("bybit_liq", "bybit_trades"),
-    "hyperliquid": STREAMS,
-}
+# The hosts each view reads; only these give it a `rest_error` reason. Every view prices with
+# Bybit spot and reads its liquidations from Coinalyze; Binance's OI comes from its history and
+# its archive files. Hyperliquid's view reads All's OI and liquidations.
 VIEW_HOSTS: dict[Exchange, tuple[str, ...]] = {
     "all": (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST),
     "binance": (BINANCE_HOST, ARCHIVE_HOST, BYBIT_HOST, CZ_HOST),
@@ -46,7 +42,7 @@ VIEW_HOSTS: dict[Exchange, tuple[str, ...]] = {
 }
 # Before the worker's first derive there is no payload, whatever else is wrong.
 NOT_DERIVED = "not_derived"
-# Nor will there be one while this process runs no worker and no collectors.
+# Nor will there be one while this process runs no worker.
 PERPS_DISABLED = "perps_disabled"
 
 
@@ -96,7 +92,6 @@ def states_view(
     exchange: Exchange,
     window: Window,
     derived: tuple[StoredStates, datetime] | None,
-    collectors: Sequence[CollectorStatus],
     hosts: Mapping[str, HostState],
     now: datetime,
     *,
@@ -104,10 +99,10 @@ def states_view(
     enabled: bool = True,
 ) -> PerpStatesView:
     """The stored payload of one view, with its freshness and reason codes at `now`; `rules` are
-    the configured ones, and `enabled` says whether this process runs the worker and the
-    collectors.
+    the configured ones, and `enabled` says whether this process runs the worker.
 
-    Reasons in order: series_missing, rest_error, collector_down, collecting (spec §3.7).
+    Reasons in order: series_missing and coinalyze_units (the worker's), rest_error, collecting
+    (spec §3.7).
     """
     stored, computed_at = derived if derived is not None else (None, None)
     states = stored.states if stored is not None else None
@@ -115,9 +110,6 @@ def states_view(
     reasons = list(stored.reasons) if stored is not None else [missing]
     errors = [(host, hosts[host].error) for host in VIEW_HOSTS[exchange]]
     reasons += [f"rest_error:{host}:{error}" for host, error in errors if error]
-    if enabled:
-        # With the collectors off by configuration, perps_disabled already says why.
-        reasons += [f"collector_down:{status.stream}" for status in collectors if not status.live]
     fields: dict[str, Any]
     if states is None:
         fields = {
@@ -157,7 +149,6 @@ def states_view(
         data_state=freshness(None if states is None else states.last, now),
         reasons=reasons,
         computed_at=computed_at,
-        collectors=list(collectors),
         rules=stored.rules if stored is not None else [],
         rules_pending=pending,
         **fields,
@@ -180,13 +171,15 @@ def create_router(
     *,
     rules: Rules,
     start_worker: bool = True,
+    start_collectors: bool = False,
+    coinalyze_key: str | None = None,
     connect: Callable[..., Connection] | None = None,
     clock: Callable[[], datetime] = utc_now,
-    coinalyze_key: str | None = None,
 ) -> APIRouter:
-    """`rules` are those the worker derives under; `start_worker` runs the REST worker and the
-    collectors; `http` and `connect` replace the REST client and the WebSocket connection
-    factory; `coinalyze_key` is the worker's Coinalyze key, None when there is none."""
+    """`rules` are those the worker derives under; `start_worker` runs the REST worker and
+    `start_collectors` the WebSocket collectors, which feed no view and are only for comparison;
+    `http` and `connect` replace the REST client and the WebSocket connection factory;
+    `coinalyze_key` is the worker's Coinalyze key, None when there is none."""
     store: PerpsStore | None = None
     collectors: Collectors | None = None
 
@@ -195,13 +188,14 @@ def create_router(
         nonlocal store, collectors
         store = PerpsStore(path)
         worker = None
-        if start_worker:
+        if start_collectors:
             collectors = Collectors(store, connect=connect or websocket_connect)
+            collectors.start()
+        if start_worker:
             rest = PerpsRest(http)
             worker = PerpsSync(
                 store, rest, clock=utc_now, rules=rules, coinalyze=Coinalyze(rest, coinalyze_key)
             )
-            collectors.start()
             worker.start()
         yield
         # The worker is told first, so that it abandons its round at its next request while the
@@ -238,7 +232,6 @@ def create_router(
             exchange,
             window,
             derived,
-            statuses(VIEW_STREAMS[exchange], now),
             stored_hosts(db().state()),
             now,
             rules=rules,
@@ -266,6 +259,7 @@ def create_router(
                 for host, state in hosts.items()
             ],
             collectors=statuses(STREAMS, now),
+            markets=stored_markets(stored),
             direction=direction(directions),
             direction_check=directions,
         )

@@ -4749,6 +4749,61 @@
         ],
         "title": "Lot"
       },
+      "MarketCheck": {
+        "properties": {
+          "venue": {
+            "type": "string",
+            "enum": [
+              "binance",
+              "bybit",
+              "okx",
+              "hyperliquid"
+            ],
+            "title": "Venue"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "denominated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Denominated"
+          },
+          "buy_sell": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buy Sell"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "venue",
+          "symbol",
+          "denominated",
+          "buy_sell",
+          "ok"
+        ],
+        "title": "MarketCheck",
+        "description": "What `/future-markets` says about one of the symbols read here."
+      },
       "MarketContext": {
         "properties": {
           "source": {
@@ -5243,13 +5298,6 @@
             "type": "array",
             "title": "Series Missing"
           },
-          "collectors": {
-            "items": {
-              "$ref": "#/components/schemas/CollectorStatus"
-            },
-            "type": "array",
-            "title": "Collectors"
-          },
           "rules": {
             "items": {
               "type": "string",
@@ -5287,7 +5335,6 @@
           "collecting",
           "qc",
           "series_missing",
-          "collectors",
           "rules",
           "rules_pending"
         ],
@@ -5333,6 +5380,13 @@
             "type": "array",
             "title": "Collectors"
           },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/MarketCheck"
+            },
+            "type": "array",
+            "title": "Markets"
+          },
           "direction": {
             "type": "string",
             "enum": [
@@ -5360,6 +5414,7 @@
           "last_error",
           "hosts",
           "collectors",
+          "markets",
           "direction",
           "direction_check"
         ],

@@ -16,8 +16,11 @@ class Settings:
     port: int = 8787
     log_level: str = "info"
     data_dir: Path = Path(__file__).resolve().parents[4] / ".local" / "analytics"
-    # The perps REST worker and WebSocket collectors; on unless WHEELHOUSE_PERPS turns them off.
+    # The perps worker; on unless WHEELHOUSE_PERPS turns it off.
     perps_enabled: bool = True
+    # The WebSocket collectors, kept for comparison only; off unless WHEELHOUSE_PERPS_COLLECTORS
+    # turns them on, and they run only while the worker does.
+    perps_collectors: bool = False
     # The opt-in rule switches; all on unless WHEELHOUSE_RULES says otherwise.
     rules: Rules = ALL_RULES
     # Sent only in the `api_key` header of Coinalyze requests; None when it is not configured.
@@ -34,6 +37,9 @@ class Settings:
         perps = os.environ.get("WHEELHOUSE_PERPS", "on").lower()
         if perps not in {"1", "0", "true", "false", "on", "off"}:
             raise ValueError("WHEELHOUSE_PERPS must be 1/0, true/false or on/off")
+        collectors = os.environ.get("WHEELHOUSE_PERPS_COLLECTORS", "off").lower()
+        if collectors not in {"1", "0", "true", "false", "on", "off"}:
+            raise ValueError("WHEELHOUSE_PERPS_COLLECTORS must be 1/0, true/false or on/off")
         try:
             rules = parse_rules(os.environ.get("WHEELHOUSE_RULES"))
         except ValueError as exc:
@@ -43,6 +49,7 @@ class Settings:
             log_level=level,
             data_dir=Path(os.environ.get("WHEELHOUSE_DATA_DIR", str(cls.data_dir))),
             perps_enabled=perps in {"1", "true", "on"},
+            perps_collectors=collectors in {"1", "true", "on"},
             rules=rules,
             coinalyze_key=_coinalyze_key(),
         )

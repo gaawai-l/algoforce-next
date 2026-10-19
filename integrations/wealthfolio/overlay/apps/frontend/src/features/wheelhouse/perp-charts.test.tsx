@@ -143,6 +143,37 @@ it("hatches uncovered blocks apart from the shading and leaves Chart 4 empty the
   expect(bars("short")).toHaveLength(179);
 });
 
+it("marks Chart 4's liquidation band and both liquidation readings as estimated on the Hyperliquid view", () => {
+  draw({ ...perpStatesSample(), exchange: "hyperliquid" });
+  const bandLabel = () =>
+    panel("c4").querySelector(".wh-perp-bandlabel")?.textContent;
+  expect(bandLabel()).toBe("Liquidations (estimated)");
+  const [delta, short, long] = values("c4");
+  expect(delta).toMatch(/^Volume delta [−-]?[\d.,k]+ BTC$/);
+  expect(short).toMatch(/^Short liquidations \(estimated\) [\d.,k]+ BTC$/);
+  expect(long).toMatch(/^Long liquidations \(estimated\) [\d.,k]+ BTC$/);
+  // Only Chart 4 carries liquidations, and Hyperliquid's own delta is not an estimate.
+  expect(panel("c1").textContent).not.toMatch(/estimated/);
+  expect(panel("c3").textContent).not.toMatch(/estimated/);
+  cleanup();
+
+  // An uncovered block says so under the same labels.
+  draw({ ...perpStatesSample("uncovered"), exchange: "hyperliquid" });
+  expect(values("c4")).toEqual([
+    "Volume delta uncovered",
+    "Short liquidations (estimated) uncovered",
+    "Long liquidations (estimated) uncovered",
+  ]);
+  cleanup();
+
+  for (const exchange of ["all", "binance", "bybit"] as const) {
+    draw({ ...perpStatesSample(), exchange });
+    expect(bandLabel()).toBe("Liquidations");
+    expect(panel("c4").textContent).not.toMatch(/estimated/);
+    cleanup();
+  }
+});
+
 it("leaves a partly covered block's bars empty even when it has partial sums", () => {
   const view = perpStatesSample();
   const k = 100;

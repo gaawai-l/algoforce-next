@@ -302,7 +302,18 @@ describe("on-chain client", () => {
           backoff_until: null,
         },
       ],
-      collectors: perpStatesSample().collectors,
+      collectors: (["binance_liq", "bybit_liq", "bybit_trades"] as const).map(
+        (stream) => ({
+          stream,
+          live: true,
+          last_proof: "2026-10-17T11:06:54Z",
+          down_since: null,
+          covered_days: 31.5,
+          since: "2026-09-16T00:00:00Z",
+          problems: {},
+        }),
+      ),
+      markets: [],
       direction: "pending",
       direction_check: null,
     };

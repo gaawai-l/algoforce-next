@@ -8,6 +8,7 @@ from pydantic import AwareDatetime
 
 from ..market import Model
 from ..rules import Rule
+from .coinalyze import MarketCheck
 from .rows import Exchange, Stream
 from .states import STEP, Block, Table, Tail, Thresholds, Window
 from .sync import Directions, Verdict
@@ -63,8 +64,6 @@ class PerpStatesView(Model):
     collecting: bool | None
     qc: list[str]
     series_missing: list[str]
-    # Only the streams this view reads: liquidations, and Bybit's trades for its delta.
-    collectors: list[CollectorStatus]
     # The rules the payload was derived under, and whether they differ from the configured ones
     # until a round derives it again. Empty and false when there is no payload.
     rules: list[Rule]
@@ -82,7 +81,11 @@ class PerpsStatus(Model):
     last_run_at: AwareDatetime | None
     last_error: str | None  # "sync_failed" when the last round failed unexpectedly
     hosts: list[HostStatus]
+    # The streams the WebSocket collectors write, for comparison only: they feed no view.
     collectors: list[CollectorStatus]
+    # What Coinalyze's market list says about the symbols read from it; empty until the worker
+    # has checked it.
+    markets: list[MarketCheck]
     # The three venues' liquidation sides: ok when all are, inverted when any is, else pending.
     direction: Verdict
     # Each venue's check; null before the first round.

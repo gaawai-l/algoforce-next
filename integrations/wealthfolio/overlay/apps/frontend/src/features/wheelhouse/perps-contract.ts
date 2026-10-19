@@ -101,6 +101,14 @@ const collectorSchema = z.object({
   // Connection ends and problems by code since the service started; not shown.
   problems: z.record(int),
 });
+// What Coinalyze's market list says about one of the symbols read from it.
+const marketCheckSchema = z.object({
+  venue: z.enum(["binance", "bybit", "okx", "hyperliquid"]),
+  symbol: z.string(),
+  denominated: z.string().nullable(),
+  buy_sell: z.boolean().nullable(),
+  ok: z.boolean(),
+});
 const directionCheckSchema = z.object({
   verdict,
   samples: int,
@@ -127,7 +135,6 @@ export const perpStatesViewSchema: z.ZodType<
   collecting: z.boolean().nullable(),
   qc: z.array(z.string()),
   series_missing: z.array(z.string()),
-  collectors: z.array(collectorSchema),
   rules,
   rules_pending: z.boolean(),
 });
@@ -145,6 +152,7 @@ export const perpsStatusSchema: z.ZodType<PerpsStatus, z.ZodTypeDef, unknown> =
       }),
     ),
     collectors: z.array(collectorSchema),
+    markets: z.array(marketCheckSchema),
     direction: verdict,
     direction_check: z
       .object({
@@ -195,12 +203,6 @@ function collecting(view: PerpStatesView): PerpStatesView {
   return {
     ...view,
     reasons: [`collecting:${coveredDays.toFixed(1)}`],
-    // The streams started with the first block, so they cover what the view covers.
-    collectors: view.collectors.map((collector) => ({
-      ...collector,
-      covered_days: coveredDays,
-      since: blocks[0].t0,
-    })),
     thresholds: view.thresholds && {
       ...view.thresholds,
       n_liq: blocks.length,
@@ -245,12 +247,8 @@ function uncover(block: PerpBlock): PerpBlock {
   };
 }
 
-// Every stream went down inside the forming block, after a past gap over the oldest block.
-const DOWN_SINCE = "2026-10-17T09:30:00Z";
-// From the first coverage to the gap (32 h), and from the gap to DOWN_SINCE (717.5 h).
-const COVERED_DAYS_AFTER_GAP = (32 + 717.5) / 24;
-
-// The oldest block (outside both table views) and the forming latest one lose their coverage.
+// The oldest block (outside both table views) and the forming latest one lose their coverage,
+// with Coinalyze answering 429.
 // Counts and shares are redone the way the service recounts the tables; the best moves and runs
 // of the other states are unaffected.
 function uncovered(view: PerpStatesView): PerpStatesView {
@@ -259,16 +257,7 @@ function uncovered(view: PerpStatesView): PerpStatesView {
   const state = latest.state;
   return {
     ...view,
-    reasons: view.collectors.map(
-      (collector) => `collector_down:${collector.stream}`,
-    ),
-    collectors: view.collectors.map((collector) => ({
-      ...collector,
-      live: false,
-      last_proof: DOWN_SINCE,
-      down_since: DOWN_SINCE,
-      covered_days: COVERED_DAYS_AFTER_GAP,
-    })),
+    reasons: ["rest_error:api.coinalyze.net:429"],
     thresholds: view.thresholds && {
       ...view.thresholds,
       n_liq: view.thresholds.n_liq - 2,

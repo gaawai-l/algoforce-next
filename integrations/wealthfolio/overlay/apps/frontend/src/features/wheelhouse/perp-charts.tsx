@@ -582,6 +582,7 @@ function Panel({
   legend,
   read,
   past,
+  bandLabel,
 }: {
   chart: ChartKey;
   items: Item[];
@@ -593,6 +594,8 @@ function Panel({
   read: (item: Item) => Reading;
   // O6: each block's thresholds come from the 90 days before it alone.
   past: boolean;
+  // Chart 4's liquidation band.
+  bandLabel: string;
 }) {
   const { text } = useWheelhouseText();
   const uid = useId().replace(/[^\w-]/g, "");
@@ -673,7 +676,7 @@ function Panel({
               size={size}
               hidden={hidden}
               uid={uid}
-              bandLabel={text("perp.chart.liquidations")}
+              bandLabel={bandLabel}
               width={width}
               height={height}
             />
@@ -781,6 +784,9 @@ export function PerpCharts({
     if (zeroThreshold) out.push(text("perp.chart.zeroThreshold"));
     return out;
   };
+  // Hyperliquid's liquidations are estimated from All's, and say so wherever they are read.
+  const liquidation = (label: string) =>
+    view.exchange === "hyperliquid" ? text("perp.estimated", { label }) : label;
   const uncovered = text("perp.chart.uncovered");
   const priceValue = (item: Item) => ({
     label: text("perp.chart.price"),
@@ -939,11 +945,11 @@ export function PerpCharts({
                   : btc(item.delta),
             },
             {
-              label: text("perp.chart.shortLiq"),
+              label: liquidation(text("perp.chart.shortLiq")),
               value: liqMissing ? uncovered : btc(item.sliq),
             },
             {
-              label: text("perp.chart.longLiq"),
+              label: liquidation(text("perp.chart.longLiq")),
               value: liqMissing ? uncovered : btc(item.lliq),
             },
           ],
@@ -967,6 +973,7 @@ export function PerpCharts({
           legend={legend}
           read={read}
           past={o6}
+          bandLabel={liquidation(text("perp.chart.liquidations"))}
         />
       ))}
     </>

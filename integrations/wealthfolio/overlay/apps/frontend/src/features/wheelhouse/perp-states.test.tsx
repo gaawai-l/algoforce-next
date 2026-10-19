@@ -45,7 +45,12 @@ afterEach(() => {
 
 const tableTitle = "Table 1 — Perp states";
 const header =
-  "Resolution 10m · Data through 2026-10-17 11:00 UTC · Price Bybit spot · OI/flows Binance USDⓈ-M + Bybit linear (public) · liquidations collected since 2026-09-16";
+  "Resolution 10m · Data through 2026-10-17 11:00 UTC · Price Bybit spot · OI Binance and Bybit (public), OKX and Hyperliquid (Coinalyze)";
+const source = "Liquidations and buy/sell volume (except Binance's):";
+const historyBanner = (days: string) =>
+  `Liquidation history too short · ${days} of 7 days (target 90)`;
+const hlNote =
+  "Hyperliquid liquidations are estimated: All venues' liquidations scaled by Hyperliquid's OI relative to theirs";
 const binanceNote =
   "Binance liquidations are a one-per-second snapshot (lower bound)";
 
@@ -55,6 +60,7 @@ function status(direction: PerpsStatus["direction"]): PerpsStatus {
     last_error: null,
     hosts: [],
     collectors: [],
+    markets: [],
     direction,
     direction_check: null,
   };
@@ -190,41 +196,42 @@ it("shows Table 1 with the eight states in order and shares adding up to 100", a
   expect(document.querySelectorAll("details")).toHaveLength(0);
 });
 
-it("shows the header line, the coverage of each stream and the Binance note", async () => {
+it("shows the header line, the source line, the history coverage and the Binance note", async () => {
   show();
   expect(await screen.findByText(header)).toBeTruthy();
+  expect(screen.getByText(source)).toBeTruthy();
   expect(
-    screen.getByText(
-      "Collected in the last 90 days: Binance liquidations 31.5 d · Bybit liquidations 31.5 d · Bybit trades 31.5 d",
-    ),
+    screen.getByText("Liquidation history: 31.5 d covered in the last 90"),
   ).toBeTruthy();
   expect(screen.getByText(binanceNote)).toBeTruthy();
+  expect(screen.queryByText(hlNote)).toBeNull();
   expect(document.querySelectorAll(".wh-onchain-warn")).toHaveLength(0);
+  // The streams that used to be listed are gone with the collectors.
+  expect(screen.queryByText(/Collected in the last 90 days/)).toBeNull();
+  expect(screen.queryByText(/collected since/)).toBeNull();
 });
 
-it("leaves out the Binance note and other streams on the Bybit view", async () => {
+it("credits Coinalyze with a link", async () => {
+  show();
+  const link = await screen.findByRole("link", { name: "Coinalyze" });
+  expect(link.getAttribute("href")).toBe("https://coinalyze.net");
+  expect(link.getAttribute("target")).toBe("_blank");
+  expect(link.getAttribute("rel")).toBe("noreferrer");
+  expect(link.closest("p")?.textContent).toBe(`${source} Coinalyze`);
+  // The source line follows the header line.
+  const lines = [...document.querySelectorAll(".wh-perp-meta")];
+  expect(lines[0].textContent).toBe(header);
+  expect(lines[1]).toBe(link.closest("p"));
+});
+
+it("leaves out the Binance note on the Bybit view", async () => {
   const view = perpStatesSample();
   view.exchange = "bybit";
-  view.collectors = view.collectors.filter(
-    (collector) => collector.stream !== "binance_liq",
-  );
   show({ view, search: "?px=bybit" });
   expect(
-    await screen.findByText(
-      "Collected in the last 90 days: Bybit liquidations 31.5 d · Bybit trades 31.5 d",
-    ),
+    await screen.findByText("Liquidation history: 31.5 d covered in the last 90"),
   ).toBeTruthy();
   expect(screen.queryByText(binanceNote)).toBeNull();
-});
-
-it("dates the liquidations from the later of the view's liquidation streams", async () => {
-  const view = perpStatesSample();
-  view.collectors[1].since = "2026-09-20T06:00:00Z";
-  view.collectors[2].since = "2026-09-25T06:00:00Z";
-  show({ view });
-  expect(
-    await screen.findByText(/liquidations collected since 2026-09-20$/),
-  ).toBeTruthy();
 });
 
 it("marks the latest block in the row of its state and says it is forming", async () => {
@@ -241,7 +248,7 @@ it("marks the latest block in the row of its state and says it is forming", asyn
   ).toBeTruthy();
 });
 
-it("marks no row when the latest block is uncovered, and names the downed collectors", async () => {
+it("marks no row when the latest block is uncovered, and names the failing Coinalyze host", async () => {
   show({ view: perpStatesSample("uncovered") });
   await screen.findByText(tableTitle);
   expect(screen.queryByRole("img", { name: /Latest block/ })).toBeNull();
@@ -249,11 +256,10 @@ it("marks no row when the latest block is uncovered, and names the downed collec
     "179 judged of 180 blocks in view · share of blocks, not a forecast · latest block uncovered",
   );
   expect(
-    screen.getByText(
-      "Binance liquidations collector down since 2026-10-17 09:30 UTC · Bybit liquidations collector down since 2026-10-17 09:30 UTC · Bybit trades collector down since 2026-10-17 09:30 UTC",
-    ),
+    screen.getByText("api.coinalyze.net failing (429); older data kept"),
   ).toBeTruthy();
-  expect(screen.queryByText(/collector_down/)).toBeNull();
+  expect(screen.queryByText(/rest_error/)).toBeNull();
+  expect(screen.queryByText(/collector/)).toBeNull();
   // The forming block has no state to change, so there is no forming note.
   expect(screen.queryByText(/still forming/)).toBeNull();
 });
@@ -284,15 +290,6 @@ it("rounds a move before choosing its sign", async () => {
   expect(cellsOf(bodyRows()[1])[3]).toBe("−0.01%");
 });
 
-it("says the liquidations' start is unavailable when a stream has none", async () => {
-  const view = perpStatesSample();
-  view.collectors[1] = { ...view.collectors[1], since: null };
-  show({ view });
-  expect(
-    await screen.findByText(/liquidations collected since Unavailable$/),
-  ).toBeTruthy();
-});
-
 it("says the requested Show is missing instead of drawing nothing", async () => {
   const view = perpStatesSample();
   view.tables = view.tables.filter((table) => table.show_days === 7);
@@ -315,50 +312,109 @@ it("refreshes the view every five minutes and the status every minute", async ()
   expect(interval(["wh", "perps", "status"])).toBe(60000);
 });
 
-it("says a collector that never connected has not connected yet", async () => {
-  const view = perpStatesSample();
-  view.collectors[2] = {
-    ...view.collectors[2],
-    live: false,
-    last_proof: null,
-    down_since: null,
-    covered_days: 0,
-    since: null,
-  };
-  view.reasons = ["collector_down:bybit_trades"];
-  show({ view });
-  expect(
-    await screen.findByText("Bybit trades collector has not connected yet"),
-  ).toBeTruthy();
-});
-
 it("shows the collecting banner instead of Table 1, keeping the parameters", async () => {
   show({ view: perpStatesSample("collecting") });
-  expect(
-    await screen.findByText(
-      "Collecting liquidations (and Bybit trades) · 3.5 of 7 days (target 90)",
-    ),
-  ).toBeTruthy();
+  expect(await screen.findByText(historyBanner("3.5"))).toBeTruthy();
   expect(screen.queryByText(tableTitle)).toBeNull();
   expect(screen.queryByRole("table")).toBeNull();
   expect(screen.queryByText(/collecting:/)).toBeNull();
   expect(screen.getByRole("button", { name: "All venues" })).toBeTruthy();
+  expect(screen.getByText(header)).toBeTruthy();
   expect(
-    screen.getByText(header.replace("2026-09-16", "2026-10-14")),
+    screen.getByText("Liquidation history: 3.5 d covered in the last 90"),
   ).toBeTruthy();
 });
 
-it("leaves Bybit trades out of the collecting banner on the Binance view", async () => {
+it.each([
+  [
+    "key_missing",
+    "Coinalyze API key not set: liquidations and Coinalyze flows unavailable",
+  ],
+  [
+    "401",
+    "Coinalyze rejected the API key: liquidations and Coinalyze flows unavailable",
+  ],
+])(
+  "shows the key notice instead of the history banner when Coinalyze says %s",
+  async (code, notice) => {
+    // Without liquidations nothing is covered, so the view is collecting as well.
+    const view = perpStatesSample("collecting");
+    view.reasons = ["collecting:0.0", `rest_error:api.coinalyze.net:${code}`];
+    show({ view });
+    expect(await screen.findByText(notice)).toBeTruthy();
+    expect(screen.queryByText(/Liquidation history too short/)).toBeNull();
+    // It replaces the generic host error rather than adding to it.
+    expect(screen.queryByText(/api\.coinalyze\.net failing/)).toBeNull();
+    expect(screen.queryByText(/rest_error/)).toBeNull();
+    cleanup();
+
+    // The same notice stands in for the reasons of a view that is not available.
+    show({
+      view: {
+        ...perpStatesSample(),
+        data_state: "unavailable",
+        reasons: [`rest_error:api.coinalyze.net:${code}`],
+        computed_at: null,
+        last: null,
+        thresholds: null,
+        blocks: [],
+        tail: null,
+        tables: [],
+        covered_days: null,
+        collecting: null,
+        qc: [],
+        series_missing: [],
+      },
+    });
+    expect(await screen.findByText("Perp states unavailable")).toBeTruthy();
+    expect(screen.getByText(notice)).toBeTruthy();
+    expect(screen.queryByText(/failing/)).toBeNull();
+  },
+);
+
+it("keeps the history banner and the host error for any other Coinalyze error", async () => {
   const view = perpStatesSample("collecting");
-  view.exchange = "binance";
-  view.collectors = view.collectors.filter(
-    (collector) => collector.stream === "binance_liq",
-  );
-  show({ view, search: "?px=binance" });
+  view.reasons = ["collecting:3.5", "rest_error:api.coinalyze.net:429"];
+  show({ view });
+  expect(await screen.findByText(historyBanner("3.5"))).toBeTruthy();
+  expect(
+    screen.getByText("api.coinalyze.net failing (429); older data kept"),
+  ).toBeTruthy();
+  expect(screen.queryByText(/API key/)).toBeNull();
+});
+
+it("shows the units notice, naming the venue and the series left out", async () => {
+  show({
+    view: {
+      ...perpStatesSample(),
+      reasons: ["series_missing:okx:oi", "coinalyze_units:okx"],
+      qc: ["missing:okx:oi"],
+    },
+  });
+  // Each of them is true, so none is suppressed.
   expect(
     await screen.findByText(
-      "Collecting liquidations · 3.5 of 7 days (target 90)",
+      "No OKX OI in the last 90 days · Coinalyze OKX market check failed: its data is left out",
     ),
+  ).toBeTruthy();
+  expect(screen.getByText("QC 1 failed: OKX OI over 1% missing")).toBeTruthy();
+  cleanup();
+
+  show({
+    view: {
+      ...viewOf("hyperliquid"),
+      reasons: ["series_missing:hyperliquid:oi", "coinalyze_units:hyperliquid"],
+      qc: ["missing:hyperliquid:oi"],
+    },
+    search: "?px=hyperliquid",
+  });
+  expect(
+    await screen.findByText(
+      "No Hyperliquid OI in the last 90 days · Coinalyze Hyperliquid market check failed: its data is left out",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText("QC 1 failed: Hyperliquid OI over 1% missing"),
   ).toBeTruthy();
 });
 
@@ -433,6 +489,13 @@ it.each([
       "Long squeeze (direction unverified)",
     ],
   ],
+  [
+    "hyperliquid",
+    [
+      "Short squeeze (direction unverified)",
+      "Long squeeze (direction unverified)",
+    ],
+  ],
 ] as const)(
   "verifies the %s view's squeezes by its own venue's check",
   async (exchange, labels) => {
@@ -452,6 +515,7 @@ it.each([
 it.each([
   ["bybit", true, true],
   ["all", true, true],
+  ["hyperliquid", true, true],
   ["binance", false, false],
 ] as const)(
   "on the %s view, warns of inverted Bybit sides: %s",
@@ -497,6 +561,58 @@ it("defaults to all venues, 4h and 30d, and asks for that view", async () => {
     "4h",
     expect.any(AbortSignal),
   );
+});
+
+it("offers Hyperliquid and keeps it in the URL", async () => {
+  show({ view: viewOf("hyperliquid"), search: "?px=hyperliquid" });
+  await screen.findByText(tableTitle);
+  const group = screen.getByRole("group", { name: "Exchange" });
+  expect(
+    within(group)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["All venues", "Binance", "Bybit", "Hyperliquid"]);
+  expect(pressed("Hyperliquid")).toBe("true");
+  expect(mocks.states).toHaveBeenCalledWith(
+    "hyperliquid",
+    "4h",
+    expect.any(AbortSignal),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Bybit" }));
+  expect(where().get("px")).toBe("bybit");
+  fireEvent.click(screen.getByRole("button", { name: "Hyperliquid" }));
+  expect(where().get("px")).toBe("hyperliquid");
+  await waitFor(() =>
+    expect(mocks.states).toHaveBeenLastCalledWith(
+      "hyperliquid",
+      "4h",
+      expect.any(AbortSignal),
+    ),
+  );
+});
+
+it("labels Hyperliquid liquidations as estimated", async () => {
+  show({ view: viewOf("hyperliquid"), search: "?px=hyperliquid" });
+  await screen.findByText(tableTitle);
+  expect(screen.getByText(hlNote)).toBeTruthy();
+  // All venues' notes still apply to the estimate it is scaled from.
+  expect(screen.getByText(binanceNote)).toBeTruthy();
+  const c4 = document.querySelector<HTMLElement>('[data-chart="c4"]')!;
+  expect(within(c4).getByText("Liquidations (estimated)")).toBeTruthy();
+  const reading = c4.querySelector(".wh-perp-reading")?.textContent ?? "";
+  expect(reading).toMatch(/Short liquidations \(estimated\) [\d.]+ BTC/);
+  expect(reading).toMatch(/Long liquidations \(estimated\) [\d.]+ BTC/);
+  // Delta is Hyperliquid's own, so it is not marked.
+  expect(reading).not.toMatch(/delta \(estimated\)/i);
+  cleanup();
+
+  // The other views read their liquidations from the exchanges and say nothing of estimates.
+  show();
+  await screen.findByText(tableTitle);
+  expect(screen.queryByText(hlNote)).toBeNull();
+  const plain = document.querySelector<HTMLElement>('[data-chart="c4"]')!;
+  expect(within(plain).getByText("Liquidations")).toBeTruthy();
+  expect(plain.textContent).not.toMatch(/estimated/);
 });
 
 it("falls back to the defaults for values outside the parameters", async () => {
@@ -642,14 +758,6 @@ it("says when this service runs no perps collection", async () => {
     qc: [],
     series_missing: [],
   };
-  view.collectors = view.collectors.map((collector) => ({
-    ...collector,
-    live: false,
-    last_proof: null,
-    down_since: null,
-    covered_days: 0,
-    since: null,
-  }));
   show({ view });
   expect(
     await screen.findByText("Perp data collection is turned off in this service"),
@@ -905,11 +1013,7 @@ it("leaves the forming block out of the collecting days under O1, as the flag do
   const view = { ...perpStatesSample("collecting"), rules: ["O1" as const] };
   view.reasons = ["collecting:3.3"];
   show({ view });
-  expect(
-    await screen.findByText(
-      "Collecting liquidations (and Bybit trades) · 3.3 of 7 days (target 90)",
-    ),
-  ).toBeTruthy();
+  expect(await screen.findByText(historyBanner("3.3"))).toBeTruthy();
   cleanup();
 
   // An uncovered forming block was never counted, so nothing is taken off.
@@ -921,11 +1025,7 @@ it("leaves the forming block out of the collecting days under O1, as the flag do
   uncovered.blocks[k] = { ...uncovered.blocks[k], covered: false };
   uncovered.covered_days = 20 / 6;
   show({ view: uncovered });
-  expect(
-    await screen.findByText(
-      "Collecting liquidations (and Bybit trades) · 3.3 of 7 days (target 90)",
-    ),
-  ).toBeTruthy();
+  expect(await screen.findByText(historyBanner("3.3"))).toBeTruthy();
 });
 
 it("lists the thresholds heading the view with their samples under O6 only", async () => {
@@ -980,11 +1080,7 @@ it("keeps what is judged on screen while the view collects, counting R's liquida
   };
   view.reasons = ["collecting:6.7"];
   show({ view });
-  expect(
-    await screen.findByText(
-      "Collecting liquidations (and Bybit trades) · 6.7 of 7 days (target 90)",
-    ),
-  ).toBeTruthy();
+  expect(await screen.findByText(historyBanner("6.7"))).toBeTruthy();
   expect(screen.getByText(tableTitle)).toBeTruthy();
   expect(screen.getByText(chartTitles[0])).toBeTruthy();
   expect(screen.getByText(chartTitles[1])).toBeTruthy();

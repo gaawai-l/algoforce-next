@@ -11,7 +11,6 @@ import {
   unjudgedWhy,
 } from "./perp-charts";
 import type {
-  PerpCollector,
   PerpState,
   PerpStatesView,
   PerpsStatus,
@@ -22,7 +21,12 @@ type Exchange = PerpStatesView["exchange"];
 type StateWindow = PerpStatesView["window"];
 
 // The parameters live in the URL as px / pw / ps; anything else there falls back to the default.
-const EXCHANGES: readonly Exchange[] = ["all", "binance", "bybit"];
+const EXCHANGES: readonly Exchange[] = [
+  "all",
+  "binance",
+  "bybit",
+  "hyperliquid",
+];
 const WINDOWS: readonly StateWindow[] = ["4h", "8h"];
 const SHOWS = ["7", "30"] as const;
 type Show = (typeof SHOWS)[number];
@@ -31,6 +35,9 @@ const HOURS: Record<StateWindow, number> = { "4h": 4, "8h": 8 };
 const BUCKETS: Record<StateWindow, number> = { "4h": 24, "8h": 48 };
 const BUCKET_MS = 600_000;
 const WIDE = "(min-width: 601px)";
+// Every view reads its liquidations from Coinalyze, whose API needs a key.
+const COINALYZE_HOST = "api.coinalyze.net";
+const COINALYZE_URL = "https://coinalyze.net";
 
 const exchangeKey: Record<Exchange, MessageKey> = {
   all: "perp.exchange.all",
@@ -65,18 +72,16 @@ const whatKey: Record<PerpState, MessageKey> = {
   spot: "perp.what.spot",
   chop: "perp.what.chop",
 };
-const streamKey: Record<PerpCollector["stream"], MessageKey> = {
-  binance_liq: "perp.stream.binance_liq",
-  bybit_liq: "perp.stream.bybit_liq",
-  bybit_trades: "perp.stream.bybit_trades",
-};
 const seriesKey: Record<string, MessageKey> = {
   "bybit:price": "perp.series.bybitPrice",
   "binance:oi": "perp.series.binanceOi",
   "binance:kline": "perp.series.binanceKline",
   "bybit:oi": "perp.series.bybitOi",
+  "okx:oi": "perp.series.okxOi",
+  "hyperliquid:oi": "perp.series.hyperliquidOi",
 };
-// Their side comes from the exchanges' liquidation fields, checked against price in /perps/status.
+// Their side comes from Coinalyze's long and short liquidation fields, checked against price in
+// /perps/status.
 const SQUEEZES: readonly PerpState[] = ["shortsq", "longsq"];
 // The venues whose liquidations a view reads: Hyperliquid's are estimated from All's.
 const VENUES: Record<Exchange, readonly Venue[]> = {
@@ -102,19 +107,26 @@ const pick = <T extends string>(
 
 const utcMinute = (t: string | number) =>
   new Date(t).toISOString().slice(0, 16).replace("T", " ");
-const utcDate = (t: string | number) => new Date(t).toISOString().slice(0, 10);
 
 const seriesName = (text: TextFn, key: string) =>
   key in seriesKey ? text(seriesKey[key]) : key;
 
+// Coinalyze's markets are named by the venue they cover, Hyperliquid included.
+const venueName = (text: TextFn, venue: string) =>
+  venue in venueKey
+    ? text(venueKey[venue as Venue])
+    : venue === "hyperliquid"
+      ? text(exchangeKey.hyperliquid)
+      : venue;
+
+// The reasons that say Coinalyze has no usable key: they replace the generic host error, and the
+// history banner, which would only repeat that nothing is covered.
+const KEY_MISSING = `rest_error:${COINALYZE_HOST}:key_missing`;
+const KEY_INVALID = `rest_error:${COINALYZE_HOST}:401`;
+
 // Reason codes from the service; anything unknown is shown as received. `kept` says whether an
 // older view is on screen, which a failing host leaves in place.
-function reasonText(
-  text: TextFn,
-  reason: string,
-  collectors: PerpCollector[],
-  kept: boolean,
-) {
+function reasonText(text: TextFn, reason: string, kept: boolean) {
   if (reason === "not_derived") return text("perp.reason.notDerived");
   if (reason === "perps_disabled") return text("perp.reason.disabled");
   const series = /^series_missing:(.+)$/.exec(reason);
@@ -122,23 +134,17 @@ function reasonText(
     return text("perp.reason.seriesMissing", {
       series: seriesName(text, series[1]),
     });
+  if (reason === KEY_MISSING) return text("perp.reason.keyMissing");
+  if (reason === KEY_INVALID) return text("perp.reason.keyInvalid");
   const rest = /^rest_error:([^:]+):(.+)$/.exec(reason);
   if (rest)
     return text(kept ? "perp.reason.restError" : "perp.reason.restFailing", {
       host: rest[1],
       code: rest[2],
     });
-  const down = /^collector_down:(.+)$/.exec(reason);
-  const collector = down && collectors.find((item) => item.stream === down[1]);
-  if (collector) {
-    const name = text(streamKey[collector.stream]);
-    return collector.down_since
-      ? text("perp.reason.collectorDown", {
-          name,
-          time: utcMinute(collector.down_since),
-        })
-      : text("perp.reason.collectorNever", { name });
-  }
+  const units = /^coinalyze_units:(.+)$/.exec(reason);
+  if (units)
+    return text("perp.reason.units", { venue: venueName(text, units[1]) });
   return reason;
 }
 
@@ -407,7 +413,7 @@ export function PerpStates() {
     // The collecting banner already says how far collection is.
     const list = view.reasons
       .filter((reason) => !reason.startsWith("collecting:"))
-      .map((reason) => reasonText(text, reason, view.collectors, kept));
+      .map((reason) => reasonText(text, reason, kept));
     return list.length ? (
       <p className="wh-onchain-warn">{list.join(" · ")}</p>
     ) : null;
@@ -436,17 +442,10 @@ export function PerpStates() {
     );
   } else {
     const through = utcMinute(Date.parse(data.last) + BUCKET_MS);
-    // All venues counts a block only once every venue's liquidations are collected.
-    const liquidations = data.collectors.filter(
-      (collector) => collector.stream !== "bybit_trades",
+    // Without a key nothing is covered, and the key notice already says why.
+    const keyNotice = data.reasons.some(
+      (reason) => reason === KEY_MISSING || reason === KEY_INVALID,
     );
-    const starts = liquidations
-      .map((collector) => collector.since)
-      .filter((start) => start != null);
-    const since =
-      starts.length && starts.length === liquidations.length
-        ? utcDate(Math.max(...starts.map((start) => Date.parse(start))))
-        : text("missing");
     const late = data.data_state === "delayed" || data.data_state === "stale";
     const o6 = data.rules.includes("O6");
     const perDay = 24 / HOURS[data.window];
@@ -463,31 +462,29 @@ export function PerpStates() {
         : data.covered_days - (formingCovered ? 1 / perDay : 0);
     notices = (
       <>
+        <p className="wh-perp-meta">{text("perp.meta", { time: through })}</p>
         <p className="wh-perp-meta">
-          {text("perp.meta", { time: through, since })}
+          {text("perp.source")}{" "}
+          <a href={COINALYZE_URL} target="_blank" rel="noreferrer">
+            Coinalyze
+          </a>
         </p>
+        {data.covered_days == null ? null : (
+          <p className="wh-muted">
+            {text("perp.coverage", { days: data.covered_days.toFixed(1) })}
+          </p>
+        )}
         {rulesNote(text, data).map((line) => (
           <p key={line} className="wh-perp-meta">
             {line}
           </p>
         ))}
-        {data.collectors.length ? (
-          <p className="wh-muted">
-            {text("perp.coverage", {
-              list: data.collectors
-                .map((collector) =>
-                  text("perp.coverageDays", {
-                    name: text(streamKey[collector.stream]),
-                    days: collector.covered_days.toFixed(1),
-                  }),
-                )
-                .join(" · "),
-            })}
-          </p>
-        ) : null}
         {data.exchange === "bybit" ? null : (
           <p className="wh-muted">{text("perp.binanceNote")}</p>
         )}
+        {data.exchange === "hyperliquid" ? (
+          <p className="wh-muted">{text("perp.hlNote")}</p>
+        ) : null}
         {late ? (
           <p className="wh-onchain-warn">
             {text(
@@ -510,17 +507,11 @@ export function PerpStates() {
             {text("perp.inverted", { venue: text(venueKey[venue]) })}
           </p>
         ))}
-        {data.collecting ? (
+        {data.collecting && !keyNotice ? (
           <p className="wh-flows-note wh-flows-note--pending">
-            {text(
-              data.exchange === "binance"
-                ? "perp.collecting"
-                : "perp.collectingTrades",
-              {
-                days:
-                  collected == null ? text("missing") : collected.toFixed(1),
-              },
-            )}
+            {text("perp.collecting", {
+              days: collected == null ? text("missing") : collected.toFixed(1),
+            })}
           </p>
         ) : null}
       </>
