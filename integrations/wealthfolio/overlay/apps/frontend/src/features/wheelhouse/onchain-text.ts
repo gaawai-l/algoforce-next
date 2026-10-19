@@ -38,6 +38,18 @@ export function reasonText(text: TextFn, reason: string) {
   const empty = /^urpd_empty:([^:]+)$/.exec(reason);
   if (empty)
     return text("cycle.reason.urpdEmpty", { bucket: aggBucket(empty[1]) });
+  const gap = /^window_missing:([^:]+):([^:]+)$/.exec(reason);
+  if (gap)
+    return text("cycle.reason.windowMissing", {
+      window: gap[1],
+      bucket: aggBucket(gap[2]),
+    });
+  const mismatch = /^urpd_mismatch:([^:]+):([^:]+)$/.exec(reason);
+  if (mismatch)
+    return text("cycle.reason.urpdMismatch", {
+      cohort: mismatch[1].toUpperCase(),
+      bucket: aggBucket(mismatch[2]),
+    });
   const key = `cycle.reason.${reason}`;
   return Object.prototype.hasOwnProperty.call(messages.en, key)
     ? text(key as MessageKey)

@@ -3,21 +3,37 @@ import {
   WINDOWS,
   ZOOMS3,
   ZOOMS4,
+  agingNote,
+  barCounts,
+  chip,
+  clusterMeta,
+  clusters,
+  flowTip,
+  flowTotals,
+  fmtBtc,
+  fmtPrice,
+  fmtSigned,
   gridFor,
+  kLabel,
+  mixRows,
+  mixtureMeta,
   segments,
   sideWeights,
   udiff,
+  vsSpot,
   type FlowRow,
   type Holders,
   type Side,
   type Window,
   type Zoom,
 } from "./cost-flow";
-import { DEFAULT_SIDE, fitSide } from "./cost-flow-engine";
+import { DEFAULT_SIDE, fitSide, type SideSetting } from "./cost-flow-engine";
 import expected from "./cost-flow-expected.json";
 import s1raw from "./cost-flow-sample-0512.json";
 import s2raw from "./cost-flow-sample.json";
+import { phrase, type TextFn } from "./i18n";
 import { costFlowSchema, type FlowGrid } from "./onchain-contract";
+import { reasonText } from "./onchain-text";
 
 // S1: the 05:12 snapshot, both grids, no age snapshots. S2: the 06:04 snapshot, $500 grid only.
 const s1 = costFlowSchema.parse(s1raw);
@@ -234,5 +250,423 @@ describe("cost-flow chart 3 data", () => {
     expect(gridFor(s2, "all")?.step).toBe(500);
     expect(gridFor(s2, "lth")?.step).toBe(500);
     expect(gridFor(s1, "sth")?.step).toBe(200);
+  });
+});
+
+const en: TextFn = (key, vars) => phrase("en", key, vars);
+const zh: TextFn = (key, vars) => phrase("zh", key, vars);
+const gmm: SideSetting = { ...DEFAULT_SIDE, mixture: "gmm" };
+
+// expected.chart3_page split at its "## <label>" headers: label -> the block's lines, header first.
+const pageBlocks = new Map<string, string[]>();
+{
+  let block: string[] = [];
+  for (const line of expected.chart3_page.split("\n")) {
+    if (line.startsWith("## ")) {
+      block = [];
+      pageBlocks.set(line.slice(3), block);
+    }
+    block.push(line);
+  }
+}
+
+// The settings of the page blocks S2 can rebuild: bells on = mixture "gmm" on both sides; the BIC
+// block = smoothing "none" on both sides; restored defaults = DEFAULT_SIDE.
+interface Block {
+  w: Window;
+  h: Holders;
+  z: Zoom;
+  aging: boolean;
+  side: SideSetting;
+}
+const BLOCKS = new Map<string, Block>();
+for (const w of WINDOWS) {
+  BLOCKS.set(`${w} all zoomAll aging off bells on`, { w, h: "all", z: 0, aging: false, side: gmm });
+  for (const aging of [false, true])
+    BLOCKS.set(`${w} lth zoomAll aging ${aging ? "on" : "off"} bells on`, {
+      w,
+      h: "lth",
+      z: 0,
+      aging,
+      side: gmm,
+    });
+}
+for (const z of [50, 25, 10] as const)
+  BLOCKS.set(`30d all zoom ${z} bells on`, { w: "30d", h: "all", z, aging: false, side: gmm });
+BLOCKS.set("30d all zoomAll smoothing Off bells on (BIC)", {
+  w: "30d",
+  h: "all",
+  z: 0,
+  aging: false,
+  side: { ...gmm, smoothing: "none" },
+});
+BLOCKS.set("restored defaults", { w: "30d", h: "all", z: 0, aging: false, side: DEFAULT_SIDE });
+
+// The sweep names the side pills BUY and SELL.
+const PILL: Record<Side, string> = { pos: "BUY", neg: "SELL" };
+
+const s2Rows = (w: Window, h: Holders, aging: boolean, z: Zoom) =>
+  rowsOf(gridFor(s2, h)!, w, h, aging, z, s2.spot!);
+const s2Sides = (rows: readonly FlowRow[], h: Holders, aging: boolean, s: SideSetting) => {
+  const centers = rows.map((r) => r.price);
+  return {
+    pos: fitSide(centers, sideWeights(rows, h, aging, "pos"), s),
+    neg: fitSide(centers, sideWeights(rows, h, aging, "neg"), s),
+  };
+};
+
+// One block in the sweep's format (sweep_expected.py): the legend's label and value joined by a
+// space and its rows by " || ", the note, the drawn bars, then each table's meta and rows. The
+// cell formats are the page's (A:1828-1835, A:1856-1863). The empty-table lines are the page's
+// own text; their copy keys belong to the UI.
+const chart3Lines = (label: string, b: Block): string[] => {
+  const spot = s2.spot!;
+  const grid = gridFor(s2, b.h)!;
+  const rows = s2Rows(b.w, b.h, b.aging, b.z);
+  const t = flowTotals(rows, b.h, b.aging);
+  const legend = [
+    `${en("costflow.buy")} ${fmtSigned(t.buy)} BTC`,
+    `${en("costflow.sell")} ${fmtSigned(-t.sell)} BTC`,
+  ];
+  if (t.aging !== null && t.share !== null)
+    legend.push(
+      `${en("costflow.agingRow")} ${en(b.h === "sth" ? "costflow.ofSell" : "costflow.ofBuy", {
+        btc: fmtBtc(t.aging),
+        pct: `${(t.share * 100).toFixed(0)}%`,
+      })}`,
+    );
+  const n = barCounts(rows, b.h, b.aging);
+  const { pos, neg } = s2Sides(rows, b.h, b.aging, b.side);
+  const cs = clusters(pos, neg);
+  const ms = mixRows(pos, neg);
+  return [
+    `## ${label}`,
+    `legend: ${legend.join(" || ")}`,
+    `note: ${agingNote(en, b.h, b.aging, grid.step)}`,
+    `bars: pos ${n["bar-pos"]} neg ${n["bar-neg"]} agingPos ${n["bar-aging-pos"]} agingNeg ${n["bar-aging-neg"]}`,
+    `clusterMeta: ${clusterMeta(en, cs)}`,
+    ...(cs.length
+      ? cs.map(
+          (c) =>
+            `K${c.n} | ${PILL[c.side]} | ${fmtPrice(c.peak.location)} | ${fmtPrice(c.peak.width)} | ` +
+            `${fmtBtc(c.peak.supply)} BTC | ${(c.peak.share * 100).toFixed(1)}% | ` +
+            `${(c.peak.strength * 100).toFixed(0)}% | ${vsSpot(en, c.peak.location, spot)}`,
+        )
+      : ["No clusters. Turn smoothing on for a side, or lower its peak cutoff."]),
+    `mixtureMeta: ${mixtureMeta(en, pos, neg)}`,
+    ...(ms.length
+      ? ms.map(
+          (m) =>
+            `M${m.m} | ${PILL[m.side]} | ${fmtPrice(Math.round(m.comp.mu))} | ` +
+            `${fmtPrice(Math.round(m.comp.sigma))} | ${(m.comp.w * 100).toFixed(1)}% | ` +
+            `${fmtBtc(m.comp.w * m.totalW)} BTC | ${vsSpot(en, m.comp.mu, spot)}`,
+        )
+      : ["Bell curves are off. Turn them on for either side above."]),
+  ];
+};
+
+describe("cost-flow chart 3 readings", () => {
+  // Chart 3, page-recorded (05:55, same snapshot as S2): the 17 blocks of expected.chart3_page that
+  // have no STH ($200 grid not in S2): "{1d,7d,30d,90d} all zoomAll aging off bells on",
+  // "{1d,7d,30d,90d} lth zoomAll aging {off,on} bells on", "30d all zoom {50,25,10} bells on",
+  // "30d all zoomAll smoothing Off bells on (BIC)", "restored defaults". Rebuild every line in the
+  // sweep's format (legend " || ", note, bars, clusterMeta, K rows with BUY/SELL, mixtureMeta, M rows)
+  // and expect equality, except the "labels:" line (U4). Block settings: bells on = mixture "gmm"
+  // both sides; BIC block = smoothing "none" both sides; restored defaults = DEFAULT_SIDE.
+  it("matches the page's Chart 3 readings cell for cell", () => {
+    expect(pageBlocks.size).toBe(25);
+    const noSth = [...pageBlocks.keys()].filter((label) => !label.includes(" sth "));
+    expect(noSth).toHaveLength(17);
+    expect([...BLOCKS.keys()].sort()).toEqual([...noSth].sort());
+    for (const [label, b] of BLOCKS) {
+      // 页面记录: the block as the page rendered it, minus the chart's K labels (U4 renumbers them).
+      const page = pageBlocks.get(label)!.filter((line) => !line.startsWith("labels: "));
+      expect(chart3Lines(label, b), label).toEqual(page);
+    }
+
+    // 页面记录 with the plan's display ruling: the STH notes are the page's, at 150 days, not 155
+    // (BRK's line), on the $200 bins STH reads.
+    for (const w of WINDOWS)
+      for (const aging of [false, true]) {
+        const page = pageBlocks.get(`${w} sth zoomAll aging ${aging ? "on" : "off"} bells on`)!;
+        const note = page.find((line) => line.startsWith("note: "))!.slice("note: ".length);
+        if (!aging) expect(note).toContain("crossed 155 days.");
+        expect(agingNote(en, "sth", aging, 200)).toBe(note.replace("155 days", "150 days"));
+      }
+    // 页面记录: STH's aging row reads against the sell side (30d STH Show: 334,817 BTC, 23%).
+    const sthLegend = pageBlocks.get("30d sth zoomAll aging on bells on")![1];
+    expect(sthLegend.split(" || ")[2]).toBe(
+      `${en("costflow.agingRow")} ${en("costflow.ofSell", { btc: "334,817", pct: "23%" })}`,
+    );
+
+    // A:1762: All draws no aging row, whatever the Aging button says, and Show changes nothing.
+    const show = s2Rows("30d", "all", true, 0);
+    expect(flowTotals(show, "all", true)).toEqual(flowTotals(show, "all", false));
+    expect(flowTotals(show, "all", true)).toMatchObject({ aging: null, share: null });
+    expect(barCounts(show, "all", true)).toEqual(barCounts(show, "all", false));
+    // Hide draws no aging row for LTH either (A:1762).
+    expect(flowTotals(s2Rows("90d", "lth", false, 0), "lth", false)).toMatchObject({
+      aging: null,
+      share: null,
+    });
+    // A:1766 on a hand row: LTH Show with nothing on the buy side has an aging share of 0, not 0/0.
+    expect(flowTotals([{ b: 0, price: 250, all: -1, sth: 1, lth: -2 }], "lth", true)).toEqual({
+      buy: 0,
+      sell: 1,
+      aging: 0,
+      share: 0,
+    });
+
+    // The zh copy (brief's i18n table, new translations): the note and the legend's aging value.
+    expect(agingNote(zh, "lth", true, 500)).toBe(
+      "LTH 的真实买卖，加上因币龄增长进入 LTH 的币，两者都在买方。币龄迁移是下界。$500 价格桶。",
+    );
+    expect(zh("costflow.ofBuy", { btc: "1,283,400", pct: "40%" })).toBe(
+      "1,283,400 BTC · 占买方 40%",
+    );
+    const shown = s2Sides(show, "all", true, gmm);
+    expect(clusterMeta(zh, clusters(shown.pos, shown.neg))).toBe("5 个聚类 · 流入 1 · 流出 4");
+  });
+
+  // fitSide with smoothing "kde", bw 0.02, minProm 0.05 deep-equals smoothing "auto";
+  // chip "0.020 / 0.05" (U1, A:1944-1948)
+  it("Manual at its defaults equals Auto", () => {
+    const rows = s2Rows("30d", "all", false, 0);
+    for (const mixture of ["none", "gmm"] as const) {
+      const auto = s2Sides(rows, "all", false, { ...DEFAULT_SIDE, mixture });
+      const manual = s2Sides(rows, "all", false, { ...DEFAULT_SIDE, mixture, smoothing: "kde" });
+      expect(manual).toEqual(auto);
+      expect(auto.pos!.peaks.length + auto.neg!.peaks.length).toBe(5);
+    }
+    expect(chip({ ...DEFAULT_SIDE, smoothing: "kde" })).toBe("0.020 / 0.05");
+    expect(chip(DEFAULT_SIDE)).toBe("auto");
+    expect(chip({ ...DEFAULT_SIDE, smoothing: "none" })).toBe("raw");
+    // The slider ends (U1): width 0.10, cutoff 0.40, in the same A:1947 format.
+    expect(chip({ ...DEFAULT_SIDE, smoothing: "kde", bw: 0.1, minProm: 0.4 })).toBe("0.100 / 0.40");
+  });
+
+  // derived from page values: 30d All Zoom All, sell side minProm 0.40 -> one peak, $77,750,
+  // width $6,960, 490,118 BTC (the page's K3, strength 99%); the other sell strengths are 7%, 30%, 7%
+  it("Manual cutoff 0.40 keeps only the strong sell peak", () => {
+    const rows = s2Rows("30d", "all", false, 0);
+    const at = (minProm: number) =>
+      s2Sides(rows, "all", false, { ...DEFAULT_SIDE, smoothing: "kde", minProm });
+    // 页面记录: the four sell clusters at the default cutoff, by price.
+    expect(at(0.05).neg!.peaks.map((p) => `${(p.strength * 100).toFixed(0)}%`)).toEqual([
+      "7%",
+      "30%",
+      "99%",
+      "7%",
+    ]);
+    const { pos, neg } = at(0.4);
+    expect(
+      neg!.peaks.map((p) => [fmtPrice(p.location), fmtPrice(p.width), fmtBtc(p.supply)]),
+    ).toEqual([["$77,750", "$6,960", "490,118"]]);
+    // The buy side keeps its own cutoff; the table renumbers the two rows by price.
+    expect(clusters(pos, neg).map((c) => [c.n, c.side, fmtPrice(c.peak.location)])).toEqual([
+      [1, "neg", "$77,750"],
+      [2, "pos", "$83,750"],
+    ]);
+    expect(clusterMeta(en, clusters(null, neg))).toBe("1 cluster · 0 in · 1 out");
+  });
+
+  // page-recorded via mixtureMeta: "auto · 1" (buy), "auto · 4" (sell), "auto · 5 of 6" (90d LTH Show,
+  // sell), "auto · 2 of 3" (30d ±10%, buy), "auto · 1 (BIC)" (smoothing off); plain "auto" when
+  // kMode is manual or there is no fit
+  it("labels auto as the original does", () => {
+    const sides = (w: Window, h: Holders, aging: boolean, z: Zoom, s: SideSetting) =>
+      s2Sides(s2Rows(w, h, aging, z), h, aging, s);
+    const all30 = sides("30d", "all", false, 0, gmm);
+    expect(mixtureMeta(en, all30.pos, all30.neg)).toBe("in: 1 bell · out: 4 bells");
+    expect(kLabel(en, gmm, all30.pos)).toBe("auto · 1");
+    expect(kLabel(en, gmm, all30.neg)).toBe("auto · 4");
+
+    const lth90 = sides("90d", "lth", true, 0, gmm);
+    expect(mixtureMeta(en, lth90.pos, lth90.neg)).toBe("in: 1 bell · out: 5 of 6 bells");
+    expect(kLabel(en, gmm, lth90.neg)).toBe("auto · 5 of 6");
+    expect(kLabel(zh, gmm, lth90.neg)).toBe("自动 · 6 取 5");
+
+    const z10 = sides("30d", "all", false, 10, gmm);
+    expect(mixtureMeta(en, z10.pos, z10.neg)).toBe("in: 2 of 3 bells · out: 3 bells");
+    expect(kLabel(en, gmm, z10.pos)).toBe("auto · 2 of 3");
+
+    const off = { ...gmm, smoothing: "none" as const };
+    const bic = sides("30d", "all", false, 0, off);
+    expect(mixtureMeta(en, bic.pos, bic.neg)).toBe("in: 1 bell (BIC) · out: 1 bell (BIC)");
+    expect(kLabel(en, off, bic.pos)).toBe("auto · 1 (BIC)");
+    expect(kLabel(zh, off, bic.pos)).toBe("自动 · 1（BIC）");
+    expect(mixtureMeta(zh, bic.pos, bic.neg)).toBe("流入：1 条（BIC） · 流出：1 条（BIC）");
+
+    // A:1720: a manual k leaves the auto option reading "auto".
+    const manual = { ...gmm, kMode: "manual" as const, kManual: 3 };
+    const fixed = sides("30d", "all", false, 0, manual);
+    expect(fixed.neg!.mix).toMatchObject({ k: 3, src: "manual" });
+    expect(kLabel(en, manual, fixed.neg)).toBe("auto");
+    expect(mixtureMeta(en, fixed.pos, fixed.neg)).toBe("in: 3 bells · out: 3 bells");
+    expect(mixtureMeta(zh, fixed.pos, fixed.neg)).toBe("流入：3 条 · 流出：3 条");
+    // Bells off (the opening state): no fit, so "auto" (the plan's display ruling).
+    const plain = sides("30d", "all", false, 0, DEFAULT_SIDE);
+    expect(plain.neg!.mix).toBeNull();
+    expect(kLabel(en, DEFAULT_SIDE, plain.neg)).toBe("auto");
+    expect(kLabel(zh, DEFAULT_SIDE, plain.neg)).toBe("自动");
+    expect(mixtureMeta(en, plain.pos, plain.neg)).toBe("");
+  });
+
+  // a side with fewer than 3 weighted rows: 1d All has one buy bar (page-recorded "bars: pos 1"),
+  // so the buy side has peaks but no bells; the page's mixtureMeta is "out: 1 bell". The page left
+  // the buy option at a stale "auto · 1" (SR-3.md:71); the plan's ruling reads plain "auto".
+  it("kLabel and mixtureMeta skip a side without a fit", () => {
+    const rows = s2Rows("1d", "all", false, 0);
+    expect(sideWeights(rows, "all", false, "pos").filter((w) => w > 0)).toHaveLength(1);
+    const { pos, neg } = s2Sides(rows, "all", false, gmm);
+    expect(pos!.peaks).toHaveLength(1);
+    expect(pos!.mix).toBeNull();
+    expect(kLabel(en, gmm, pos)).toBe("auto");
+    expect(kLabel(en, gmm, neg)).toBe("auto · 1");
+    expect(mixtureMeta(en, pos, neg)).toBe("out: 1 bell");
+    expect(mixRows(pos, neg).map((m) => [m.m, m.side])).toEqual([[1, "neg"]]);
+    // No fit at all: fewer than 3 rows (A:1680).
+    const two = rows.slice(0, 2).map((r) => r.price);
+    expect(fitSide(two, [1, 1], gmm)).toBeNull();
+    expect(kLabel(en, gmm, null)).toBe("auto");
+    expect(mixtureMeta(en, null, neg)).toBe("out: 1 bell");
+    expect(mixtureMeta(en, null, null)).toBe("");
+    expect(mixRows(null, null)).toEqual([]);
+    expect(clusters(null, null)).toEqual([]);
+    expect(clusterMeta(en, [])).toBe("");
+  });
+
+  // page-recorded: flowTip({ b: 77500, all: -115540.48, sth: -180246.45, lth: 64705.98 }, 500, "30d") ->
+  // ["$77,500 – $78,000", "Real net flow −115,540", "Aging to LTH −64,706", "STH apparent −180,246",
+  //  "36% of the STH decline is aging, not selling · 30d window"]
+  it("reads one bucket like the page's tooltip", () => {
+    const row = s2Rows("30d", "all", false, 0).find((r) => r.b === 77500)!;
+    expect([row.all, row.sth, row.lth].map((v) => v.toFixed(2))).toEqual([
+      "-115540.48",
+      "-180246.45",
+      "64705.98",
+    ]);
+    const tip = [
+      "$77,500 – $78,000",
+      "Real net flow −115,540",
+      "Aging to LTH −64,706",
+      "STH apparent −180,246",
+      "36% of the STH decline is aging, not selling · 30d window",
+    ];
+    expect(flowTip(en, row, 500, "30d")).toEqual(tip);
+    expect(
+      flowTip(
+        en,
+        { b: 77500, price: 77750, all: -115540.48, sth: -180246.45, lth: 64705.98 },
+        500,
+        "30d",
+      ),
+    ).toEqual(tip);
+    // zh labels: A:940-941 for the rows, the brief's table for the verdict.
+    expect(flowTip(zh, row, 500, "30d")).toEqual([
+      "$77,500 – $78,000",
+      "真实净流动 −115,540",
+      "迁移至长期持有者 −64,706",
+      "短期持有者表观 −180,246",
+      "短期持有者减少中有 36% 是币龄迁移而非卖出 · 30d 窗口",
+    ]);
+    // The other verdicts and the LTH label, on hand rows, worded as A:1893-1899 words them: STH
+    // grew; STH did not grow and LTH did not gain (all three zero included: "+0", A:1583's v >= 0).
+    expect(
+      flowTip(
+        en,
+        { b: 82000, price: 82250, all: 220010.4, sth: 233631.2, lth: -13620.8 },
+        500,
+        "7d",
+      ),
+    ).toEqual([
+      "$82,000 – $82,500",
+      "Real net flow +220,010",
+      "LTH distribution +13,621",
+      "STH apparent +233,631",
+      "STH acquired at this cost basis · 7d window",
+    ]);
+    expect(flowTip(en, { b: 1000, price: 1100, all: 0, sth: 0, lth: 0 }, 200, "1d")).toEqual([
+      "$1,000 – $1,200",
+      "Real net flow +0",
+      "Aging to LTH +0",
+      "STH apparent +0",
+      "supply left this bucket outright · 1d window",
+    ]);
+    expect(flowTip(en, { b: 1000, price: 1100, all: -3, sth: -2, lth: -1 }, 200, "90d")[4]).toBe(
+      "supply left this bucket outright · 90d window",
+    );
+    // Only a strict STH decline with a strict LTH gain is read as aging (A:1893): an unchanged
+    // LTH, or an unchanged STH, falls through to "outright".
+    expect(flowTip(en, { b: 1000, price: 1100, all: -2, sth: -2, lth: 0 }, 200, "1d")[4]).toBe(
+      "supply left this bucket outright · 1d window",
+    );
+    expect(flowTip(en, { b: 1000, price: 1100, all: 0.01, sth: 0, lth: 0.01 }, 200, "1d")[4]).toBe(
+      "supply left this bucket outright · 1d window",
+    );
+    // All gained while STH lost to age: the whole decline is aging (A:1893-1894).
+    expect(flowTip(en, { b: 1000, price: 1100, all: 1, sth: -4, lth: 5 }, 200, "1d")[4]).toBe(
+      "100% of the STH decline is aging, not selling · 1d window",
+    );
+  });
+
+  // The reasons the service gives Chart 3 for a missing window or a snapshot from another block,
+  // in the words of the brief's i18n table.
+  it("names a missing window and a mismatched snapshot", () => {
+    expect(reasonText(en, "window_missing:1d:lin500")).toBe(
+      "No 1d comparison at $500: a snapshot it needs is missing",
+    );
+    expect(reasonText(zh, "window_missing:90d:lin200")).toBe(
+      "$200 桶宽下无法比较 90d：缺少所需的快照",
+    );
+    expect(reasonText(en, "urpd_mismatch:sth:lin500")).toBe(
+      "The STH $500 snapshot is from another block; not used",
+    );
+    expect(reasonText(zh, "urpd_mismatch:lth:lin200")).toBe(
+      "LTH 的 $200 快照来自另一个区块，未使用",
+    );
+  });
+
+  // The page's spot comparison (A:1812-1817): one decimal, below or above; no spot reads "—".
+  it("compares a level with spot as the page does", () => {
+    // 页面记录: 30d All K1 at $41,750 and K4 at $83,750 against spot 82,361.33.
+    expect(vsSpot(en, 41750, s2.spot!)).toBe("49.3% below");
+    expect(vsSpot(en, 83750, s2.spot!)).toBe("1.7% above");
+    expect(vsSpot(zh, 41750, s2.spot!)).toBe("低于现价 49.3%");
+    expect(vsSpot(zh, 83750, s2.spot!)).toBe("高于现价 1.7%");
+    expect(vsSpot(en, 83750, 0)).toBe("—");
+    expect(vsSpot(en, 83750, Number.NaN)).toBe("—");
+    // A:1812's strict "<": a level at spot itself (a close on a bucket's middle) reads "above".
+    expect(vsSpot(en, 82250, 82250)).toBe("0.0% above");
+    // The brief's integer format: grouped, rounded, signed with "+" from zero up and "−" below.
+    expect([fmtSigned(-0.4), fmtSigned(0.5), fmtSigned(-1121241.2)]).toEqual([
+      "−0",
+      "+1",
+      "−1,121,241",
+    ]);
+    expect([fmtPrice(125500), fmtBtc(1134836.6)]).toEqual(["$125,500", "1,134,837"]);
+  });
+
+  // stage A = the Python reference port, 05:12, sample-0512: the legend totals of the 23 states,
+  // including STH with Aging Show, whose aging bars sit on the sell side (S2 has no $200 grid).
+  it("totals the legend as stage A does, STH aging included", () => {
+    const spot = s1.spot!;
+    for (const v of expected.chart3_stage_a.views) {
+      const h = v.cohort as Holders;
+      const aging = v.aging === "on";
+      const what = `${v.win} ${v.cohort} z${v.zoom} ${v.aging}`;
+      const rows = rowsOf(gridFor(s1, h)!, v.win as Window, h, aging, v.zoom as Zoom, spot);
+      const t = flowTotals(rows, h, aging);
+      near(t.buy, v.net_buy, 1e-9, `${what} buy`);
+      near(-t.sell, v.net_sell, 1e-9, `${what} sell`);
+      if (v.aging_btc === null) expect(t.aging, what).toBeNull();
+      else near(t.aging!, v.aging_btc, 1e-9, `${what} aging`);
+    }
+    // 阶段 A 参考实现 printout: 30d STH Show, Aging 334,783, 23% of the sell side.
+    const sth30 = flowTotals(rowsOf(gridFor(s1, "sth")!, "30d", "sth", true, 0, spot), "sth", true);
+    expect([fmtBtc(sth30.aging!), `${(sth30.share! * 100).toFixed(0)}%`]).toEqual([
+      "334,783",
+      "23%",
+    ]);
   });
 });

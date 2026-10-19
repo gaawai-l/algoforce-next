@@ -372,6 +372,10 @@ const en = {
     "All-holder URPD snapshot missing for the {{bucket}} bucket",
   "cycle.reason.urpd_not_final":
     "The latest closed day's cost-basis snapshots are not final yet",
+  "cycle.reason.windowMissing":
+    "No {{window}} comparison at {{bucket}}: a snapshot it needs is missing",
+  "cycle.reason.urpdMismatch":
+    "The {{cohort}} {{bucket}} snapshot is from another block; not used",
   "cycle.title": "Cycle",
   "cycle.loading": "Loading cycle…",
   "cycle.stateLabel": "State",
@@ -757,6 +761,45 @@ const en = {
     "Delta shows who crossed the spread: a tall positive bar means buyers paid up, a tall negative one means sellers hit the bids. The band shows forced exits by side. In a squeeze the two panels agree: one side's liquidations spike while delta leans hard in the direction those forced orders push, for example many shorts liquidated during strong net buying.",
   "perp.c4.how":
     "Colours: cyan for net buying, pink for net selling, and in the liquidation band moss for shorts and rust for longs, the hues Chart 1 uses for squeezes. Reported liquidations are a lower bound, and Binance publishes at most one per second, so some forced exits never show. When one side keeps getting liquidated block after block while delta keeps leaning its way, forced orders are feeding the move.",
+  "costflow.buy": "Net Buy (Accumulation)",
+  "costflow.sell": "Net Sell (Distribution)",
+  "costflow.agingRow": "Aging STH→LTH",
+  "costflow.ofSell": "{{btc}} BTC · {{pct}} of sell side",
+  "costflow.ofBuy": "{{btc}} BTC · {{pct}} of buy side",
+  "costflow.bins": "${{step}} bins",
+  "costflow.note.all":
+    "All-cohort diff nets aging out by construction, so this toggle changes nothing here. {{bins}}.",
+  "costflow.note.sthHide":
+    "Raw STH diff. Declines mix real selling with coins that simply crossed 150 days. {{bins}}.",
+  "costflow.note.sthShow":
+    "Real STH buying and selling, plus the coins that left STH by ageing — both on the sell side. Aging is a lower bound. {{bins}}.",
+  "costflow.note.lthHide":
+    "Raw LTH diff, aging inflow and LTH selling netted together. {{bins}}.",
+  "costflow.note.lthShow":
+    "Real LTH buying and selling, plus the coins that arrived by ageing — both on the buy side. Aging is a lower bound. {{bins}}.",
+  "costflow.clusters.one": "1 cluster · {{in}} in · {{out}} out",
+  "costflow.clusters.many": "{{n}} clusters · {{in}} in · {{out}} out",
+  "costflow.mix.in": "in",
+  "costflow.mix.out": "out",
+  "costflow.mix.one": "{{side}}: 1 bell",
+  "costflow.mix.many": "{{side}}: {{k}} bells",
+  "costflow.mix.of": "{{side}}: {{k}} of {{n}} bells",
+  "costflow.mix.bic": "{{part}} (BIC)",
+  "costflow.k.auto": "auto",
+  "costflow.k.autoK": "auto · {{k}}",
+  "costflow.k.autoOf": "auto · {{k}} of {{n}}",
+  "costflow.k.autoBic": "auto · {{k}} (BIC)",
+  "costflow.below": "{{pct}}% below",
+  "costflow.above": "{{pct}}% above",
+  "costflow.tip.real": "Real net flow",
+  "costflow.tip.agingToLth": "Aging to LTH",
+  "costflow.tip.lthDist": "LTH distribution",
+  "costflow.tip.sth": "STH apparent",
+  "costflow.tip.agingShare":
+    "{{pct}}% of the STH decline is aging, not selling",
+  "costflow.tip.sthBought": "STH acquired at this cost basis",
+  "costflow.tip.left": "supply left this bucket outright",
+  "costflow.tip.window": "{{verdict}} · {{window}} window",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1117,6 +1160,8 @@ const zh: Record<MessageKey, string> = {
   "cycle.reason.urpdEmpty": "{{bucket}} 桶宽下没有高于 $1k 的成本数据",
   "cycle.reason.urpdMissingAll": "{{bucket}} 桶宽缺少全体持有者的 URPD 快照",
   "cycle.reason.urpd_not_final": "最近一个已收盘日的成本分布快照尚未定稿",
+  "cycle.reason.windowMissing": "{{bucket}} 桶宽下无法比较 {{window}}：缺少所需的快照",
+  "cycle.reason.urpdMismatch": "{{cohort}} 的 {{bucket}} 快照来自另一个区块，未使用",
   "cycle.title": "周期",
   "cycle.loading": "正在加载周期…",
   "cycle.stateLabel": "状态",
@@ -1489,6 +1534,41 @@ const zh: Record<MessageKey, string> = {
     "买卖差反映谁在主动吃单：正向高柱是买方愿意加价成交，负向高柱是卖方主动砸向买盘。带状区按方向显示被迫离场的量。挤压时上下两区会相互印证：一侧清算量骤增，同时买卖差明显倒向这些强平单推动的方向，例如大量空头被强平的同时出现强劲净买入。",
   "perp.c4.how":
     "配色：青色为净买入，粉色为净卖出；清算带里苔绿代表空头、锈红代表多头，沿用图 1 挤压的颜色。交易所上报的清算只是下限，Binance 每秒最多推送一条，部分强平不会出现在图上。如果同一侧连续几块都在被强平，买卖差也一直朝那边倾斜，说明行情正被强制单推着走。",
+  "costflow.buy": "净买入（累积）",
+  "costflow.sell": "净卖出（派发）",
+  "costflow.agingRow": "币龄迁移 STH→LTH",
+  "costflow.ofSell": "{{btc}} BTC · 占卖方 {{pct}}",
+  "costflow.ofBuy": "{{btc}} BTC · 占买方 {{pct}}",
+  "costflow.bins": "${{step}} 价格桶",
+  "costflow.note.all": "全体持有者的差值天然抵消了币龄迁移，这个开关在这里不起作用。{{bins}}。",
+  "costflow.note.sthHide": "STH 原始差值。减少的部分既有真实卖出，也有刚跨过 150 天的币。{{bins}}。",
+  "costflow.note.sthShow":
+    "STH 的真实买卖，加上因币龄增长离开 STH 的币，两者都在卖方。币龄迁移是下界。{{bins}}。",
+  "costflow.note.lthHide": "LTH 原始差值，币龄迁入与 LTH 卖出相互抵消。{{bins}}。",
+  "costflow.note.lthShow":
+    "LTH 的真实买卖，加上因币龄增长进入 LTH 的币，两者都在买方。币龄迁移是下界。{{bins}}。",
+  "costflow.clusters.one": "{{n}} 个聚类 · 流入 {{in}} · 流出 {{out}}",
+  "costflow.clusters.many": "{{n}} 个聚类 · 流入 {{in}} · 流出 {{out}}",
+  "costflow.mix.in": "流入",
+  "costflow.mix.out": "流出",
+  "costflow.mix.one": "{{side}}：1 条",
+  "costflow.mix.many": "{{side}}：{{k}} 条",
+  "costflow.mix.of": "{{side}}：{{n}} 条中取 {{k}} 条",
+  "costflow.mix.bic": "{{part}}（BIC）",
+  "costflow.k.auto": "自动",
+  "costflow.k.autoK": "自动 · {{k}}",
+  "costflow.k.autoOf": "自动 · {{n}} 取 {{k}}",
+  "costflow.k.autoBic": "自动 · {{k}}（BIC）",
+  "costflow.below": "低于现价 {{pct}}%",
+  "costflow.above": "高于现价 {{pct}}%",
+  "costflow.tip.real": "真实净流动",
+  "costflow.tip.agingToLth": "迁移至长期持有者",
+  "costflow.tip.lthDist": "长期持有者派发",
+  "costflow.tip.sth": "短期持有者表观",
+  "costflow.tip.agingShare": "短期持有者减少中有 {{pct}}% 是币龄迁移而非卖出",
+  "costflow.tip.sthBought": "短期持有者在此成本价买入",
+  "costflow.tip.left": "供应直接离开了这个价格桶",
+  "costflow.tip.window": "{{verdict}} · {{window}} 窗口",
 };
 
 export const messages = { en, zh };

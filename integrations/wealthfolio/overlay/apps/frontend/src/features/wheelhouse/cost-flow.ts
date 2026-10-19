@@ -1,3 +1,5 @@
+import type { EnginePeak, GmmComp, SideCurves, SideSetting } from "./cost-flow-engine";
+import type { TextFn } from "./i18n";
 import type { CostFlowView, FlowGrid } from "./onchain-contract";
 
 // Chart 3's rows, bars and side weights (Buy & Sell Side By Cost Basis), following the original
@@ -112,4 +114,171 @@ export function sideWeights(
     const t = bucketTotal(r, h, aging);
     return side === "pos" ? Math.max(0, t) : Math.max(0, -t);
   });
+}
+
+// Chart 3's readings: the legend, the aging note, the two tables and the tooltip (A:1748-1904).
+// The page's integers are d3's ",.0f", which rounds with toFixed.
+const fmtInt = (v: number) => Number(v.toFixed(0)).toLocaleString("en-US");
+// A:1583
+export const fmtSigned = (v: number) => (v >= 0 ? "+" : "−") + fmtInt(Math.abs(v));
+// A:1584
+export const fmtPrice = (v: number) => "$" + fmtInt(v);
+// A:1810 without its unit: the copy and the cells add " BTC".
+export const fmtBtc = (v: number) => fmtInt(v);
+
+// A:1811-1817: how far a level sits from spot; "—" without a spot.
+export function vsSpot(text: TextFn, price: number, spot: number): string {
+  if (!(spot > 0)) return "—";
+  const pct = Math.abs(price / spot - 1) * 100;
+  return text(price < spot ? "costflow.below" : "costflow.above", { pct: pct.toFixed(1) });
+}
+
+// A:1748-1779: the legend's totals, read off the drawn bars so they cannot disagree with them.
+// sell is the size of the sell side. aging is the aging bars' size and share its fraction of the
+// side they are drawn on (STH's sell side, LTH's buy side); both are null when no aging row is
+// shown, that is for All or with Aging Hide.
+export function flowTotals(
+  rows: readonly FlowRow[],
+  h: Holders,
+  aging: boolean,
+): { buy: number; sell: number; aging: number | null; share: number | null } {
+  let buy = 0,
+    sell = 0,
+    age = 0;
+  for (const r of rows)
+    for (const sg of segments(r, h, aging)) {
+      if (sg.v > 0) buy += sg.v;
+      else sell += -sg.v;
+      if (sg.aging) age += Math.abs(sg.v);
+    }
+  if (!aging || h === "all") return { buy, sell, aging: null, share: null };
+  const side = h === "sth" ? sell : buy;
+  return { buy, sell, aging: age, share: side > 0 ? age / side : 0 };
+}
+
+// A:1625-1633: the bars drawn per class; a bar of zero is not drawn.
+export function barCounts(
+  rows: readonly FlowRow[],
+  h: Holders,
+  aging: boolean,
+): Record<Seg["cls"], number> {
+  const n: Record<Seg["cls"], number> = {
+    "bar-pos": 0,
+    "bar-neg": 0,
+    "bar-aging-pos": 0,
+    "bar-aging-neg": 0,
+  };
+  for (const r of rows) for (const sg of segments(r, h, aging)) if (sg.v !== 0) n[sg.cls] += 1;
+  return n;
+}
+
+// A:1786-1802: what the Aging button does for the holders shown, then the bucket size.
+export function agingNote(text: TextFn, h: Holders, aging: boolean, step: number): string {
+  const bins = text("costflow.bins", { step: step.toLocaleString("en-US") });
+  if (h === "all") return text("costflow.note.all", { bins });
+  if (h === "sth") return text(aging ? "costflow.note.sthShow" : "costflow.note.sthHide", { bins });
+  return text(aging ? "costflow.note.lthShow" : "costflow.note.lthHide", { bins });
+}
+
+// One Clusters row: the KDE peaks of both sides by price, numbered in that order (A:1819-1823).
+export interface Cluster {
+  n: number;
+  side: Side;
+  peak: EnginePeak;
+}
+
+// A:1819-1840
+export function clusters(pos: SideCurves | null, neg: SideCurves | null): Cluster[] {
+  const rows: { side: Side; peak: EnginePeak }[] = [];
+  for (const [side, curves] of [
+    ["pos", pos],
+    ["neg", neg],
+  ] as const)
+    for (const peak of curves?.peaks ?? []) rows.push({ side, peak });
+  rows.sort((a, b) => a.peak.location - b.peak.location);
+  return rows.map((r, i) => ({ n: i + 1, ...r }));
+}
+
+// One Bell curve components row: m numbers the bells within their side; Est. BTC is
+// comp.w × totalW (A:1861-1864).
+export interface MixRow {
+  m: number;
+  side: Side;
+  comp: GmmComp;
+  totalW: number;
+}
+
+// A:1842-1866: the bells of both sides, by centre.
+export function mixRows(pos: SideCurves | null, neg: SideCurves | null): MixRow[] {
+  const rows: MixRow[] = [];
+  for (const [side, curves] of [
+    ["pos", pos],
+    ["neg", neg],
+  ] as const) {
+    const f = curves?.mix;
+    if (f) f.comps.forEach((comp, i) => rows.push({ m: i + 1, side, comp, totalW: f.totalW }));
+  }
+  rows.sort((a, b) => a.comp.mu - b.comp.mu);
+  return rows;
+}
+
+// A:1838: how many clusters, and how many are on each side; empty without one.
+export function clusterMeta(text: TextFn, cs: readonly Cluster[]): string {
+  if (!cs.length) return "";
+  const vars = {
+    n: cs.length,
+    in: cs.filter((c) => c.side === "pos").length,
+    out: cs.filter((c) => c.side === "neg").length,
+  };
+  return text(cs.length === 1 ? "costflow.clusters.one" : "costflow.clusters.many", vars);
+}
+
+// A:1867-1876: where each side's k came from: the marked peaks, the peaks capped at 5, or BIC.
+// A side without bells says nothing.
+export function mixtureMeta(text: TextFn, pos: SideCurves | null, neg: SideCurves | null): string {
+  const part = (curves: SideCurves | null, name: string) => {
+    const f = curves?.mix;
+    if (!f) return null;
+    const side = text(name === "in" ? "costflow.mix.in" : "costflow.mix.out");
+    const n = text(f.k === 1 ? "costflow.mix.one" : "costflow.mix.many", { side, k: f.k });
+    if (f.src === "bic") return text("costflow.mix.bic", { part: n });
+    if (f.raw && f.raw > f.k) return text("costflow.mix.of", { side, k: f.k, n: f.raw });
+    return n;
+  };
+  return [part(pos, "in"), part(neg, "out")].filter((p) => p !== null).join(" · ");
+}
+
+// A:1719-1724, worked out on every render: the How many option "auto" names the k auto chose.
+// A manual k, or no fit on the side, reads plain "auto"; the page kept a stale k there.
+export function kLabel(text: TextFn, s: SideSetting, curves: SideCurves | null): string {
+  const f = curves?.mix;
+  if (s.kMode !== "auto" || !f) return text("costflow.k.auto");
+  if (f.src === "bic") return text("costflow.k.autoBic", { k: f.k });
+  if (f.raw && f.raw > f.k) return text("costflow.k.autoOf", { k: f.k, n: f.raw });
+  return text("costflow.k.autoK", { k: f.k });
+}
+
+// A:1944-1948: the ⚙ chip; Manual shows its width and peak cutoff.
+export function chip(s: SideSetting): string {
+  if (s.smoothing === "none") return "raw";
+  if (s.smoothing === "auto") return "auto";
+  return `${s.bw.toFixed(3)} / ${s.minProm.toFixed(2)}`;
+}
+
+// A:1880-1904: one bucket's tooltip: its price range, the real flow, the LTH change (aging in or
+// LTH selling), the STH change, then what the bucket's change most likely was.
+export function flowTip(text: TextFn, r: FlowRow, step: number, w: Window): string[] {
+  let verdict: string;
+  if (r.sth < 0 && r.lth > 0) {
+    const share = (r.lth / (r.lth + Math.abs(Math.min(0, r.all)))) * 100;
+    verdict = text("costflow.tip.agingShare", { pct: share.toFixed(0) });
+  } else if (r.sth > 0) verdict = text("costflow.tip.sthBought");
+  else verdict = text("costflow.tip.left");
+  return [
+    `${fmtPrice(r.b)} – ${fmtPrice(r.b + step)}`,
+    `${text("costflow.tip.real")} ${fmtSigned(r.all)}`,
+    `${text(r.lth >= 0 ? "costflow.tip.agingToLth" : "costflow.tip.lthDist")} ${fmtSigned(-r.lth)}`,
+    `${text("costflow.tip.sth")} ${fmtSigned(r.sth)}`,
+    text("costflow.tip.window", { verdict, window: w }),
+  ];
 }
