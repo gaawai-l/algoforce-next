@@ -317,10 +317,11 @@ class OnchainSync:
     def _urpd(self, at: datetime) -> Urpd | None:
         """Today's snapshot, or yesterday's while today's does not exist yet.
 
-        The rest of URPD_SET is fetched for the same day D, then D's age snapshots (`_flow_set`),
-        and so are the past snapshots the cost-basis grid needs while they are missing or not
-        final. All are stored, and the days no longer needed are pruned, also when a same-day
-        request fails the stage. Returns D as `_flow_set` leaves it.
+        The rest of URPD_SET is fetched for the same day D, then D's age snapshots and, when the
+        cost flow's snapshots of D do not share one close, that set once more (`_flow_set`), and
+        so are the past snapshots the cost-basis grid needs while they are missing or not final.
+        All are stored, and the days no longer needed are pruned, also when a URPD_SET request
+        fails the stage; nothing `_flow_set` asks for can. Returns D as `_flow_set` leaves it.
         """
         today = at.astimezone(UTC).date()
         urpd: Urpd | None = None
@@ -340,12 +341,11 @@ class OnchainSync:
             for cohort, agg in URPD_SET[1:]:
                 # A failure here fails the stage, like one of `all lin500`.
                 fetched[(cohort, agg)] = self._save_urpd(cohort, urpd.date, agg, at)
-            # So does one fetching `all lin500` again in `_flow_set`.
-            urpd = self._flow_set(urpd, fetched, at)
         except BrkError:
             # A lasting outage of one endpoint must not keep the table growing.
             self.store.prune_urpd(keep)
             raise
+        urpd = self._flow_set(urpd, fetched, at)
         for day in past:
             # Fetched before the day closed, plus the grace day1 rows get, it may have been forming.
             final = final_from(day)
@@ -387,7 +387,8 @@ class OnchainSync:
         `fetched` holds what this round got of URPD_SET[1:], None where BRK had nothing. The cost
         flow reads D's lin500 and lin200 grids and its age snapshots, and all must share D's close:
         BRK may have moved on to a new block while they were fetched. A failure among the age
-        snapshots, or among those fetched again, ends them without failing the stage.
+        snapshots, or anywhere in fetching the set again, ends that step and never fails the
+        stage: what was not fetched stays as stored, and the cost flow leaves out what differs.
         """
         day = urpd.date
         grids = [
@@ -401,38 +402,30 @@ class OnchainSync:
             snapshot = fetched[(cohort, agg)]
             # One BRK did not have this time: the stored one is what the cost flow would read.
             found.append(snapshot if snapshot is not None else self.store.urpd(cohort, day, agg))
-        found += self._save_ages(day, at)
+        try:
+            for cohort in AGE_URPD_COHORTS:
+                found.append(self._save_urpd(cohort, day, URPD_AGG, at))
+        except BrkError as exc:
+            logger.warning("onchain_urpd_age_failed code=%s", exc.code)
         if all(snapshot.close == urpd.close for snapshot in found if snapshot is not None):
             return urpd
         # Once more, and only once: what still differs is left out when the cost flow is derived.
-        # When BRK no longer has D, the first one stays.
-        again = self.client.urpd(URPD_COHORT, day, URPD_AGG)
-        if again is not None:
-            self.store.save_urpd(again, at)
-            urpd = again
+        # When BRK no longer has D, or fails to send it, the first one stays.
+        what = "all"
         try:
+            again = self.client.urpd(URPD_COHORT, day, URPD_AGG)
+            if again is not None:
+                self.store.save_urpd(again, at)
+                urpd = again
+            what = "grid"
             for cohort, agg in grids:
                 self._save_urpd(cohort, day, agg, at)
-        except BrkError as exc:
-            logger.warning("onchain_urpd_age_failed code=%s", exc.code)
-        else:
-            self._save_ages(day, at)
-        return urpd
-
-    def _save_ages(self, day: date, at: datetime) -> list[Urpd]:
-        """Fetch and store the age snapshots of `day`; return those BRK had.
-
-        A failure ends them without failing the stage: the cost flow then names what is missing.
-        """
-        found: list[Urpd] = []
-        try:
+            what = "age"
             for cohort in AGE_URPD_COHORTS:
-                urpd = self._save_urpd(cohort, day, URPD_AGG, at)
-                if urpd is not None:
-                    found.append(urpd)
+                self._save_urpd(cohort, day, URPD_AGG, at)
         except BrkError as exc:
-            logger.warning("onchain_urpd_age_failed code=%s", exc.code)
-        return found
+            logger.warning("onchain_costflow_refetch_failed code=%s what=%s", exc.code, what)
+        return urpd
 
     def _save_urpd(self, cohort: str, day: date, agg: str, at: datetime) -> Urpd | None:
         urpd = self.client.urpd(cohort, day, agg)

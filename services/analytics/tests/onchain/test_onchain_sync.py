@@ -2211,6 +2211,15 @@ FLOW_D = date(2026, 10, 19)
 FLOW_THEN = [FLOW_D - timedelta(days=n) for n in PAST_DAYS]
 # The close every snapshot of D shares in the golden sample.
 GOLDEN_CLOSE = 81217.6
+# The P1 fixtures' D closes at 82154.25 and its five grid snapshots at 81217.6: what the cost flow
+# says of them, with no grid at all.
+P1_MISMATCH = [
+    "urpd_mismatch:sth:lin500",
+    "urpd_mismatch:lth:lin500",
+    "urpd_mismatch:all:lin200",
+    "urpd_mismatch:sth:lin200",
+    "urpd_mismatch:lth:lin200",
+]
 
 
 def write_ages(directory: Path, close: float) -> Path:
@@ -2342,6 +2351,40 @@ def test_refetched_d_that_is_gone_keeps_the_first(tmp_path: Path):
     assert (levels["urpd_date"], levels["onchain_close"]) == ("2026-10-16", 82154.25)
     flow = costflow_of(store)
     assert (flow.now_day, flow.spot) == (D, 82154.25)
+    # The grid snapshots fetched again are still of another block: none is paired with D.
+    assert (flow.grids, flow.reasons) == ([], P1_MISMATCH)
+
+
+def test_a_failed_refetch_of_d_keeps_the_first(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # The P1 fixtures' D closes at 82154.25 and its grid snapshots at 81217.6, so D is refetched;
+    # that second request fails.
+    inner, calls = brk_transport()
+    heads: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = inner.handler(request)
+        if (
+            request.url.path == f"/api/urpd/all/{D.isoformat()}"
+            and request.url.params["agg"] == "lin500"
+        ):
+            heads.append(request)
+            if len(heads) == 2:
+                return httpx.Response(500)
+        return response
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, httpx.MockTransport(handler), NOW) is True
+
+    # The failure ends what is fetched again; the past days are fetched as usual.
+    assert urpd_calls(calls) == [*same_day(D), *refetch_of(D)[:1], *past_of(D)]
+    first = store.urpd("all", D, "lin500")
+    assert first is not None and first.close == 82154.25
+    state = store.state()
+    assert (state["last_error"], strings(state["reasons"])) == (None, [])
+    assert caplog.text.count("onchain_costflow_refetch_failed code=brk_unavailable what=all") == 1
+    flow = costflow_of(store)
+    assert (flow.spot, flow.grids, flow.reasons) == (82154.25, [], P1_MISMATCH)
 
 
 def test_age_snapshot_error_does_not_fail_the_stage(
@@ -2439,6 +2482,7 @@ def test_day1_stage_fetches_the_daily_range(tmp_path: Path):
     assert requested(day1_calls(calls)) == set(DAY1_FETCH)
     for name in ("price_high", "price_low"):
         assert len(store.read_series(name, "day1")) == 5037
+
 
 
 def test_missing_daily_range_only_takes_chart_4_down(tmp_path: Path):
@@ -2616,7 +2660,9 @@ def test_a_failed_refetch_does_not_fail_the_stage(tmp_path: Path, caplog: pytest
         *refetch_of(D)[:3],
         *past_of(D),
     ]
-    assert caplog.text.count("onchain_urpd_age_failed code=brk_unavailable") == 1
+    assert caplog.text.count("onchain_costflow_refetch_failed code=brk_unavailable what=grid") == 1
+    assert "onchain_urpd_age_failed" not in caplog.text
     state = store.state()
     assert (state["last_error"], strings(state["reasons"])) == (None, [])
-    assert store.derived("costflow") is not None
+    flow = costflow_of(store)
+    assert (flow.grids, flow.reasons) == ([], P1_MISMATCH)
