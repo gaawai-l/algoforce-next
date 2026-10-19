@@ -8,6 +8,9 @@ from ..market import Model
 Exchange = Literal["all", "binance", "bybit"]
 # The collected WebSocket streams; each one's coverage is recorded on its own.
 Stream = Literal["binance_liq", "bybit_liq", "bybit_trades"]
+# The venues Coinalyze reports on, and the kinds of series read from it.
+CzVenue = Literal["binance", "bybit", "okx", "hyperliquid"]
+CzKind = Literal["liq", "ohlcv", "oi"]
 
 
 class Kline(Model):
@@ -45,3 +48,14 @@ class Trade(Model):
     ts: float  # epoch seconds
     side: Literal["Buy", "Sell"]
     qty: float
+
+
+class CzPoint(Model):
+    """One closed Coinalyze interval, in BTC. liq: a = longs, b = shorts liquidated;
+    ohlcv: a = volume, b = taker buy volume; oi: a = open, b = close interest."""
+
+    t: int  # interval start, epoch seconds
+    a: float
+    b: float
+    # liq only: inside a fetched range but absent from Coinalyze's reply, so stored as 0.
+    filled: bool = False

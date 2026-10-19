@@ -1,4 +1,5 @@
-"""Public Binance and Bybit REST data for the perp states (spec §3.1 and §3.8).
+"""Public Binance and Bybit REST data for the perp states (spec §3.1 and §3.8), and the
+authenticated Coinalyze GET (proposal §3.7).
 
 Times are epoch seconds. A request window is half-open: `[start, end)` over the rows' own
 timestamps. Nothing here retries: a failure raises `RestError` and the caller decides when to ask
@@ -26,6 +27,7 @@ from .rows import Kline, OiPoint
 BINANCE_HOST = "fapi.binance.com"
 ARCHIVE_HOST = "data.binance.vision"
 BYBIT_HOST = "api.bybit.com"
+CZ_HOST = "api.coinalyze.net"
 SYMBOL = "BTCUSDT"
 TIMEOUT = 20.0
 BAR = 300  # one 5m kline or OI period
@@ -43,7 +45,15 @@ PAGE_LIMITS = {
 BINANCE_BACKOFF = {429: 120, 418: 1800, 403: 1800}
 # 403 is the spec's. The 429 is an addition to the §3.8 table: the same rate-limit signal.
 BYBIT_BACKOFF = {403: 600, 429: 600}
-BACKOFF = {BINANCE_HOST: BINANCE_BACKOFF, ARCHIVE_HOST: BINANCE_BACKOFF, BYBIT_HOST: BYBIT_BACKOFF}
+# Coinalyze (proposal §3.7): 429 is its rate limit, 403 is Cloudflare. 401 is not listed: it is
+# given up on for the round with no backoff, so a new key works at the next one.
+CZ_BACKOFF = {429: 60, 403: 600}
+BACKOFF = {
+    BINANCE_HOST: BINANCE_BACKOFF,
+    ARCHIVE_HOST: BINANCE_BACKOFF,
+    BYBIT_HOST: BYBIT_BACKOFF,
+    CZ_HOST: CZ_BACKOFF,
+}
 # Bybit answers 200 with these retCodes when the API or the IP limit is exceeded. The spec's
 # table names 10006 and "etc."; 10018 is an addition to it, a documented rate-limit code.
 RATE_LIMIT_RETCODES = frozenset({10006, 10018})
@@ -88,7 +98,8 @@ def _malformed(host: str) -> Iterator[None]:
 
 
 def _retry_after(response: httpx.Response, now: datetime) -> timedelta:
-    """The wait a Retry-After header asks for, in seconds or as an HTTP date; zero if absent.
+    """The wait a Retry-After header asks for, in (possibly fractional) seconds or as an HTTP
+    date; zero if absent or not usable.
 
     Never more than MAX_BACKOFF, so that no value can overflow a date.
     """
@@ -96,7 +107,7 @@ def _retry_after(response: httpx.Response, now: datetime) -> timedelta:
     if value is None:
         return timedelta(0)
     try:
-        seconds = int(value)
+        seconds = float(value)
     except ValueError:
         try:
             when = parsedate_to_datetime(value)
@@ -104,7 +115,9 @@ def _retry_after(response: httpx.Response, now: datetime) -> timedelta:
             return timedelta(0)
         wait = when.replace(tzinfo=when.tzinfo or UTC) - now
     else:
-        wait = timedelta(seconds=min(seconds, MAX_BACKOFF.total_seconds()))
+        if not math.isfinite(seconds):
+            return timedelta(0)
+        wait = timedelta(seconds=min(max(seconds, 0.0), MAX_BACKOFF.total_seconds()))
     return min(max(wait, timedelta(0)), MAX_BACKOFF)
 
 
@@ -305,6 +318,13 @@ class PerpsRest:
             params = {**params, "cursor": cursor}
         return [found[t] for t in sorted(found)]
 
+    def coinalyze(self, path: str, params: Mapping[str, str | int], key: str) -> Any:
+        """GET https://api.coinalyze.net{path} with the key in the `api_key` header only; the
+        parsed JSON body. Errors and backoff as `_get`."""
+        response = self._get(CZ_HOST, path, params, {"api_key": key})
+        with _malformed(CZ_HOST):
+            return response.json()
+
     def _binance(self, path: str, params: Mapping[str, str | int]) -> list[Any]:
         response = self._get(BINANCE_HOST, path, params)
         with _malformed(BINANCE_HOST):
@@ -331,9 +351,16 @@ class PerpsRest:
         return result
 
     def _get(
-        self, host: str, path: str, params: Mapping[str, str | int] | None = None
+        self,
+        host: str,
+        path: str,
+        params: Mapping[str, str | int] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> httpx.Response:
-        """One GET; raises unless the status is 2xx, and backs the host off for the listed ones."""
+        """One GET; raises unless the status is 2xx, and backs the host off for the listed ones.
+
+        `headers` go on this request only, never into the client's defaults.
+        """
         with self._lock:
             until = self.backoff_until(host)
             if until is not None:
@@ -341,7 +368,7 @@ class PerpsRest:
                 raise RestError(host, "backoff", until)
             started = time.perf_counter()
             try:
-                response = self._send(f"https://{host}{path}", params)
+                response = self._send(f"https://{host}{path}", params, headers)
             except httpx.RequestError as exc:
                 self._log(host, path, "network", started)
                 raise RestError(host, "network") from exc
@@ -362,11 +389,16 @@ class PerpsRest:
             self._until[host] = now + wait
             return self._until[host]
 
-    def _send(self, url: str, params: Mapping[str, str | int] | None) -> httpx.Response:
+    def _send(
+        self,
+        url: str,
+        params: Mapping[str, str | int] | None,
+        headers: Mapping[str, str] | None = None,
+    ) -> httpx.Response:
         if self._client is not None:
-            return self._client.get(url, params=params, timeout=TIMEOUT)
+            return self._client.get(url, params=params, headers=headers, timeout=TIMEOUT)
         with httpx.Client(follow_redirects=False) as client:
-            return client.get(url, params=params, timeout=TIMEOUT)
+            return client.get(url, params=params, headers=headers, timeout=TIMEOUT)
 
     @staticmethod
     def _log(host: str, path: str, outcome: str, started: float | None = None) -> None:

@@ -1,10 +1,14 @@
-"""Explicit local-development settings; no credentials are needed."""
+"""Explicit local-development settings; the only credential is the optional Coinalyze key."""
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .rules import ALL_RULES, Rules, parse_rules
+
+# The repo-root .env, where the Coinalyze key may live when the environment does not hold it.
+DOTENV = Path(__file__).resolve().parents[4] / ".env"
+COINALYZE_KEY = "WHEELHOUSE_COINALYZE_KEY"
 
 
 @dataclass(frozen=True)
@@ -16,6 +20,8 @@ class Settings:
     perps_enabled: bool = True
     # The opt-in rule switches; all on unless WHEELHOUSE_RULES says otherwise.
     rules: Rules = ALL_RULES
+    # Sent only in the `api_key` header of Coinalyze requests; None when it is not configured.
+    coinalyze_key: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -38,4 +44,26 @@ class Settings:
             data_dir=Path(os.environ.get("WHEELHOUSE_DATA_DIR", str(cls.data_dir))),
             perps_enabled=perps in {"1", "true", "on"},
             rules=rules,
+            coinalyze_key=_coinalyze_key(),
         )
+
+
+def _coinalyze_key() -> str | None:
+    """The environment's key if the variable is present (empty means missing), else the .env's.
+
+    Only this one key is read from the file; the .env is never exported into the environment.
+    """
+    if COINALYZE_KEY in os.environ:
+        return os.environ[COINALYZE_KEY].strip() or None
+    if not DOTENV.is_file():
+        return None
+    key = ""
+    for line in DOTENV.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            continue
+        line = line.removeprefix("export ").strip()
+        name, sep, value = line.partition("=")
+        if sep and name.strip() == COINALYZE_KEY:
+            key = value.strip().strip("'\"")
+    return key or None
