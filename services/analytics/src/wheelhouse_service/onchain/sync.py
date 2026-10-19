@@ -342,8 +342,9 @@ class OnchainSync:
         The rest of URPD_SET is fetched for the same day D, then D's age snapshots and, when the
         cost flow's snapshots of D do not share one close, that set once more (`_flow_set`), and
         so are the past snapshots the cost-basis grid needs while they are missing or not final.
-        All are stored, and the days no longer needed are pruned, also when a URPD_SET request
-        fails the stage; nothing `_flow_set` asks for can. Returns D as `_flow_set` leaves it.
+        All are stored (that set once more only when all of it came), and the days no longer
+        needed are pruned, also when a URPD_SET request fails the stage; nothing `_flow_set` asks
+        for can. Returns D as `_flow_set` leaves it.
         """
         today = at.astimezone(UTC).date()
         urpd: Urpd | None = None
@@ -409,8 +410,9 @@ class OnchainSync:
         `fetched` holds what this round got of URPD_SET[1:], None where BRK had nothing. The cost
         flow reads D's lin500 and lin200 grids and its age snapshots, and all must share D's close:
         BRK may have moved on to a new block while they were fetched. A failure among the age
-        snapshots, or anywhere in fetching the set again, ends that step and never fails the
-        stage: what was not fetched stays as stored, and the cost flow leaves out what differs.
+        snapshots ends that step, and what was not fetched stays as stored. The set fetched again
+        is stored only once all of it came: a failure anywhere in it stores none, so the first set
+        stays whole. Neither fails the stage, and the cost flow leaves out what differs.
         """
         day = urpd.date
         grids = [
@@ -432,21 +434,24 @@ class OnchainSync:
         if all(snapshot.close == urpd.close for snapshot in found if snapshot is not None):
             return urpd
         # Once more, and only once: what still differs is left out when the cost flow is derived.
-        # When BRK no longer has D, or fails to send it, the first one stays.
+        # Nothing is stored before every request succeeded, so a failure midway never leaves a
+        # new D among the first set's grids. When BRK no longer has D, the first one stays.
         what = "all"
         try:
             again = self.client.urpd(URPD_COHORT, day, URPD_AGG)
-            if again is not None:
-                self.store.save_urpd(again, at)
-                urpd = again
             what = "grid"
-            for cohort, agg in grids:
-                self._save_urpd(cohort, day, agg, at)
+            snapshots = [self.client.urpd(cohort, day, agg) for cohort, agg in grids]
             what = "age"
-            for cohort in AGE_URPD_COHORTS:
-                self._save_urpd(cohort, day, URPD_AGG, at)
+            snapshots += [self.client.urpd(cohort, day, URPD_AGG) for cohort in AGE_URPD_COHORTS]
         except BrkError as exc:
             logger.warning("onchain_costflow_refetch_failed code=%s what=%s", exc.code, what)
+            return urpd
+        if again is not None:
+            urpd = again
+            self.store.save_urpd(again, at)
+        for snapshot in snapshots:
+            if snapshot is not None:
+                self.store.save_urpd(snapshot, at)
         return urpd
 
     def _save_urpd(self, cohort: str, day: date, agg: str, at: datetime) -> Urpd | None:

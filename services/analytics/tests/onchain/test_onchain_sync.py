@@ -2733,3 +2733,87 @@ def test_a_failed_refetch_does_not_fail_the_stage(tmp_path: Path, caplog: pytest
     assert (state["last_error"], strings(state["reasons"])) == (None, [])
     flow = costflow_of(store)
     assert (flow.grids, flow.reasons) == ([], P1_MISMATCH)
+
+
+def one_age_moved_on(directory: Path) -> Path:
+    """The six age snapshots at the golden close, but for the first, of a later block."""
+    write_ages(directory, GOLDEN_CLOSE)
+    path = directory / f"urpd_{AGE_URPD_COHORTS[0]}_lin500.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "close": 81300.0}))
+    return directory
+
+
+def test_a_partly_failed_refetch_keeps_the_whole_first_set(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # The first set is one snapshot but for one age cohort, of a later block. Fetched again, D is
+    # of that block too, and then the grid request fails.
+    inner, calls = brk_transport(urpd_dir=GOLDEN, age_dir=one_age_moved_on(tmp_path / "ages"))
+    seen: dict[str, int] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = inner.handler(request)
+        if request.url.params.get("agg") != "lin500":
+            return response
+        path = request.url.path
+        seen[path] = seen.get(path, 0) + 1
+        if seen[path] == 2 and path == f"/api/urpd/all/{D.isoformat()}":
+            return httpx.Response(200, json={**json.loads(response.content), "close": 81300.0})
+        if seen[path] == 2 and path == f"/api/urpd/sth/{D.isoformat()}":
+            return httpx.Response(500)
+        return response
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, httpx.MockTransport(handler), NOW) is True
+
+    assert urpd_calls(calls, include_ages=True) == [
+        *same_day(D),
+        *ages_of(D),
+        *refetch_of(D)[:2],
+        *past_of(D),
+    ]
+    assert caplog.text.count("onchain_costflow_refetch_failed code=brk_unavailable what=grid") == 1
+    # Nothing fetched again is stored: D is still the first, and its grids still agree with it.
+    stored = store.urpd("all", D, "lin500")
+    assert stored is not None and stored.close == GOLDEN_CLOSE
+    flow = costflow_of(store)
+    assert flow.spot == GOLDEN_CLOSE
+    assert [grid.step for grid in flow.grids] == [500, 200]
+    assert (flow.age, flow.reasons) == (None, ["age_urpd_mismatch"])
+
+
+def test_a_failed_refetch_of_an_age_snapshot_keeps_the_grids(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # One age snapshot is of a later block, so the set is fetched again; that age request fails.
+    moved = AGE_URPD_COHORTS[0]
+    inner, calls = brk_transport(urpd_dir=GOLDEN, age_dir=one_age_moved_on(tmp_path / "ages"))
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = inner.handler(request)
+        if request.url.path == f"/api/urpd/{moved}/{D.isoformat()}":
+            seen.append(request)
+            if len(seen) == 2:
+                return httpx.Response(500)
+        return response
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, httpx.MockTransport(handler), NOW) is True
+
+    assert urpd_calls(calls, include_ages=True) == [
+        *same_day(D),
+        *ages_of(D),
+        *refetch_of(D),
+        *ages_of(D)[:1],
+        *past_of(D),
+    ]
+    assert caplog.text.count("onchain_costflow_refetch_failed") == 1
+    assert caplog.text.count("onchain_costflow_refetch_failed code=brk_unavailable what=age") == 1
+    state = store.state()
+    assert (state["last_error"], strings(state["reasons"])) == (None, [])
+    flow = costflow_of(store)
+    assert [grid.step for grid in flow.grids] == [500, 200]
+    assert (flow.age, flow.reasons) == (None, ["age_urpd_mismatch"])
