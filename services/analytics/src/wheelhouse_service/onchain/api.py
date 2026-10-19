@@ -14,13 +14,15 @@ from ..market import Model
 from ..rules import Rule, Rules, View, rules_for_view
 from .agecohorts import INPUTS as AGE_INPUTS
 from .agecohorts import AgeBands, AgeCohorts
-from .brk import DAY1_SERIES, HOUR1_SERIES, BrkClient
+from .brk import AGE_FLOOR_SERIES, DAY1_SERIES, HOUR1_SERIES, BrkClient
 from .costbasis import StoredCostBasis
+from .costflow import StoredCostFlow
 from .cycle import Cycle
 from .levels import ModelLine, line_series
 from .models import (
     AgeCohortsView,
     CostBasisView,
+    CostFlowView,
     CycleView,
     DatasetStatus,
     HourState,
@@ -44,6 +46,12 @@ PRESSURE_REASONS = (*(f"series_missing:hour1:{name}" for name in HOUR1_SERIES), 
 SELL_SIDE_REASONS = (*(f"series_missing:hour1:{name}" for name in INPUTS), "brk_unavailable")
 AGE_REASONS = (*(f"series_missing:hour1:{name}" for name in AGE_INPUTS), "brk_unavailable")
 CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unavailable")
+# The snapshot-level codes are stored with the result, not shared: see `StoredCostFlow.reasons`.
+COST_FLOW_REASONS = (
+    "urpd_missing",
+    *(f"series_missing:{name}" for name in AGE_FLOOR_SERIES),
+    "brk_unavailable",
+)
 
 
 def levels_reasons(rules: Rules) -> tuple[str, ...]:
@@ -159,6 +167,12 @@ def create_router(
         if derived is None:
             return None
         return StoredCostBasis.model_validate_json(derived[0]), derived[1]
+
+    def stored_cost_flow() -> tuple[StoredCostFlow, datetime] | None:
+        derived = db().derived("costflow")
+        if derived is None:
+            return None
+        return StoredCostFlow.model_validate_json(derived[0]), derived[1]
 
     def stored_pressure() -> tuple[Pressure, datetime] | None:
         derived = db().derived("pressure")
@@ -357,6 +371,50 @@ def create_router(
             computed_at=computed_at,
             brk_version=state["brk_version"],
             rules_pending=pending("costbasis", result.rules),
+        )
+
+    @router.get("/cost-flow", response_model=CostFlowView)
+    def cost_flow() -> CostFlowView:
+        now = clock()
+        state = db().state()
+        reasons = only(stored_reasons(state), COST_FLOW_REASONS)
+        refreshing = state["refreshing"] == "true"
+        stored = stored_cost_flow()
+        if stored is None:
+            return CostFlowView(
+                data_state="unavailable",
+                reasons=reasons or ["brk_unavailable"],
+                refreshing=refreshing,
+                forming_at=None,
+                now_day=None,
+                snapshot_at=None,
+                computed_at=None,
+                spot=None,
+                grids=[],
+                age=None,
+                qc=[],
+                brk_version=state["brk_version"],
+                rules=[],
+                rules_pending=False,
+            )
+        result, computed_at = stored
+        # D still forms when its snapshot was fetched before it ended.
+        forming = result.snapshot_at < day_start(result.now_day + timedelta(days=1))
+        return CostFlowView(
+            data_state=day1_state(result.now_day, now),
+            reasons=[*reasons, *result.reasons],
+            refreshing=refreshing,
+            forming_at=day_start(result.now_day) if forming else None,
+            now_day=result.now_day,
+            snapshot_at=result.snapshot_at,
+            computed_at=computed_at,
+            spot=result.spot,
+            grids=result.grids,
+            age=result.age,
+            qc=result.qc,
+            brk_version=state["brk_version"],
+            rules=result.rules,
+            rules_pending=pending("costflow", result.rules),
         )
 
     @router.get("/seller-pressure", response_model=SellerPressureView)

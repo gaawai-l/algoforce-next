@@ -1,4 +1,5 @@
 import json
+import math
 import threading
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
@@ -6,15 +7,24 @@ from typing import Any
 
 import httpx
 import pytest
+from costflow_sample import (
+    WHEELHOUSE,
+    crosscheck,
+    render_sample_0512,
+    render_sample_0604,
+    sample_0512,
+    sample_0604,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from onchain_fixture import GOLDEN_DAYS, brk_transport, seed_golden
 
 from wheelhouse_service.http import create_app
-from wheelhouse_service.onchain import api, models
+from wheelhouse_service.onchain import api, costbasis, costflow, models
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
 from wheelhouse_service.onchain.costbasis import StoredCostBasis
+from wheelhouse_service.onchain.costflow import StoredCostFlow
 from wheelhouse_service.onchain.models import closed_day, day1_state, hour1_state
 from wheelhouse_service.onchain.pressure import Pressure, seller_pressure
 from wheelhouse_service.onchain.store import OnchainStore
@@ -333,10 +343,10 @@ def test_refreshing_flag_is_exposed(tmp_path: Path):
     path = synced(tmp_path)
     OnchainStore(path).set_state(refreshing="true")
     with TestClient(router_app(path, NOW)) as http:
-        names = ("cycle", "levels", "seller-pressure", "cost-basis", "status")
+        names = ("cycle", "levels", "seller-pressure", "cost-basis", "cost-flow", "status")
         views = [http.get(f"{PREFIX}/{name}").json() for name in names]
 
-    assert [view["refreshing"] for view in views] == [True, True, True, True, True]
+    assert [view["refreshing"] for view in views] == [True, True, True, True, True, True]
 
 
 @pytest.mark.parametrize(
@@ -490,6 +500,7 @@ def test_capability_and_get_only_schema(tmp_path: Path):
         f"{PREFIX}/sell-side",
         f"{PREFIX}/age-cohorts",
         f"{PREFIX}/cost-basis",
+        f"{PREFIX}/cost-flow",
     }
     assert all(methods == {"get"} for methods in onchain.values())
 
@@ -1274,3 +1285,300 @@ def test_a_shared_series_gap_shows_on_the_age_cohorts_too(tmp_path: Path):
     for view in (ages, sell_side):
         assert view["data_state"] == "unavailable"
         assert view["reasons"] == [f"series_missing:hour1:{gap}"]
+
+
+# The cost-flow sample of Charts 3 and 4: D = 2026-10-19, its snapshots fetched by 05:12Z.
+COSTFLOW = Path(__file__).parent / "fixtures" / "brk-2026-10-19T0512Z-costflow"
+FLOW_D = date(2026, 10, 19)
+FLOW_SYNC = datetime(2026, 10, 19, 5, 15, tzinfo=UTC)
+FLOW_READ = datetime(2026, 10, 19, 5, 20, tzinfo=UTC)
+
+
+def cost_flow_of(path: Path, now: datetime) -> dict[str, Any]:
+    with TestClient(router_app(path, now)) as http:
+        response = http.get(f"{PREFIX}/cost-flow")
+    assert response.status_code == 200
+    body: dict[str, Any] = response.json()
+    return body
+
+
+def store_cost_flow(
+    path: Path, *, snapshot_at: datetime, computed_at: datetime, reasons: tuple[str, ...] = ()
+) -> None:
+    """Store derived cost-flow inputs directly, the way the sync worker would have left them."""
+    stored = StoredCostFlow(
+        now_day=FLOW_D,
+        snapshot_at=snapshot_at,
+        spot=82347.76,
+        grids=[],
+        age=None,
+        reasons=list(reasons),
+        qc=[],
+    )
+    OnchainStore(path).save_derived("costflow", stored.model_dump_json(), computed_at)
+
+
+def test_cost_flow_is_unavailable_without_a_payload(tmp_path: Path):
+    view = cost_flow_of(tmp_path / "onchain.sqlite", NOW)
+
+    assert view["data_state"] == "unavailable"
+    assert view["reasons"] == ["brk_unavailable"]
+    assert (view["grids"], view["age"]) == ([], None)
+    # Missing data is absent, never a zero or an empty-looking value.
+    for field in ("forming_at", "now_day", "snapshot_at", "computed_at", "spot", "brk_version"):
+        assert view[field] is None, field
+    assert (view["qc"], view["rules"], view["rules_pending"]) == ([], [], False)
+    assert view["refreshing"] is False
+
+
+def test_cost_flow_serves_the_derived_payload(tmp_path: Path):
+    path = synced(tmp_path, at=FLOW_SYNC, urpd_dir=COSTFLOW)
+    view = cost_flow_of(path, FLOW_READ)
+
+    assert view["data_state"] == "fresh"
+    # D was fetched at 05:15, while it was still open.
+    assert view["forming_at"] == "2026-10-19T00:00:00Z"
+    assert view["now_day"] == "2026-10-19"
+    assert view["spot"] == 82347.76
+    assert [grid["step"] for grid in view["grids"]] == [500, 200]
+    assert "age_urpd_missing" in view["reasons"]
+    assert view["rules"] == []
+    assert datetime.fromisoformat(view["snapshot_at"]) == FLOW_SYNC
+    assert datetime.fromisoformat(view["computed_at"]) == FLOW_SYNC
+    assert view["brk_version"] == "0.12.2"
+    # The stored inputs are served as they are.
+    derived = OnchainStore(path).derived("costflow")
+    assert derived is not None
+    stored = json.loads(derived[0])
+    for field in ("now_day", "snapshot_at", "spot", "grids", "age", "qc", "rules"):
+        assert view[field] == stored[field], field
+
+
+@pytest.mark.parametrize(
+    ("snapshot_at", "now", "forming", "state"),
+    [
+        pytest.param(
+            datetime(2026, 10, 19, 5, 12, 6, tzinfo=UTC),
+            FLOW_READ,
+            "2026-10-19T00:00:00Z",
+            "fresh",
+            id="same-day",
+        ),
+        # In the grace period of the next day D was never seen closed, so it still forms.
+        pytest.param(
+            datetime(2026, 10, 19, 5, 12, 6, tzinfo=UTC),
+            datetime(2026, 10, 20, 1, 30, tzinfo=UTC),
+            "2026-10-19T00:00:00Z",
+            "fresh",
+            id="grace",
+        ),
+        pytest.param(
+            datetime(2026, 10, 19, 23, 59, 59, tzinfo=UTC),
+            datetime(2026, 10, 20, 2, 30, tzinfo=UTC),
+            "2026-10-19T00:00:00Z",
+            "stale",
+            id="stale",
+        ),
+        # Fetched once D had ended: nothing in it forms, and how fresh it is follows D itself.
+        pytest.param(
+            datetime(2026, 10, 20, tzinfo=UTC),
+            datetime(2026, 10, 20, 2, 30, tzinfo=UTC),
+            None,
+            "stale",
+            id="closed",
+        ),
+    ],
+)
+def test_cost_flow_forming_and_freshness(
+    tmp_path: Path, snapshot_at: datetime, now: datetime, forming: str | None, state: str
+):
+    path = tmp_path / "onchain.sqlite"
+    store_cost_flow(path, snapshot_at=snapshot_at, computed_at=snapshot_at + timedelta(minutes=1))
+    view = cost_flow_of(path, now)
+
+    assert view["forming_at"] == forming
+    assert view["data_state"] == state == day1_state(FLOW_D, now)
+
+
+def test_cost_flow_reasons_filtered(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    # A synthetic state: no single run stores all of these codes at once. Only the filter is
+    # under test here.
+    OnchainStore(path).set_state(
+        reasons=json.dumps(
+            [
+                "series_missing:true_market_mean",
+                "series_missing:price_low",
+                "series_missing:hour1:sth_supply_in_loss",
+                "urpd_missing",
+                "urpd_not_final",
+                "series_missing:price_high",
+                "brk_unavailable",
+            ]
+        )
+    )
+    shared = [
+        "series_missing:price_low",
+        "urpd_missing",
+        "series_missing:price_high",
+        "brk_unavailable",
+    ]
+    # Without a payload, the shared reasons that concern Charts 3 and 4 say why.
+    assert cost_flow_of(path, FLOW_READ)["reasons"] == shared
+
+    store_cost_flow(
+        path,
+        snapshot_at=FLOW_SYNC,
+        computed_at=FLOW_SYNC,
+        reasons=("urpd_missing:sth:lin200", "age_urpd_missing"),
+    )
+    # The shared ones first, in their stored order, then the codes stored with the payload.
+    assert cost_flow_of(path, FLOW_READ)["reasons"] == [
+        *shared,
+        "urpd_missing:sth:lin200",
+        "age_urpd_missing",
+    ]
+
+
+def test_cost_flow_reads_no_network(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    synced(tmp_path, at=FLOW_SYNC, urpd_dir=COSTFLOW)
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the read route computed something")
+
+    # Nor does it compute: neither the worker's derivation nor an engine runs, wherever the route
+    # would have imported it from.
+    names = ("cost_flow", "qc_codes", "age_band", "age_groups", "weighted_kde", "find_peaks")
+    for module in (api, costflow, costbasis):
+        for name in names:
+            if hasattr(module, name):
+                monkeypatch.setattr(module, name, boom)
+    client, seen = blocked_client()
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
+    with TestClient(app) as http:
+        view = http.get(f"{PREFIX}/cost-flow").json()
+
+    assert view["now_day"] == "2026-10-19"
+    assert [grid["step"] for grid in view["grids"]] == [500, 200]
+    assert seen == []
+
+
+def mismatches(committed: Any, fresh: Any, at: str = "$") -> list[str]:
+    """Where `fresh` departs from `committed`: in its structure, or in a number by more than a
+    relative 1e-12."""
+    if isinstance(committed, dict) and isinstance(fresh, dict):
+        if committed.keys() != fresh.keys():
+            return [f"{at}: keys"]
+        return [
+            m for key in committed for m in mismatches(committed[key], fresh[key], f"{at}.{key}")
+        ]
+    if isinstance(committed, list) and isinstance(fresh, list):
+        if len(committed) != len(fresh):
+            return [f"{at}: length {len(committed)} != {len(fresh)}"]
+        return [
+            m
+            for i, (left, right) in enumerate(zip(committed, fresh, strict=True))
+            for m in mismatches(left, right, f"{at}[{i}]")
+        ]
+    if type(committed) is type(fresh):
+        if type(committed) is float:
+            if math.isclose(committed, fresh, rel_tol=1e-12, abs_tol=0.0):
+                return []
+        elif committed == fresh:
+            return []
+    return [f"{at}: {committed!r} != {fresh!r}"]
+
+
+def test_samples_regenerate_identically(tmp_path: Path):
+    s1, s2 = sample_0512(), sample_0604()
+    windows = ["1d", "7d", "30d", "90d"]
+
+    # S1, stage A: the sample's 30 snapshots without age snapshots.
+    assert (s1.stored.snapshot_at, s1.computed_at, s1.read_at) == (
+        datetime(2026, 10, 19, 5, 12, 6, tzinfo=UTC),
+        datetime(2026, 10, 19, 5, 12, 30, tzinfo=UTC),
+        FLOW_READ,
+    )
+    assert s1.stored.spot == 82347.76
+    assert [(grid.step, [w.window for w in grid.windows]) for grid in s1.stored.grids] == [
+        (500, windows),
+        (200, windows),
+    ]
+    assert (s1.stored.age, s1.stored.reasons, s1.stored.qc) == (None, ["age_urpd_missing"], [])
+    # S2: the snapshot of 06:04:42, rebuilt on the $500 grid only.
+    assert (s2.stored.snapshot_at, s2.computed_at, s2.read_at) == (
+        datetime(2026, 10, 19, 6, 4, 42, tzinfo=UTC),
+        datetime(2026, 10, 19, 6, 5, tzinfo=UTC),
+        datetime(2026, 10, 19, 6, 10, tzinfo=UTC),
+    )
+    assert s2.stored.spot == 82361.33
+    assert [(grid.step, [w.window for w in grid.windows]) for grid in s2.stored.grids] == [
+        (500, windows)
+    ]
+    assert s2.stored.reasons == [
+        "urpd_missing:all:lin200",
+        "urpd_missing:sth:lin200",
+        "urpd_missing:lth:lin200",
+    ]
+    assert s2.stored.qc == []
+    assert s2.stored.age is not None
+    assert [len(group) for group in s2.stored.age.groups] == [252] * 4
+    assert len(s2.stored.age.band) == 252
+    # Its then columns are the same finalized snapshots as S1's.
+    assert s2.stored.grids[0].windows == s1.stored.grids[0].windows
+    # Net buy and net sell of the whole supply are the page's Chart 4 legends of that snapshot.
+    grid = s2.stored.grids[0]
+    nets = []
+    for found in grid.windows[:3]:
+        buy = sell = 0.0
+        for now, then in zip(grid.now.all, found.then.all, strict=True):
+            if now - then > 0:
+                buy += now - then
+            else:
+                sell += now - then
+        nets.append((round(buy), round(sell)))
+    assert nets == [(54_914, -54_811), (329_997, -327_019), (1_134_837, -1_121_241)]
+
+    for name, sample, render in (
+        ("cost-flow-sample-0512.json", s1, render_sample_0512),
+        ("cost-flow-sample.json", s2, render_sample_0604),
+    ):
+        # No libm result is in these two, so they are the same bytes on every platform.
+        committed = (WHEELHOUSE / name).read_text()
+        assert committed == render(), name
+        # The route serves the same body from the same stored payload.
+        directory = tmp_path / name
+        directory.mkdir()
+        path = directory / "onchain.sqlite"
+        payload = sample.stored.model_dump_json()
+        OnchainStore(path).save_derived("costflow", payload, sample.computed_at)
+        view = cost_flow_of(path, sample.read_at)
+        assert view == json.loads(committed), name
+        assert (view["data_state"], view["forming_at"]) == ("fresh", "2026-10-19T00:00:00Z")
+
+    # The crosscheck holds math.exp results, whose last bit depends on the platform's libm.
+    committed = json.loads((WHEELHOUSE / "cost-flow-crosscheck.json").read_text())
+    assert mismatches(committed, crosscheck().model_dump(mode="json")) == []
+    sides = [
+        (side["holders"], side["aging"], side["side"], len(side["centers"]))
+        for side in committed["sides"]
+    ]
+    assert sides == [
+        ("all", False, "pos", 252),
+        ("all", False, "neg", 252),
+        ("sth", True, "pos", 629),
+        ("sth", True, "neg", 629),
+    ]
+    # Its rows and weights are stage A's: the same engine finds the same peaks on them.
+    stage_a = json.loads((COSTFLOW / "expected_chart3.json").read_text())["views"]
+    for side in committed["sides"]:
+        aging = "on" if side["aging"] else "off"
+        (view,) = [
+            v
+            for v in stage_a
+            if (v["win"], v["cohort"], v["zoom"], v["aging"]) == ("30d", side["holders"], 0, aging)
+        ]
+        assert view["rows"] == len(side["centers"])
+        assert mismatches(view["sides"][side["side"]]["peaks"], side["peaks"]) == []

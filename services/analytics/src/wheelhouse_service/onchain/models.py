@@ -9,6 +9,7 @@ from ..market import Model
 from ..rules import Rule
 from .agecohorts import AgeBands
 from .costbasis import BucketCostBasis
+from .costflow import AgeFlow, FlowGrid
 from .cycle import Component, CycleState, Episode
 from .levels import ModelLine
 from .pressure import PressureLevels, PressureLossPoint, PressurePoint, QcCode
@@ -130,6 +131,31 @@ class CostBasisView(Model):
     computed_at: AwareDatetime | None
     # Only the bucket widths whose snapshots are all stored; the reasons name the rest.
     buckets: list[BucketCostBasis]
+    brk_version: str | None
+    rules: list[Rule]
+    rules_pending: bool
+
+
+class CostFlowView(Model):
+    """The inputs of Charts 3 and 4 as the worker stored them; the browser computes the rest."""
+
+    # Follows D, the day of the snapshot.
+    data_state: DataState
+    reasons: list[str]
+    refreshing: bool
+    # The start of D when its snapshot was fetched before D ended; otherwise null.
+    forming_at: AwareDatetime | None
+    now_day: date | None
+    snapshot_at: AwareDatetime | None
+    computed_at: AwareDatetime | None
+    # Null when there is no data: an absent price is not zero.
+    spot: float | None
+    # Only the grids whose snapshots of D are all there and share one close; the reasons name
+    # the rest.
+    grids: list[FlowGrid]
+    age: AgeFlow | None
+    # The QC checks that failed; empty when they all pass or there is no data.
+    qc: list[str]
     brk_version: str | None
     rules: list[Rule]
     rules_pending: bool

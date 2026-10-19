@@ -480,6 +480,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/onchain/cost-flow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cost Flow */
+        get: operations["cost_flow_api_wheelhouse_v1_onchain_cost_flow_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/onchain/seller-pressure": {
         parameters: {
             query?: never;
@@ -607,6 +624,13 @@ export interface components {
             rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
             /** Rules Pending */
             rules_pending: boolean;
+        };
+        /** AgeFlow */
+        AgeFlow: {
+            /** Groups */
+            groups: number[][];
+            /** Band */
+            band: number[];
         };
         /** Analysis */
         Analysis: {
@@ -854,6 +878,15 @@ export interface components {
             /** Components */
             components: components["schemas"]["GmmComponent"][];
         };
+        /** CohortColumns */
+        CohortColumns: {
+            /** All */
+            all: number[];
+            /** Sth */
+            sth: number[];
+            /** Lth */
+            lth: number[];
+        };
         /**
          * CollectorStatus
          * @description One collected stream, from its stored coverage (P4-R10), and what its collectors in this
@@ -917,6 +950,42 @@ export interface components {
             computed_at: string | null;
             /** Buckets */
             buckets: components["schemas"]["BucketCostBasis"][];
+            /** Brk Version */
+            brk_version: string | null;
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
+        };
+        /**
+         * CostFlowView
+         * @description The inputs of Charts 3 and 4 as the worker stored them; the browser computes the rest.
+         */
+        CostFlowView: {
+            /**
+             * Data State
+             * @enum {string}
+             */
+            data_state: "fresh" | "stale" | "unavailable";
+            /** Reasons */
+            reasons: string[];
+            /** Refreshing */
+            refreshing: boolean;
+            /** Forming At */
+            forming_at: string | null;
+            /** Now Day */
+            now_day: string | null;
+            /** Snapshot At */
+            snapshot_at: string | null;
+            /** Computed At */
+            computed_at: string | null;
+            /** Spot */
+            spot: number | null;
+            /** Grids */
+            grids: components["schemas"]["FlowGrid"][];
+            age: components["schemas"]["AgeFlow"] | null;
+            /** Qc */
+            qc: string[];
             /** Brk Version */
             brk_version: string | null;
             /** Rules */
@@ -1428,6 +1497,33 @@ export interface components {
             author: string;
             /** Reason */
             reason: string;
+        };
+        /** FlowGrid */
+        FlowGrid: {
+            /**
+             * Step
+             * @enum {integer}
+             */
+            step: 200 | 500;
+            /** Floors */
+            floors: number[];
+            now: components["schemas"]["CohortColumns"];
+            /** Windows */
+            windows: components["schemas"]["FlowWindow"][];
+        };
+        /** FlowWindow */
+        FlowWindow: {
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1d" | "7d" | "30d" | "90d";
+            /**
+             * Then Day
+             * Format: date
+             */
+            then_day: string;
+            then: components["schemas"]["CohortColumns"];
         };
         /** FxRate */
         FxRate: {
@@ -3729,6 +3825,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CostBasisView"];
+                };
+            };
+        };
+    };
+    cost_flow_api_wheelhouse_v1_onchain_cost_flow_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostFlowView"];
                 };
             };
         };

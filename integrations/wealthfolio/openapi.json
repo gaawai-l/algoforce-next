@@ -1162,6 +1162,27 @@
         }
       }
     },
+    "/api/wheelhouse/v1/onchain/cost-flow": {
+      "get": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Cost Flow",
+        "operationId": "cost_flow_api_wheelhouse_v1_onchain_cost_flow_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostFlowView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/onchain/seller-pressure": {
       "get": {
         "tags": [
@@ -1464,6 +1485,34 @@
           "rules_pending"
         ],
         "title": "AgeCohortsView"
+      },
+      "AgeFlow": {
+        "properties": {
+          "groups": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "band": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Band"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "groups",
+          "band"
+        ],
+        "title": "AgeFlow"
       },
       "Analysis": {
         "properties": {
@@ -2231,6 +2280,39 @@
         ],
         "title": "CohortClusters"
       },
+      "CohortColumns": {
+        "properties": {
+          "all": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "All"
+          },
+          "sth": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Sth"
+          },
+          "lth": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Lth"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "all",
+          "sth",
+          "lth"
+        ],
+        "title": "CohortColumns"
+      },
       "CollectorStatus": {
         "properties": {
           "stream": {
@@ -2479,6 +2561,163 @@
           "rules_pending"
         ],
         "title": "CostBasisView"
+      },
+      "CostFlowView": {
+        "properties": {
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "refreshing": {
+            "type": "boolean",
+            "title": "Refreshing"
+          },
+          "forming_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forming At"
+          },
+          "now_day": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Now Day"
+          },
+          "snapshot_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot At"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "spot": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spot"
+          },
+          "grids": {
+            "items": {
+              "$ref": "#/components/schemas/FlowGrid"
+            },
+            "type": "array",
+            "title": "Grids"
+          },
+          "age": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgeFlow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "qc": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Qc"
+          },
+          "brk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brk Version"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data_state",
+          "reasons",
+          "refreshing",
+          "forming_at",
+          "now_day",
+          "snapshot_at",
+          "computed_at",
+          "spot",
+          "grids",
+          "age",
+          "qc",
+          "brk_version",
+          "rules",
+          "rules_pending"
+        ],
+        "title": "CostFlowView",
+        "description": "The inputs of Charts 3 and 4 as the worker stored them; the browser computes the rest."
       },
       "Cycle": {
         "properties": {
@@ -3963,6 +4202,74 @@
           "reason"
         ],
         "title": "FillReconciliation"
+      },
+      "FlowGrid": {
+        "properties": {
+          "step": {
+            "type": "integer",
+            "enum": [
+              200,
+              500
+            ],
+            "title": "Step"
+          },
+          "floors": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Floors"
+          },
+          "now": {
+            "$ref": "#/components/schemas/CohortColumns"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/FlowWindow"
+            },
+            "type": "array",
+            "title": "Windows"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "step",
+          "floors",
+          "now",
+          "windows"
+        ],
+        "title": "FlowGrid"
+      },
+      "FlowWindow": {
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "1d",
+              "7d",
+              "30d",
+              "90d"
+            ],
+            "title": "Window"
+          },
+          "then_day": {
+            "type": "string",
+            "format": "date",
+            "title": "Then Day"
+          },
+          "then": {
+            "$ref": "#/components/schemas/CohortColumns"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window",
+          "then_day",
+          "then"
+        ],
+        "title": "FlowWindow"
       },
       "FxRate": {
         "properties": {
