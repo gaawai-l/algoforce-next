@@ -68,15 +68,32 @@ describe("wheelhouse copy", () => {
         "Chart 6 — Net Realized Profit & Loss By Size Cohorts",
         "图 6 — 按地址规模分组的净已实现盈亏",
       ],
+      // The window's start has to move past the hour without a block, which takes another hour
+      // when the newest hour has no block yet either (the final review's M2).
       "sizes.noBlock": [
-        "No block was mined in the hour this {{win}} window starts from, so there is nothing to compare against. It fills in at the next hourly refresh.",
-        "这个 {{win}} 窗口起点那一小时没有出块，没有可比的值；下一次每小时刷新后会补上。",
+        "No block was mined in the hour this {{win}} window starts from, so there is nothing to compare against. It usually fills in within an hour or two, once the window's start moves past that hour.",
+        "这个 {{win}} 窗口起点那一小时没有出块，没有可比的值；通常一两个小时内、窗口起点移过这一小时后就会补上。",
+      ],
+      // Bands switches to the twelve size bands, not to groups (OP-4).
+      "sizes.bands": ["Bands", "区间"],
+      // A row is a band under Bands and a group under Entities: "档" names either (OP-4).
+      "sizes.pctBand": ["% of band", "占本档比例"],
+      "sizes.supply.share": ["Share of band", "占本档比例"],
+      "sizes.supply.held": ["Band supply", "本档持币量"],
+      "sizes.pnl.none": ["no coins from this band moved", "该档没有币移动"],
+      // Realized cap is what the band paid for everything it holds, not only for what it spent.
+      "sizes.pnl.implies": [
+        "This chart sets no thresholds. A band booking mostly losses is spending coins below what it paid for them; one booking mostly profits is spending them into strength. BRK books every on-chain spend, moves between a holder's own wallets included, so booked is not the same as sold. Against realized cap a bar reads as a share of what the band paid for everything it holds.",
+        "本图没有设阈值。某区间以亏损入账为主，说明它花费的币低于买入成本；以盈利入账为主，说明它在逢高花费。BRK 记录每一笔链上花费，包括持有者在自己钱包之间的转移，所以“入账”不等于“卖出”。按已实现市值看，条形可理解为占该档全部持币买入成本的比例。",
       ],
     } as const;
     for (const [key, [en, zh]] of Object.entries(copy)) {
       expect(messages.en[key as keyof typeof messages.en], key).toBe(en);
       expect(messages.zh[key as keyof typeof messages.zh], key).toBe(zh);
     }
+    // No zh size-cohort line calls a row "this group": under Bands it is a band.
+    for (const [key, zh] of Object.entries(messages.zh))
+      if (key.startsWith("sizes.")) expect(zh, key).not.toMatch(/本组|该组/);
   });
 
   it("ends the source line so the Coinalyze link follows it without a gap", () => {

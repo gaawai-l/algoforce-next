@@ -35,7 +35,7 @@ const TITLE5 = "Chart 5 — Net Supply Change By Size Cohorts";
 const TITLE6 = "Chart 6 — Net Realized Profit & Loss By Size Cohorts";
 const HINT = "Hover a row, or focus the chart and use the up and down arrow keys, to read it";
 const NO_BLOCK =
-  "No block was mined in the hour this 7d window starts from, so there is nothing to compare against. It fills in at the next hourly refresh.";
+  "No block was mined in the hour this 7d window starts from, so there is nothing to compare against. It usually fills in within an hour or two, once the window's start moves past that hour.";
 const MISSING = "—";
 const GROUP_NAMES = ["Large entities", "Mid-size entities", "Small entities", "Retail"];
 
