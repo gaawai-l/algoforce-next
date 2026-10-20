@@ -23,6 +23,7 @@ import {
   fmtPct,
   fmtVal,
   footLine,
+  heightFor,
   niceDomain,
   si,
   ticks,
@@ -59,10 +60,6 @@ const LEG_NAMES = {
   SP: "sellside.leg.SP",
   SL: "sellside.leg.SL",
 } as const satisfies Record<Leg, MessageKey>;
-
-// The plot's height follows its width, like the original's 940x440, between 300 and 440 px.
-export const heightFor = (width: number) =>
-  Math.round(Math.min(440, Math.max(300, width * 0.47)));
 
 interface Frame {
   left: number;

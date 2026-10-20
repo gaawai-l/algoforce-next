@@ -39,9 +39,6 @@ vi.mock("./perp-states", () => ({
 vi.mock("./sell-side-charts", () => ({
   SellSideCharts: () => <p>sell-side-charts</p>,
 }));
-vi.mock("./size-cohorts-charts", () => ({
-  SizeCohortsCharts: () => <p>size-cohorts-charts</p>,
-}));
 vi.mock("./language-toggle", () => ({ LanguageToggle: () => null }));
 vi.mock("./i18n", () => ({
   useWheelhouseText: () => ({ text: mocks.text }),

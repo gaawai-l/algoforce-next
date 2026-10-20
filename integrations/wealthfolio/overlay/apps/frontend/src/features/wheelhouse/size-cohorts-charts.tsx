@@ -1,7 +1,7 @@
 import { useMemo, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getSizeCohorts } from "./client";
-import { ReadColumns } from "./cost-flow-charts";
+import { ReadColumns } from "./flow-notes";
 import { useWheelhouseText, type MessageKey } from "./i18n";
 import { SIZE_WINDOWS, type SizeCohortsView, type WindowKey } from "./onchain-contract";
 import { reasonText, rulesNote } from "./onchain-text";

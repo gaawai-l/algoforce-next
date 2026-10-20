@@ -64,6 +64,7 @@ import {
   type Window,
   type Zoom,
 } from "./cost-flow";
+import { ReadColumns } from "./flow-notes";
 import { useWheelhouseText, type MessageKey, type TextFn } from "./i18n";
 import type { CostFlowView } from "./onchain-contract";
 import { reasonText, rulesNote } from "./onchain-text";
@@ -821,35 +822,6 @@ export function ClustersTable({
       spot={spot}
       empty={empty}
     />
-  );
-}
-
-// The three notes under a chart, always expanded.
-export function ReadColumns({
-  shows,
-  implies,
-  how,
-}: {
-  shows: MessageKey;
-  implies: MessageKey;
-  how: MessageKey;
-}) {
-  const { text } = useWheelhouseText();
-  return (
-    <div className="wh-seller-read">
-      {(
-        [
-          ["seller.read.shows", shows],
-          ["seller.read.implies", implies],
-          ["seller.read.how", how],
-        ] as const
-      ).map(([heading, body]) => (
-        <div key={heading}>
-          <h4>{text(heading)}</h4>
-          <p>{text(body)}</p>
-        </div>
-      ))}
-    </div>
   );
 }
 

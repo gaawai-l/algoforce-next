@@ -154,6 +154,10 @@ export function niceDomain(start: number, stop: number, count = 10): [number, nu
   return [start, stop];
 }
 
+// The plot's height follows its width, like the original's 940x440, between 300 and 440 px.
+export const heightFor = (width: number) =>
+  Math.round(Math.min(440, Math.max(300, width * 0.47)));
+
 // Formats as the original prints them.
 export const grouped = (value: number) =>
   Number(value.toFixed(0)).toLocaleString("en-US");

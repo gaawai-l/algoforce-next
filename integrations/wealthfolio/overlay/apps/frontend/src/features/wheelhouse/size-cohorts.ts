@@ -5,8 +5,7 @@ import {
   type SizeCohortsView,
   type WindowKey,
 } from "./onchain-contract";
-import { heightFor } from "./sell-side-charts";
-import { grouped, ticks } from "./sell-side";
+import { grouped, heightFor, ticks } from "./sell-side";
 
 // The size-cohort charts' choices and arithmetic, following the original state-report page's
 // Charts 5 and 6 (`raw/script_2_app.js`, A:1993-2397): the fold into entity groups, the values,
