@@ -1246,6 +1246,27 @@
         }
       }
     },
+    "/api/wheelhouse/v1/onchain/size-cohorts": {
+      "get": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Size Cohorts",
+        "operationId": "size_cohorts_api_wheelhouse_v1_onchain_size_cohorts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SizeCohortsView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/perps/states": {
       "get": {
         "tags": [
@@ -7661,6 +7682,222 @@
           "side"
         ],
         "title": "SignalRef"
+      },
+      "SizeBand": {
+        "properties": {
+          "band": {
+            "type": "string",
+            "title": "Band"
+          },
+          "supply": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supply"
+          },
+          "realized_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Cap"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/SizeWindow"
+            },
+            "type": "array",
+            "title": "Windows"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "band",
+          "supply",
+          "realized_cap",
+          "windows"
+        ],
+        "title": "SizeBand"
+      },
+      "SizeCohortsView": {
+        "properties": {
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "refreshing": {
+            "type": "boolean",
+            "title": "Refreshing"
+          },
+          "forming_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forming At"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last At"
+          },
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/SizeBand"
+            },
+            "type": "array",
+            "title": "Bands"
+          },
+          "no_block": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "1d",
+                "7d",
+                "30d",
+                "90d"
+              ]
+            },
+            "type": "array",
+            "title": "No Block"
+          },
+          "brk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brk Version"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data_state",
+          "reasons",
+          "refreshing",
+          "forming_at",
+          "last_at",
+          "bands",
+          "no_block",
+          "brk_version",
+          "rules",
+          "rules_pending"
+        ],
+        "title": "SizeCohortsView"
+      },
+      "SizeWindow": {
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "1d",
+              "7d",
+              "30d",
+              "90d"
+            ],
+            "title": "Window"
+          },
+          "supply_change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supply Change"
+          },
+          "profit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit"
+          },
+          "loss": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loss"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window",
+          "supply_change",
+          "profit",
+          "loss"
+        ],
+        "title": "SizeWindow"
       },
       "SnapshotSummary": {
         "properties": {

@@ -14,6 +14,7 @@ from .cycle import Component, CycleState, Episode
 from .levels import ModelLine
 from .pressure import PressureLevels, PressureLossPoint, PressurePoint, QcCode
 from .sellside import SellSideLegs
+from .sizes import SizeBand, WindowKey
 
 DataState = Literal["fresh", "stale", "unavailable"]
 # Hourly data adds `delayed`: late, but not yet old enough to call stale.
@@ -227,6 +228,22 @@ class AgeCohortsView(Model):
     pnl: AgeBands
     volb: AgeBands
     volu: AgeBands
+    brk_version: str | None
+    rules: list[Rule]
+    rules_pending: bool
+
+
+class SizeCohortsView(Model):
+    data_state: HourState
+    reasons: list[str]
+    refreshing: bool
+    # The time of the in-progress row, when the last row was still open when it was computed.
+    forming_at: AwareDatetime | None
+    last_at: AwareDatetime | None
+    # In SIZE_BANDS order. Empty when there is no data: an absent band is never sent as zeros.
+    bands: list[SizeBand]
+    # The windows whose anchor hour had no block, as stored; empty when there is no data.
+    no_block: list[WindowKey]
     brk_version: str | None
     rules: list[Rule]
     rules_pending: bool

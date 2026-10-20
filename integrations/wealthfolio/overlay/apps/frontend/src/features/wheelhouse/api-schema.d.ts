@@ -548,6 +548,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/onchain/size-cohorts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Size Cohorts */
+        get: operations["size_cohorts_api_wheelhouse_v1_onchain_size_cohorts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/perps/states": {
         parameters: {
             query?: never;
@@ -2628,6 +2645,57 @@ export interface components {
              */
             side: "buy" | "sell";
         };
+        /** SizeBand */
+        SizeBand: {
+            /** Band */
+            band: string;
+            /** Supply */
+            supply: number | null;
+            /** Realized Cap */
+            realized_cap: number | null;
+            /** Windows */
+            windows: components["schemas"]["SizeWindow"][];
+        };
+        /** SizeCohortsView */
+        SizeCohortsView: {
+            /**
+             * Data State
+             * @enum {string}
+             */
+            data_state: "fresh" | "delayed" | "stale" | "unavailable";
+            /** Reasons */
+            reasons: string[];
+            /** Refreshing */
+            refreshing: boolean;
+            /** Forming At */
+            forming_at: string | null;
+            /** Last At */
+            last_at: string | null;
+            /** Bands */
+            bands: components["schemas"]["SizeBand"][];
+            /** No Block */
+            no_block: ("1d" | "7d" | "30d" | "90d")[];
+            /** Brk Version */
+            brk_version: string | null;
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
+        };
+        /** SizeWindow */
+        SizeWindow: {
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1d" | "7d" | "30d" | "90d";
+            /** Supply Change */
+            supply_change: number | null;
+            /** Profit */
+            profit: number | null;
+            /** Loss */
+            loss: number | null;
+        };
         /** SnapshotSummary */
         SnapshotSummary: {
             /** Snapshot Id */
@@ -3905,6 +3973,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgeCohortsView"];
+                };
+            };
+        };
+    };
+    size_cohorts_api_wheelhouse_v1_onchain_size_cohorts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SizeCohortsView"];
                 };
             };
         };

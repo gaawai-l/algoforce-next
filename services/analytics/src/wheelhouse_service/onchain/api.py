@@ -14,7 +14,7 @@ from ..market import Model
 from ..rules import Rule, Rules, View, rules_for_view
 from .agecohorts import INPUTS as AGE_INPUTS
 from .agecohorts import AgeBands, AgeCohorts
-from .brk import AGE_FLOOR_SERIES, DAY1_SERIES, HOUR1_SERIES, BrkClient
+from .brk import AGE_FLOOR_SERIES, DAY1_SERIES, HOUR1_SERIES, SIZE_SERIES, BrkClient
 from .costbasis import StoredCostBasis
 from .costflow import StoredCostFlow
 from .cycle import Cycle
@@ -30,12 +30,14 @@ from .models import (
     OnchainStatus,
     SellerPressureView,
     SellSideView,
+    SizeCohortsView,
     day1_state,
     day_start,
     hour1_state,
 )
 from .pressure import HOUR, SHOWN_HOURS, Pressure
 from .sellside import INPUTS, SellSide, SellSideLegs
+from .sizes import SizeCohorts
 from .store import OnchainStore
 from .sync import CYCLE_SERIES, OnchainSync
 
@@ -45,6 +47,7 @@ URPD_REASONS = ("urpd_missing", "urpd_not_final", "brk_unavailable")
 PRESSURE_REASONS = (*(f"series_missing:hour1:{name}" for name in HOUR1_SERIES), "brk_unavailable")
 SELL_SIDE_REASONS = (*(f"series_missing:hour1:{name}" for name in INPUTS), "brk_unavailable")
 AGE_REASONS = (*(f"series_missing:hour1:{name}" for name in AGE_INPUTS), "brk_unavailable")
+SIZE_REASONS = (*(f"series_missing:hour1:{name}" for name in SIZE_SERIES), "brk_unavailable")
 CYCLE_REASONS = (*(f"series_missing:{name}" for name in CYCLE_SERIES), "brk_unavailable")
 # The snapshot-level codes are stored with the result, not shared: see `StoredCostFlow.reasons`.
 COST_FLOW_REASONS = (
@@ -187,6 +190,12 @@ def create_router(
         if derived is None:
             return None
         return AgeCohorts.model_validate_json(derived[0]), derived[1]
+
+    def stored_sizes() -> tuple[SizeCohorts, datetime] | None:
+        derived = db().derived("sizes")
+        if derived is None:
+            return None
+        return SizeCohorts.model_validate_json(derived[0]), derived[1]
 
     @router.get("/status", response_model=OnchainStatus)
     def status() -> OnchainStatus:
@@ -559,6 +568,40 @@ def create_router(
             brk_version=state["brk_version"],
             rules=result.rules,
             rules_pending=pending("agecohorts", result.rules),
+        )
+
+    @router.get("/size-cohorts", response_model=SizeCohortsView)
+    def size_cohorts() -> SizeCohortsView:
+        now = clock()
+        state = db().state()
+        reasons = only(stored_reasons(state), SIZE_REASONS)
+        refreshing = state["refreshing"] == "true"
+        stored = stored_sizes()
+        if stored is None:
+            return SizeCohortsView(
+                data_state="unavailable",
+                reasons=reasons or ["brk_unavailable"],
+                refreshing=refreshing,
+                forming_at=None,
+                last_at=None,
+                bands=[],
+                no_block=[],
+                brk_version=state["brk_version"],
+                rules=[],
+                rules_pending=False,
+            )
+        result, computed_at = stored
+        return SizeCohortsView(
+            data_state=hour1_state(result.last_at, now),
+            reasons=reasons,
+            refreshing=refreshing,
+            forming_at=result.last_at if computed_at < result.last_at + HOUR else None,
+            last_at=result.last_at,
+            bands=result.bands,
+            no_block=result.no_block,
+            brk_version=state["brk_version"],
+            rules=result.rules,
+            rules_pending=pending("sizes", result.rules),
         )
 
     return router

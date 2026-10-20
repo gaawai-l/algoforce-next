@@ -19,16 +19,19 @@ from costflow_sample import (
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from onchain_fixture import GOLDEN_DAYS, brk_transport, seed_golden
+from sizes_fixture import golden_rows
 
 from wheelhouse_service import rules as rules_module
 from wheelhouse_service.http import create_app
-from wheelhouse_service.onchain import api, costbasis, costflow, models
+from wheelhouse_service.onchain import api, costbasis, costflow, models, sizes
+from wheelhouse_service.onchain import sync as sync_module
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
 from wheelhouse_service.onchain.costbasis import StoredCostBasis
 from wheelhouse_service.onchain.costflow import StoredCostFlow
 from wheelhouse_service.onchain.models import closed_day, day1_state, hour1_state
 from wheelhouse_service.onchain.pressure import Pressure, seller_pressure
+from wheelhouse_service.onchain.sizes import size_cohorts
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import OnchainSync
 from wheelhouse_service.rules import Rules
@@ -503,6 +506,7 @@ def test_capability_and_get_only_schema(tmp_path: Path):
         f"{PREFIX}/age-cohorts",
         f"{PREFIX}/cost-basis",
         f"{PREFIX}/cost-flow",
+        f"{PREFIX}/size-cohorts",
     }
     assert all(methods == {"get"} for methods in onchain.values())
 
@@ -1634,3 +1638,209 @@ def test_samples_regenerate_identically(tmp_path: Path):
         ]
         assert view["rows"] == len(side["centers"])
         assert mismatches(view["sides"][side["side"]]["peaks"], side["peaks"]) == []
+
+
+# The size cohorts of Charts 5 and 6: the page's readings at 2026-10-19 06:00Z (see the README of
+# `fixtures/sr5-6-page-2026-10-19T0600Z`), derived at 06:21 while that hour was still open.
+SIZE_LAST = "2026-10-19T06:00:00Z"
+SIZE_COMPUTED = datetime(2026, 10, 19, 6, 21, tzinfo=UTC)
+SIZE_READ = datetime(2026, 10, 19, 6, 30, tzinfo=UTC)
+SIZE_SAMPLE = (
+    Path(__file__).resolve().parents[4]
+    / "integrations/wealthfolio/overlay/apps/frontend/src/features/wheelhouse"
+    / "size-cohorts-sample.json"
+)
+SizeRows = dict[str, list[tuple[datetime, float | None]]]
+
+
+def size_cohorts_of(path: Path, now: datetime, **options: Any) -> dict[str, Any]:
+    with TestClient(router_app(path, now, **options)) as http:
+        response = http.get(f"{PREFIX}/size-cohorts")
+    assert response.status_code == 200
+    body: dict[str, Any] = response.json()
+    return body
+
+
+def store_sizes(
+    path: Path,
+    computed_at: datetime = SIZE_COMPUTED,
+    *,
+    rows: SizeRows | None = None,
+    rules: tuple[str, ...] = (),
+) -> None:
+    """Store derived size cohorts directly, the way the sync worker would have left them."""
+    result = size_cohorts(golden_rows() if rows is None else rows)
+    assert result is not None
+    payload = result.model_copy(update={"rules": list(rules)}).model_dump_json()
+    OnchainStore(path).save_derived("sizes", payload, computed_at)
+
+
+def test_size_cohorts_unavailable_with_200_and_no_zero(tmp_path: Path):
+    with TestClient(router_app(tmp_path / "m.sqlite")) as http:
+        response = http.get(f"{PREFIX}/size-cohorts")
+
+    assert response.status_code == 200
+    view = response.json()
+    assert view["data_state"] == "unavailable"
+    assert view["reasons"] == ["brk_unavailable"]
+    # Missing data is empty, never bands of zeros.
+    assert (view["bands"], view["no_block"]) == ([], [])
+    assert (view["last_at"], view["forming_at"], view["brk_version"]) == (None, None, None)
+    assert (view["rules"], view["rules_pending"]) == ([], False)
+
+
+def test_size_cohorts_view_matches_the_frontend_sample(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    store_sizes(path, datetime(2026, 10, 19, 6, 21, tzinfo=UTC))
+    view = size_cohorts_of(path, datetime(2026, 10, 19, 6, 30, tzinfo=UTC))
+
+    committed = SIZE_SAMPLE.read_text()
+    assert view == json.loads(committed)
+    # The sample is this response written as it came, so any drift of the route or of the rows
+    # shows here, down to a whole number that turned into a float.
+    assert committed == json.dumps(view, indent=1, ensure_ascii=False) + "\n"
+    assert view["data_state"] == "fresh"
+    assert view["last_at"] == view["forming_at"] == "2026-10-19T06:00:00Z"
+    assert len(view["bands"]) == 12
+    assert (view["reasons"], view["no_block"], view["rules"]) == ([], [], [])
+
+
+@pytest.mark.parametrize(
+    ("computed_at", "now", "forming", "state"),
+    [
+        pytest.param(moment(19, 6, 21), moment(19, 6, 30), SIZE_LAST, "fresh", id="forming"),
+        pytest.param(moment(19, 7, 5), moment(19, 7, 10), None, "fresh", id="closed"),
+        # Computed while 06:00 was open, it stays forming however long ago that was.
+        pytest.param(moment(19, 6, 21), moment(19, 8, 30), SIZE_LAST, "delayed", id="delayed"),
+        # How fresh it is follows the hour it is of, not when it was computed.
+        pytest.param(moment(19, 7, 5), moment(19, 12, 30), None, "stale", id="stale"),
+        # The hour is open until its last second.
+        pytest.param(
+            moment(19, 7) - timedelta(seconds=1), moment(19, 7, 10), SIZE_LAST, "fresh", id="59:59"
+        ),
+        pytest.param(moment(19, 7), moment(19, 7, 10), None, "fresh", id="hour-end"),
+    ],
+)
+def test_size_cohorts_freshness_and_forming(
+    tmp_path: Path, computed_at: datetime, now: datetime, forming: str | None, state: str
+):
+    path = tmp_path / "onchain.sqlite"
+    store_sizes(path, computed_at)
+    view = size_cohorts_of(path, now)
+
+    assert view["last_at"] == SIZE_LAST
+    assert view["forming_at"] == forming
+    assert view["data_state"] == state
+
+
+def test_size_cohorts_reasons_are_module_filtered(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    # A synthetic state: only the filter is under test here.
+    OnchainStore(path).set_state(
+        reasons=json.dumps(
+            [
+                "series_missing:hour1:sth_supply_in_loss",
+                "series_missing:hour1:addrs_over_100k_btc_realized_cap",
+                "urpd_missing",
+            ]
+        )
+    )
+    own = ["series_missing:hour1:addrs_over_100k_btc_realized_cap"]
+    # Without a payload the reasons that concern Charts 5 and 6 say why; with one they still show.
+    assert size_cohorts_of(path, SIZE_READ)["reasons"] == own
+    store_sizes(path)
+    assert size_cohorts_of(path, SIZE_READ)["reasons"] == own
+
+    # An outage the sync recorded concerns them too, after their own codes as stored.
+    OnchainStore(path).set_state(
+        reasons=json.dumps(
+            ["series_missing:hour1:addrs_under_1k_sats_supply", "urpd_missing", "brk_unavailable"]
+        )
+    )
+    assert size_cohorts_of(path, SIZE_READ)["reasons"] == [
+        "series_missing:hour1:addrs_under_1k_sats_supply",
+        "brk_unavailable",
+    ]
+
+
+def test_size_cohorts_expose_the_sync_state(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    OnchainStore(path).set_state(refreshing="true", brk_version="0.12.2")
+    without = size_cohorts_of(path, SIZE_READ)
+    store_sizes(path)
+    served = size_cohorts_of(path, SIZE_READ)
+
+    # Without a payload and with one: the sync's state shows either way.
+    for view in (without, served):
+        assert (view["refreshing"], view["brk_version"]) == (True, "0.12.2")
+
+
+def test_size_cohorts_pass_no_block_through(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    # The 7d anchor as an hour without a block: every series has its row there, all of them null.
+    anchor = datetime(2026, 10, 19, 6, tzinfo=UTC) - timedelta(hours=168)
+    rows = {
+        name: [(at, None if at == anchor else value) for at, value in series]
+        for name, series in golden_rows().items()
+    }
+    store_sizes(path, rows=rows)
+    view = size_cohorts_of(path, SIZE_READ)
+
+    assert view["no_block"] == ["7d"]
+    assert [[w["window"] for w in band["windows"]] for band in view["bands"]] == [
+        ["1d", "7d", "30d", "90d"]
+    ] * 12
+    # Its cells are null, never zero.
+    assert {
+        (window["supply_change"], window["profit"], window["loss"])
+        for band in view["bands"]
+        for window in band["windows"]
+        if window["window"] == "7d"
+    } == {(None, None, None)}
+
+
+def test_size_cohorts_rules_pending_until_the_worker_derives_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "onchain.sqlite"
+    store_sizes(path)
+    # Were O1 to apply to the size cohorts, the payload derived under no rule would be pending
+    # while a worker runs; the worker's thread itself is not started.
+    monkeypatch.setitem(rules_module.IMPLEMENTED, "sizes", frozenset({"O1"}))
+    monkeypatch.setattr(OnchainSync, "start", lambda self: None)
+    view = size_cohorts_of(path, SIZE_READ, start_worker=True, rules=O1)
+    assert (view["rules"], view["rules_pending"]) == ([], True)
+
+    # Once derived under O1 it is no longer pending, and it names the rules it was derived under.
+    store_sizes(path, rules=("O1",))
+    view = size_cohorts_of(path, SIZE_READ, start_worker=True, rules=O1)
+    assert (view["rules"], view["rules_pending"]) == (["O1"], False)
+
+
+def test_size_cohorts_after_sync_never_touch_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    synced(tmp_path)
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the read route computed something")
+
+    # Nor does it compute: the worker's derivation does not run, wherever the route would have
+    # imported it from.
+    for module in (api, sizes, sync_module):
+        if hasattr(module, "size_cohorts"):
+            monkeypatch.setattr(module, "size_cohorts", boom)
+    client, seen = blocked_client()
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
+    with TestClient(app) as http:
+        response = http.get(f"{PREFIX}/size-cohorts")
+
+    assert response.status_code == 200
+    view = response.json()
+    # This app runs on the real clock, so how fresh the fixture's rows are is not asserted here.
+    assert view["last_at"] == "2026-10-16T09:00:00Z"
+    assert len(view["bands"]) == 12
+    assert view["brk_version"] == "0.12.2"
+    assert seen == []
