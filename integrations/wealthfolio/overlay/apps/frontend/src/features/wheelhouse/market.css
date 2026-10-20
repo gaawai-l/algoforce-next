@@ -1310,18 +1310,23 @@
   border-radius: 6px;
   overflow: hidden;
 }
+/* Each button draws its divider 1px outside its left and top edges: between two buttons in a
+   row, between the rows once they wrap, and under the container's border, which clips it, at
+   the container's edges. Once they wrap, the buttons grow to fill each row (on one row there is
+   no room to grow). So a wrapped switch still reads as one control, without a double line where
+   a row ends. */
 .wh-market .wh-flows-switch button {
+  flex: 1 1 auto;
   min-height: 36px;
   padding: 5px 14px;
   border: 0;
-  border-right: 1px solid var(--wh-edge);
   border-radius: 0;
   background: transparent;
+  box-shadow:
+    -1px 0 0 var(--wh-edge),
+    0 -1px 0 var(--wh-edge);
   color: var(--wh-muted);
   font-size: 12px;
-}
-.wh-market .wh-flows-switch button:last-child {
-  border-right: 0;
 }
 .wh-market .wh-flows-switch button:hover {
   background: #19303a;
@@ -1354,7 +1359,6 @@
   /* When the five views do not fit one row, the buttons keep their labels on one line and
      wrap to a second row instead of overflowing. */
   .wh-market .wh-flows-switch button {
-    flex: 1 1 auto;
     min-height: 44px;
     padding-inline: 8px;
     white-space: nowrap;
