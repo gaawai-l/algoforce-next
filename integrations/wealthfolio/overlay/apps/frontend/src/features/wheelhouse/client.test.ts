@@ -303,6 +303,44 @@ describe("on-chain client", () => {
     expect(fetchMock.mock.calls[0][1].signal?.aborted).toBe(true);
   });
 
+  it("says the service did not respond when the timeout cuts off a long body", async () => {
+    const timer = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timer.signal);
+    // The headers arrive at once; the body stops part way and fails when the request is aborted.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"data_state":'));
+            init.signal?.addEventListener("abort", () =>
+              controller.error(init.signal?.reason),
+            );
+          },
+        });
+        return Promise.resolve(new Response(body));
+      }),
+    );
+    try {
+      const pending = getCostBasisHistory("all");
+      timer.abort(new DOMException("signal timed out", "TimeoutError"));
+      await expect(pending).rejects.toThrow(
+        "Python service did not respond. Check the local workspace and retry.",
+      );
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("keeps a malformed body's own error on every endpoint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => Promise.resolve(new Response("{not json"))),
+    );
+    await expect(getSellSide()).rejects.toThrow(SyntaxError);
+    await expect(getCostBasisHistory("30")).rejects.toThrow(SyntaxError);
+  });
+
   it("rejects a cost-basis history payload outside the contract", async () => {
     vi.stubGlobal(
       "fetch",

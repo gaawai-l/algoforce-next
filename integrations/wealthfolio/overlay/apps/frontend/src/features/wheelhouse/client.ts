@@ -167,15 +167,17 @@ async function query<T>(
   init?: RequestInit,
   timeoutMs = 5000,
 ): Promise<T> {
-  let response: Response;
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+  let response: Response | undefined;
+  let body: unknown;
   try {
-    const timeout = AbortSignal.timeout(timeoutMs);
-    response = await fetch(PREFIX + path, {
-      ...init,
-      cache: "no-store",
-      signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
-    });
-  } catch {
+    response = await fetch(PREFIX + path, { ...init, cache: "no-store", signal });
+    // The timeout covers reading the body too, which takes longest for the long spans.
+    if (response.ok) body = await response.json();
+  } catch (error) {
+    // A body the service sent in full but malformed keeps its own error.
+    if (response && !signal.aborted) throw error;
     throw new Error(
       "Python service did not respond. Check the local workspace and retry.",
     );
@@ -184,7 +186,7 @@ async function query<T>(
     throw new Error(
       `Python service unavailable (HTTP ${response.status}). No simulated fallback was used.`,
     );
-  const parsed = schema.safeParse(await response.json());
+  const parsed = schema.safeParse(body);
   if (!parsed.success)
     throw new Error(
       "Python service contract is incompatible. Update the host and service together.",
