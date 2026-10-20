@@ -91,10 +91,19 @@ perps worker 启动时不从库里重新派生：启动后立即开始的第一�
 2. 保持前进，修复后再发布；
 3. **（需人工确认后执行）无损回退迁移 002，不需要迁移前的备份。** 先停写（停掉 analytics），把 `onchain.sqlite` 另存一份副本，再用 Python 的 `sqlite3`（镜像里没有 sqlite3 命令行）对它执行：
 
-   ```sql
+   ```python
+   import sqlite3
+   db = sqlite3.connect("onchain.sqlite")
+   db.executescript("""
+   BEGIN;
    DROP TABLE urpd_history;
    DELETE FROM onchain_schema WHERE version = 2;
+   COMMIT;
+   """)
+   db.close()
    ```
+
+   两句必须放在同一个事务里，并且显式提交（如上用 `executescript`）。如果分两次 `execute` 之后不提交就关闭连接，表会被删掉，`version 2` 那一行却留在库里：旧镜像仍然拒绝打开，新镜像又认为 002 已应用、不会重建表。执行后用 `SELECT version FROM onchain_schema` 确认只剩 1。
 
    之后旧镜像就能打开这个库，再回滚镜像。这样做安全，原因是（已对照 main `1023827` 的代码核对）：
    - 迁移 002 只新增 `urpd_history` 一张表，不改已有的表，旧代码也不引用它；去掉它和版本 2 的记录，库就回到旧代码认识的样子，迁移 001 的校验和不变；
