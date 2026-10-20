@@ -47,7 +47,7 @@
 | 4 | 在 1440px 和 390px 宽度下浏览器核验：无横向溢出，键盘能切换 tab，控制台无报错 |
 
 **不做**
-- state-report 的图 5、6、8。图 1A/1B（含三种口径）于 2026-10-19 按用户要求纳入，做法见 [PLAN-SELL-SIDE.md](PLAN-SELL-SIDE.md)；图 2 同日纳入，做法见 [PLAN-AGE-COHORTS.md](PLAN-AGE-COHORTS.md)；图 3、图 4 于 2026-10-20 纳入，规则见 §3.5，做法见 [PLAN-SR3-4.md](PLAN-SR3-4.md)。
+- state-report 的图 8。图 1A/1B（含三种口径）于 2026-10-19 按用户要求纳入，做法见 [PLAN-SELL-SIDE.md](PLAN-SELL-SIDE.md)；图 2 同日纳入，做法见 [PLAN-AGE-COHORTS.md](PLAN-AGE-COHORTS.md)；图 3、图 4 于 2026-10-20 纳入，规则见 §3.5，做法见 [PLAN-SR3-4.md](PLAN-SR3-4.md)；图 5、6 同日纳入，规则见 §3.6，做法见 [PLAN-SR5-6.md](PLAN-SR5-6.md)。
 - onchain-pulse 的 Exp1–6，以及人工解读。
 - ETH 和 MU 的链上指标，因为 BRK 只覆盖比特币。
 - 任何交易能力，以及链上 as-known 回放（理由见 §7）。
@@ -383,6 +383,52 @@ flowchart LR
   - 原站 identity 检查里 |bought − sold − (now − then)| 的恒等式项也没有移植。
 - 补齐 23 个 cohort 的完整 QC 不在本期范围内。
 
+### 3.6 规模分组（state-report 图 5、图 6）
+
+照原站 v1 口径（D5）。做法与分任务验收见 [PLAN-SR5-6.md](PLAN-SR5-6.md)，数值核对见 [SR5-6-VERIFICATION.md](SR5-6-VERIFICATION.md)。界面在 Flows → Size cohorts（`flow=sizes`）：图 5 Net Supply Change By Size Cohorts 在上，图 6 Net Realized Profit & Loss By Size Cohorts 在下。`rules` 恒为空，`rules.View` 加 `"sizes"`，`IMPLEMENTED["sizes"]` 为空集：O1–O6 在这两张图上都没有实现，也不做无块小时向前沿用的 O3 版本。
+
+**分工**
+- worker 相当于原站的 loader（`script_3_app.js` L:323-339）：取 BRK、算出每档的当前量和 4 个窗口的差分，存进 derived `"sizes"`（`sizes.py`）。读接口 `GET /onchain/size-cohorts` 只读库、原样返回，不访问 BRK，不现算。
+- 前端纯函数（`size-cohorts.ts`）照原站图表代码（`script_2_app.js` A:1993-2397）做 Entities 折叠、百分比、图例合计、刻度和全部格式化；两张图共用一个横向发散条形组件。每个与原站逐字比对的格式都放在导出的纯函数里，由界面渲染，不只存在于测试助手中。
+
+**数据**
+- 12 个地址规模档（`SIZE_BANDS`，原站 L:48-54，从小到大）× 4 条 hour1 序列（`_supply`、`_realized_profit_cumulative`、`_realized_loss_cumulative`、`_realized_cap`），共 48 条（`SIZE_SERIES`）。读库深度 `DEPTH` = 2250 行，同原站 `start=-2250`（L:125-131）。
+- **独立阶段**：48 条不并进 `HOUR1_SERIES`，在币龄阶段（图 2）之后、URPD 之前单独 `_increment`，自带缺失集合和 `size_error`。它失败只影响 sizes：卖压、Sell side、图 2、Cost basis、URPD 照常更新，sizes 保留上一轮结果并随时间变 delayed / stale。sizes 不读其他阶段的序列，所以按自己阶段的完成时间盖戳。
+- **请求**：48 个名字用逗号拼起来是 2,003 个字符，大于 `MAX_SERIES_CHARS`（当前为 2,000），所以增量请求由 `_chunks` 按顺序贪心拆开，每轮 2 次（47 + 1 个名字，较长的一次约 1,970 字符）；首次回填按点数分片，每片 6 条、`start=-3000`，共 8 次。测试断言只写 `<= MAX_SERIES_CHARS`，不写死上限的数值。
+- **门控**：48 条中任一条本轮缺失（BRK 不认识），两张图都不派生，接口 `unavailable`，reasons 写明缺哪条，与 Sell side 一致。`size_cohorts()` 本身需要 48 条齐全（缺一条就是 `KeyError`），所以这道门由 sync 守住，不让异常传出去。`/status` 的 hour1 数据集不纳入 size 序列。
+- **存储增量**：首次回填 48 × 3,000 = 144,000 行，之后每天 48 × 24 = 1,152 行（hour1 不裁剪）。实测库体积记在 VERIFICATION 第 3 节。
+
+**计算**（`sizes.py`；出处为原站 loader L:323-339、图表 A:2048-2062 / 2216-2244）
+- **SE（读数时点）**：48 条序列都有行的最新小时，即各序列最后一行时间的最小值（原站 `SE = sts.length − 1`，L:324，假定序列对齐）。它通常是正在形成的小时，标 forming；只要有一条序列一行都没有，就没有 SE，按无数据处理。
+- **窗口**：1d / 7d / 30d / 90d = 24 / 168 / 720 / 2160 个**时钟小时**（BRK hour1 每小时一行，无块小时也占位，按行即按时间）。每档：`supply`、`realized_cap` 取 SE 时的值；每窗口的 `supply_change`、`profit`、`loss` 取 `v[SE] − v[SE−n]`。
+- **取整**（两种，各有出处）：`supply`、`supply_change` 照 `+x.toFixed(2)`，对浮点的精确值按 0.01 的半数远离零取整（`Decimal(x).quantize(Decimal("0.01"), ROUND_HALF_UP)`）；`profit`、`loss`、`realized_cap` 照 JS `Math.round`，即 `math.floor(x + 0.5)`，**不用** Python `round()`：银行家舍入会让 88.5 → 88、2425253218.5 → …218，原站是 89、…219。这两格是黄金样本里的半美元格。
+- **缺失值**（原站缺陷的裁定）：原站 `a[SE] − a[SE−n]` 在 JS 里把 null 当 0（L:332-333），参考小时没出块时，Δ 变成整条累计量（图 5 约 +5.27M BTC、图 6 约 +$558.8B 的假柱）。本地裁定：**任一端点为 null 或库里没有这一行，该格为 null**，界面显示 "—"、不画柱。
+  - Entities 下组内任一成员为 null，整组为 null。
+  - 图例所在视图有任一行为 null，图例三项都显示 "—"，不静默少算。
+  - 百分比的分母（`supply` 或 `realized_cap`）为 null 或 ≤ 0 时为 "—"。
+  - 读数行按项处理：哪一项缺就哪一项写 "—"，另一项照常；图 5 的 `Band supply` 是 SE 时的持币量，与窗口无关，有值就照常显示。
+  - 没有任何行（`bands` 为空）时，图例也是 "—"，不出现 "+0 BTC" 这样的伪零。
+- **无块锚点**：锚点小时 `SE − n` 在 48 条里都有行且全为 null 时，worker 在载荷的 `no_block` 里记下这个窗口（按 1d / 7d / 30d / 90d 的顺序），该窗口的每一格为 null，界面在图下显示专门说明 `sizes.noBlock`，不显示通用的「此图暂无数据」。只有部分序列为 null 的是序列缺口，不算无块，也不进 `no_block`。
+  - 频率：每小时约 1–2% 的概率有某个窗口整列为空；默认 7d 约每 230 小时一次，每次 1 小时，下一次每小时刷新后补上。
+  - 向前沿用上一小时（供应和累计量在无块小时确实不变，结果精确）属 O3 语义，v1 不做；用户若嫌空白，另立计划。
+- **零值**：真实的 0 照原站显示 `+0`、`+$0`，0 值柱照画 0.8px 细线；`Loss booked +$0`（`usd(-0)`）也照原样。负零（`-0`）显示为 `+0`，不会出现 "−0"（`signed(-0)` 给 "+"）；真实的微小负值（如 −0.01 BTC 除以大额持币量）仍显示 "−0.000%"，与原站一致。
+
+**与原站的有意偏离**
+1. null 显示 "—"、不画柱（原站当 0，无块锚点时会画出整条累计量的假柱）；Entities 缺成员、图例遇缺失行，同样显示 "—"。
+2. 百分比的分母无效显示 "—"（原站柱和标签给 0，A:2058、A:2233）。
+3. 图 6 读数的 `vs realized cap` 在 `realized_cap` ≤ 0 时显示 "—"（原站写 `n/a`，A:2366-2367；本地统一用 "—" 表示缺失）。
+4. 无块锚点的窗口在图下说明原因（原站没有这个状态）。
+5. 悬停读数改为图下一行（原站是浮动 tooltip，A:2137-2157、A:2350-2380）：悬停某一行，或聚焦图后用方向键选中，显示 tooltip 的全部内容；不做浮窗。这样键盘也能读。
+6. 窄屏改排版，不照原站整体等比缩小（390px 下字只有 4–6px）。
+7. 图内由 JS 生成的文字（档名、组名与副标题、图例、两侧小字、读数）全部翻译；原站这些不走 `t()`。原站已有的中文直接沿用。
+8. Net 图例色块与图 6 的净额竖线用浅色墨 `#e5edf6`（原站 net-tick 用 `--ink`，Net 图例用 `--pine-deep`，本来就不同色）；图 5 没有竖线，用同一墨色只为两张图的 Net 同色。正负柱用本地 moss `#7fc98a` 与 rust `#e0805c`。
+9. 三栏说明是我们起草的：原站两张图只有一行 caption（A:480、A:526），没有三栏。原 caption 的内容并进三栏，不另显示 caption；中英文措辞交用户审定。
+
+**遗留问题**
+- HH:00–HH:12 之间那一小时其实已结束，页头仍写 "includes the forming hour"。这个瑕疵与卖压、Sell side 共有（[CHART-VERIFICATION.md](CHART-VERIFICATION.md) 跨图第 9 条），三处要一起修，不在 sizes 单独修，以免三处说法不一致。
+- size 阶段持续 5xx 时，整轮每 5 分钟重试一次，不只重试 size 阶段（hour1、URPD 失败时的已有行为）。
+- `tests/onchain` 的耗时：同口径对比从 202 s 增至 269 s（+33%），原因是每次完整 sync 都要多回填 48 × 2,600 行。
+
 ## 4. 优化清单（v1 验收后逐项启用）
 
 每一项都要做到四件事：单独实现、单独加测试、界面写明口径、验收记录写清启用前后的差异。
@@ -426,7 +472,7 @@ flowchart LR
 - **ETH / MU**：只显示原有内容，另加一行 "On-chain levels are BTC only"。
 
 **Flows（BTC）**
-- 子视图切换：Seller pressure | Sell side | Cost basis | Perp states，写入 URL 参数 `flow`（Cost basis 为 `flow=costbasis`）。这个 tab 里不显示时间周期控件。390px 下切换条换行，不横向溢出。
+- 子视图切换，顺序为：Seller pressure | Sell side | Cost basis | Size cohorts | Perp states，写入 URL 参数 `flow`（Cost basis 为 `flow=costbasis`，Size cohorts 为 `flow=sizes`）。这个 tab 里不显示时间周期控件。390px 下切换条换行，不横向溢出。
 - **Seller pressure**：照原站三张图纵向排列。每张图有：
   - 标题；
   - 自己的 Span 选择（7d / 30d / 90d）；
@@ -440,6 +486,18 @@ flowchart LR
   - 每张图一张大图，加图例、两侧控件、悬停或键盘读数块、Clusters 表（图 3 另有 Bell curve components 表），以及下方三栏说明；
   - 页头一行写 URPD 快照的日子 D 和来源：形成中时加取数时刻（`URPD snapshot 19 Oct 2026 · 05:12 UTC`），已收盘时写 `URPD snapshot 19 Oct 2026 close`；日期一律取 D，不取取数那天（终审 M2，00:12 那一轮 D 可能退回前一天）；快照仍在形成时写明 `includes the forming snapshot of <日期>`；
   - 缺窗口、缺网格、缺年龄快照时只留标题、控件行和一句说明，不画图，也不显示 0。
+- **Size cohorts**（图 5、图 6，规则见 §3.6）：
+  - 图 5（Net Supply Change By Size Cohorts）在上，图 6（Net Realized Profit & Loss By Size Cohorts）在下，纵向排列。每张图是一张横向发散条形大图：行是规模档或实体组，最大的在上，正值（盈利、累积）向右，负值向左。
+  - 控件各图独立，默认值照原站（A:2029、A:2196）：
+    - 图 5：Window 7d（1d / 7d / 30d / 90d）、Breakdown Entities（Bands / Entities）、Scale BTC（BTC / % of band）。
+    - 图 6：Window 7d、Breakdown Entities、View Gross（Net / Gross，按钮顺序为 Net、Gross）、Scale USD（USD / % of realized cap）。
+    - 任一控件变化（包括再点已选中的按钮）都清除选中的读数。
+  - 行：Bands 为 12 档，Entities 为 4 组（Retail、Small entities、Mid-size entities、Large entities；组的副标题，如 `major exchanges, treasuries`，只出现在读数里）。Gross 视图每行画盈利和亏损两根条，在净额处画一条短竖线，条右侧统一放净额标签，列头写 `net`；Net 视图每行一根条。
+  - 图例三项：图 5 为 Net accumulation / Net distribution / Net (issuance)，图 6 为 Profit booked / Loss booked / Net。图例合计始终是 BTC 或美元，与 Scale 无关。
+  - 读数行在图下，一行文字：悬停某一行，或聚焦图后用 ↑ / ↓ 逐行、Home / End 跳到首尾，显示该行的全部读数；Esc 或失焦清除；未选中时显示操作提示。图 5 的读数是 Net change / Share of band / Band supply，图 6 的是 Profit booked / Loss booked / Net / vs realized cap，各带一句结论。
+  - 每张图下方有三栏说明（What it shows / What extreme values imply / How to read），窄屏全部展开。窗口起点无块时，图下显示 `sizes.noBlock` 的说明。
+  - 页头一行与 Seller pressure 相同：`Data <时间> UTC`、`includes the forming hour`，delayed / stale 时有横幅，并把 forming 提示改成 `last hour was partial when computed`；`unavailable` 时只显示警告和 reasons，不画图。
+  - 窄屏：容器宽 < 560px 时改排版，行标签放到每根条上方，左右边距 56 / 64，图高按行数取 300–440px；绘图区 < 480px 时 x 轴刻度从 7 个改为 3 个；两侧小字改成图下的 HTML 一行，可换行。5 个子视图按钮换行，不横向溢出。
 - **Perp states**：
   - P4 之前：显示 "Not connected" 横幅，写明缺哪个数据源。不放示例数据。
   - P4 之后：照原站排列 Parameters（Exchange / State window / Show）、Table 1（State / What it is / Prob. / Max move）和图 1–4，每张图都配三栏说明。
@@ -534,6 +592,14 @@ flowchart LR
 | 5 | 可选：你自建的 BRK 或 bitviewd 实例 | 数据源稳定性 |
 
 ## 10. 修订记录
+
+**v3 实施修订**（state-report 图 5、图 6，2026-10-20，见 [PLAN-SR5-6.md](PLAN-SR5-6.md)）
+- §1 "不做" 去掉图 5、图 6，纳入。
+- §3.6 新增"规模分组"：48 条 hour1 序列在独立的 size 阶段取，深度 2250，增量请求按 `MAX_SERIES_CHARS` 拆成 2 次；SE、4 个窗口和两种取整的原站出处；缺失值、零值、门控与无块锚点（`no_block`）的裁定；O1–O6 未实现。
+- §5 "Flows（BTC）" 的子视图定为 Seller pressure、Sell side、Cost basis、Size cohorts（`flow=sizes`）、Perp states 五项；新增 Size cohorts 一条：图 5、图 6 纵排，各自的控件与默认值，图例，读数行，三栏说明，窄屏规则。
+- 与原站的有意偏离：null 显示 "—"（原站当 0）；百分比分母无效显示 "—"（原站给 0）；`vs realized cap` 在 `realized_cap` ≤ 0 时显示 "—"（原站 `n/a`）；无块锚点的窗口在图下说明原因；读数行代替浮窗；窄屏改排版；图内文字全部翻译；Net 色块用墨色；三栏说明由我们起草。
+- 执行中的裁定：Entities 缺成员则整组缺失，图例遇缺失行显示 "—"；读数按项写 "—"；`size_cohorts()` 要 48 条齐全，缺失由 sync 门控；窄屏的紧凑版按"行名加条"的行块选行。
+- 遗留：页头 forming 提示在 HH:00–HH:12 之间不准（与卖压、Sell side 共有）；size 阶段持续 5xx 时整轮每 5 分钟重试。
 
 **v3 实施修订**（state-report 图 3、图 4，2026-10-20，见 [PLAN-SR3-4.md](PLAN-SR3-4.md)）
 - §1 "不做" 去掉图 4，图 3、图 4 纳入。

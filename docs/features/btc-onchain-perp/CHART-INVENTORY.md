@@ -22,7 +22,7 @@
 三个页面共 **16 张图、2 张表**，另有 Analyst Take（人工撰写的文字）、alpha-vol 两页页头的周期状态，以及 onchain-seller 的 Supplementary 标签页（见下）。
 
 目前本地做了：
-- **13 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的图 1A、1B、图 2、图 3、图 4 和图 7（刻度轨版本）。perp-squeeze 的图 1、图 2、图 4 缺的数据已用 Coinalyze 补上（2026-10-19，P6）；
+- **15 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的图 1A、1B、图 2、图 3、图 4、图 5、图 6 和图 7（刻度轨版本）。perp-squeeze 的图 1、图 2、图 4 缺的数据已用 Coinalyze 补上（2026-10-19，P6）；
 - **页头周期**（cycle badge），对应 onchain-seller、perp-squeeze 的页头；
 - **1 张表**：state-report 的表 2；
 - **perp-squeeze 的表 1**：已实现，缺的清算和买卖差已由 Coinalyze 补上（P6），首轮取数后就有约 90 天历史。
@@ -36,8 +36,8 @@
 | 图 2 Sell Side by All Age Cohorts | BRK hour1：23 个币龄群体 × 6 个累计量（138 条），合并成 12 档或 6 档 | 不缺 | **已做**（2026-10-19，Flows → Sell side，接在 1B 下面），见 [PLAN-AGE-COHORTS.md](PLAN-AGE-COHORTS.md) |
 | 图 3 Buy & Sell Side By Cost Basis | BRK URPD：all/sth/lth 今天与 1/7/30/90 天前的快照，STH 用 lin200，All 和 LTH 用 lin500 | 不缺 | **已做**（2026-10-20，Flows → Cost basis），见 [PLAN-SR3-4.md](PLAN-SR3-4.md) |
 | 图 4 同上 · Age Breakdown | BRK 分币龄的 URPD：6 个年轻 cohort（<1h 到 2m–3m）在今天的 lin500 快照；day1 `price_high`/`price_low`，从 2013 起约 5600 天 | 不缺 | **已做**（2026-10-20，Flows → Cost basis，接在图 3 下面），见 [PLAN-SR3-4.md](PLAN-SR3-4.md) |
-| 图 5 Net Supply Change By Size Cohorts | BRK hour1：12 档 `addrs_*` 的供应 | 不缺 | 没做（spec 划出范围） |
-| 图 6 Net Realized P&L By Size Cohorts | BRK hour1：12 档的已实现盈亏与已实现市值 | 不缺 | 没做（spec 划出范围） |
+| 图 5 Net Supply Change By Size Cohorts | BRK hour1：12 档 `addrs_*` 的供应 | 不缺 | **已做**（2026-10-20，Flows → Size cohorts），见 [PLAN-SR5-6.md](PLAN-SR5-6.md) |
+| 图 6 Net Realized P&L By Size Cohorts | BRK hour1：12 档的已实现盈亏与已实现市值 | 不缺 | **已做**（2026-10-20，Flows → Size cohorts，接在图 5 下面），见 [PLAN-SR5-6.md](PLAN-SR5-6.md) |
 | 图 7 Supply by Cost Basis | BRK URPD | 不缺 | 做成了价格图右侧的刻度轨（已确认的 UI 方案），**不是原图样式** |
 | 图 8 Cost Basis Distribution, All Coins | BRK：365 个日快照（All 档 1461 个） | 不缺，但首次要取 365 次 | 没做（spec 划出范围） |
 | 表 2 Price Levels | BRK URPD | 不缺 | **已做**，与原站逐格一致 |

@@ -1,0 +1,175 @@
+# SR5-6 核验记录
+
+日期：2026-10-20。分支 `claude/size-cohorts`（从 main f304735 新建），范围见 [PLAN-SR5-6](PLAN-SR5-6.md)：state-report 图 5（Net Supply Change By Size Cohorts）和图 6（Net Realized Profit & Loss By Size Cohorts），界面在 Flows → Size cohorts（`flow=sizes`）。规则见 [SPEC.md](SPEC.md) 的"规模分组"一节。
+
+本文件是骨架：第 1、2 节和第 3 节的请求数已按任务报告与评审填入；第 3 节的库体积、第 4 节浏览器、第 5 节实时对照由 controller 在 Task 7 填写，标"待 controller 填写"。
+
+提交：
+- Task 1：`9aaaa83`、`bc3fa22`（纯计算 `sizes.py`、原站黄金样本、`SIZE_SERIES`；后一个只补测试和文档）；
+- Task 2：`d6b7b93`（独立的 size 取数阶段、48 个 fixture、离线期望表 `sizes-expected.json`）；
+- Task 3：`ef4fb51`（读接口 `/onchain/size-cohorts`、契约、前端样本）；
+- Task 4：`1c79ada`（前端契约、client、图表算术纯函数）；
+- Task 5：`6329729`、`1278897`（子视图、图 5 与图 6、文案；后一个修紧凑版的选行并钉住几何）；
+- Task 6：本文档提交（SPEC、图表清单、本文件）。
+
+## 1. 全量检查（`make check`）
+
+2026-10-20 在 `1278897`（Task 5 完成，文档提交前）运行，退出码 0。Task 6 只改文档，若 Task 7 因核验发现问题新增代码提交，需在其后复跑一次并更新本表。
+
+| 项目 | 结果 |
+|---|---|
+| ruff | All checks passed |
+| mypy strict | 55 个源文件，无问题 |
+| pytest | 1069 passed（1 个 warning，是仓库原有的 Starlette/httpx 弃用提示），用时 294 s |
+| types、frontend type-check | 通过 |
+| vitest `src/features/wheelhouse` | 31 个文件，677 个测试全部通过 |
+
+各任务完成时的测试数（基线 main f304735：pytest 1024，vitest 589）和变异核对：
+
+| 任务 | pytest | vitest | 变异核对 |
+|---|---|---|---|
+| 1 纯计算与原站黄金样本 | 1039（`bc3fa22` 后 1041） | 589 | 24 个，全部杀死；补测试轮的 4 个具名变异（N1–N4）也由新增用例杀死 |
+| 2 独立的 size 阶段 | 1056 | 589 | 23 个，全部杀死 |
+| 3 读接口与样本 | 1069 | 589 | 25 个，全部杀死；评审另做 17 个，全部杀死 |
+| 4 契约与图表算术 | 1069 | 654 | 93 个，92 杀死，1 个等价（`percent no null check`：JS 里 `null > 0` 为 `false`，分母为 null 时结果仍是 null） |
+| 5 子视图、图 5 与图 6 | 1069 | 675，补修轮后 677 | 72 个，全部杀死；首轮 5 个存活，补测试后重跑全部杀死 |
+
+- 等价变异的理由写在各任务报告里：变异后的代码在所有可达输入上，输出与原代码逐位相同。
+- 测试耗时：`tests/onchain` 同口径对比从 202 s 增至 269 s（+33%）。原因是每次完整 sync 都要多回填 48 × 2,600 行。可行的提速办法是做一份会话级的首轮同步模板库，不在本计划内。
+
+## 2. 黄金对照，按来源分栏
+
+期望值的来源分三类，测试注释里逐条标明。**页面记录**是原站页面上读到的值，是最强的锚。
+
+### 页面记录（由原站读数反推的样本）
+
+样本：`services/analytics/tests/onchain/fixtures/sr5-6-page-2026-10-19T0600Z/`（README 写明来源和做法）。图 5 的读数取自 2026-10-19 06:16:46 UTC 的全局 `SIZE`，图 6 的取自 06:21 UTC 的全局 `PNL`，两者都是 06:00 那根正在形成的小时。那根小时的原始序列值之后已收盘、数值变了，无法再取，所以这是**由原站读数反推的锚点**，不是 BRK 原始值：`golden_rows()` 只在 SE 和 4 个锚点小时有值，其余全是 null，证明函数只读这 5 个小时。
+
+| 项目 | 数量 | 比对方式 | 结果 |
+|---|---|---|---|
+| 图 5 | 60 个值（12 档 × （当前量 + 4 个窗口的变化）） | `size_cohorts(golden_rows())` 与页面 `SIZE` 逐格比 | 60/60 相等 |
+| 图 6 | 108 个值（12 档 × （已实现市值 + 4 个窗口的盈利和亏损）） | 同上，与页面 `PNL` 逐格比 | 108/108 相等 |
+| 两处半美元格 | 第 0 档 1d profit（原始差值 88.5）、第 5 档 `addrs_10m_sats_to_1btc` 90d profit（2425253218.5） | `Math.round` 向上取整，得 89 和 2425253219；Python `round()` 会得 88 和 2425253218 | 相等（测试里单独断言） |
+| 页面读数与 BRK 独立复算（阶段 A，已存的复算结果重跑） | 图 5 的最大绝对差 0.00；图 6 的 108 个中 106 个相同，另 2 个差 $1 | 差的 2 个就是上面的半美元格，原因是取整方式（页面 `Math.round`，复算脚本 Python `round()`） | 与 README 一致 |
+| 评审复核（Task 1） | 原站的 loader JS 原样运行在 `golden_rows()` 上：60 + 108 个格；另有 20,160 格的随机差分 | 与 `size_cohorts` 逐格相等 | 0 处差异 |
+
+### 真实 BRK fixture 与离线复算
+
+fixture：`services/analytics/tests/onchain/fixtures/brk-2026-10-16/hour1_addrs_*.json`，48 个文件，共 1,825,665 字节。一次性抓取于 2026-10-20 01:07:36–01:07:39 UTC，BRK 0.12.2，8 次请求、每次 6 条序列，位置窗口与已有的 hour1 文件相同（153338–155938，2,600 点）；`null` 恰好落在已有 hour1 文件的那 11 个位置，没有别的 `null`。README 追加了一节：请求、抓取时刻、各文件 `version` 与 `stamp`、核对结果。
+
+| 项目 | 数量 | 比对方式 | 结果 |
+|---|---|---|---|
+| `sizes-expected.json` | 12 档 × 14 格 = 168 格 | 由 README 里的离线脚本算出：直接读 48 个 JSON 文件，不 import `wheelhouse_service`，不读 store；SE = 155937（2026-10-16 09:00 UTC），锚点 155913 / 155769 / 155217 / 153777；取整照原站 | 168 格里没有 null，`no_block` 为空 |
+| 经 sync 的整条链路 | 同上 168 格 | `test_size_cohorts_are_derived_in_their_own_stage`：回放 fixture 跑一轮同步，读出的 `bands` 与期望表逐格比 | 168/168 相等 |
+| 重新生成 | 期望表 | 评审用 README 脚本重新生成 | 与已提交的文件逐字节相同；另有 5 格独立重算，精确相等 |
+| 真实空块锚点 | SE 截到 155802（2026-10-10 18:00 UTC）；7d 的锚点 155634（2026-10-03 18:00 UTC）是真实的空块小时，48 条序列在那里全是 `null` | `test_a_real_no_block_anchor_blanks_only_that_window` | `no_block == ["7d"]`；7d 窗口每档的三项都是 `None`，其余三个窗口（锚点 155778 / 155082 / 153642）全部有值 |
+| 抓取时的一致性核对 | `price_close` 窗口 | 同一分钟内重取，与原文件的 `version`（89）和全部值都一致 | 一致（范围见"遗留"里的 T2-M2） |
+
+### 前端（页面记录 + 评审复算）
+
+| 项目 | 数量 | 比对方式 | 结果 |
+|---|---|---|---|
+| `size-cohorts-expected.json`（原站 2026-10-19 06:16 / 06:21 UTC 的线上读数，SR-5.md:22-30、39-61，SR-6.md:21-31） | 图 5 的标签与图例 8 组（4 个窗口 × BTC / %）、默认读数 1 组、轴 16 组（Bands / Entities × BTC / % × 4 个窗口）；图 6 的标签、图例与轴 7 组、读数 5 组 | `size-cohorts.test.ts` 逐项断言（标签、图例、刻度、柱数、正负、读数） | 全部相等 |
+| 评审复算（Task 4） | 同上全部条目 | 独立的 Python oracle（移植了 d3 的 `ticks`），从阶段 B 的页面全局重算 | 0 处差异 |
+| 文案 | 每种语言共 70 个键（`sizes.*` 69 个加 `flows.sizes`；Task 4 加 34 个，Task 5 加 36 个），en 与 zh 一一对应 | `i18n.test.ts` 核对键一致，并逐字核对 4 对（`flows.sizes`、两个标题、`sizes.noBlock`）；Task 5 评审另把 50 个键与 brief 的两张表逐字比对 | 0 处差异 |
+| 用例数 | `size-cohorts.test.ts` 55 个、`size-cohorts-charts.test.tsx` 19 个起，另有 `onchain-contract.test.ts`、`client.test.ts`、`flows-panel.test.tsx`、`market-defaults.test.tsx` 追加 | 见第 1 节 | 通过 |
+
+**不是逐格页面记录的 expected 项**（`source` 字段已写明）：
+- Net 视图的标签：阶段 B 只记了柱数、正负和轴端点；按原站代码 Net 与 Gross 都打印 `plfmt(d.net)`（A:2301-2307），所以用 Gross 已记录的净额标签；
+- Net 视图的刻度：只记了两端 `±4e8`，存为两项，测试只比首尾；
+- Mid、Small、Retail 三行图 6 读数的 foot：把各自已记录的份额套进 Large 行已记录的措辞；
+- 样本里没有 null 格、`no_block` 为空，所以 "—" 与无块的前端用例都是复制样本再置 null 构造的（`blanked()`），样本本身没有改。
+
+## 3. 真实数据链路
+
+**请求数**（由 `test_size_requests_stay_under_the_url_limit` 守住，断言写 `<= MAX_SERIES_CHARS`，不写死上限的数值）：
+
+| 轮次 | size 阶段的请求 | 说明 |
+|---|---|---|
+| 首次回填 | 8 次 | 每次 6 条、`start=-3000`，每片 `series` 最长 273 字符 |
+| 增量（每小时） | 2 次 | 47 + 1 个名字，较长的一次约 1,970 字符；48 个名字拼起来是 2,003 字符，大于 `MAX_SERIES_CHARS`（2,000），所以必须拆 |
+
+**controller 的验证实例**（首轮实时同步，含 size 回填）：
+- 同步用时约 22.6 s；
+- `/onchain/size-cohorts` 返回 fresh，`last_at` 为 2026-10-20 03:00 UTC，12 档，`no_block` 为 `[]`；
+- forming 状态：待 controller 填写。
+
+**库体积**：待 controller 填写。
+
+| 项目 | 回填前 | 回填后 |
+|---|---|---|
+| `series` 表行数 | 待 controller 填写 | 待 controller 填写（设计值：首次回填新增 48 × 3,000 = 144,000 行） |
+| `.local/analytics/onchain.sqlite` 体积 | 待 controller 填写 | 待 controller 填写 |
+
+之后每天新增 48 × 24 = 1,152 行（hour1 不裁剪）。
+
+## 4. 浏览器检查
+
+待 controller 填写。检查方法同 SR3-4：1440 px 直接在全宽窗口下检查；390 px 用真实点击打开 390 宽的同源弹窗，再读它的 DOM。en、zh 各做一遍。
+
+| 项目 | 1440 px | 390 px |
+|---|---|---|
+| 打开 `/market-intelligence?symbol=BTCUSDT&method=flows&flow=sizes` | 待 controller 填写 | 待 controller 填写 |
+| 图 5 默认：7d / Entities / BTC；行序（最大在上）、标签、图例、x 轴（宽版 7 个刻度，窄版 3 个） | 待 controller 填写 | 待 controller 填写 |
+| 图 6 默认：7d / Entities / Gross / USD；净额竖线与 `net` 列头、图例 | 待 controller 填写 | 待 controller 填写 |
+| 4 组控件逐个切换：Window、Breakdown、Scale、View（图 6 的按钮顺序为 Net、Gross） | 待 controller 填写 | 待 controller 填写 |
+| 键盘读数：聚焦图后 ↑ / ↓ / Home / End / Esc；焦点环可见 | 待 controller 填写 | 待 controller 填写 |
+| 5 个子视图按钮的排列 | 待 controller 填写 | 待 controller 填写：换行、无截断；并看 SR3-4 遗留的 T7-M7（两行时的边框） |
+| 窄屏版式：行标签在条上方不压条；12 档 Gross 的 `−$211.6M` 等标签在 64 px 右边距内放得下（真实字体）；两侧小字换行 | — | 待 controller 填写 |
+| 三栏说明 | 待 controller 填写 | 待 controller 填写：纵向全部展开 |
+| `scrollWidth` | 待 controller 填写 | 待 controller 填写（应为 390） |
+| zh：全部文字为中文 | 待 controller 填写 | 待 controller 填写 |
+| 控制台 | 待 controller 填写 | 待 controller 填写 |
+
+已有的非实测材料：Task 5 在提交前用无头 Chrome 给 jsdom 渲染出的静态 DOM 配上 `market.css` 截过图（940 和 336 两个宽度），版式正常；这不能替代上表，没有启动任何服务。
+
+## 5. 与原站同刻对照（可选）
+
+待 controller 填写。同一小时、默认视图（7d / Entities），对比原站与本地：
+
+| 项目 | 原站 | 本地 | 结果 |
+|---|---|---|---|
+| 图 5 四行的标签（Large / Mid / Small / Retail） | 待 controller 填写 | 待 controller 填写 | 待 controller 填写 |
+| 图 5 图例（Net accumulation / Net distribution / Net） | 待 controller 填写 | 待 controller 填写 | 待 controller 填写 |
+| 图 6 四行的标签（Gross 的净额） | 待 controller 填写 | 待 controller 填写 | 待 controller 填写 |
+| 图 6 图例（Profit booked / Loss booked / Net） | 待 controller 填写 | 待 controller 填写 | 待 controller 填写 |
+
+## 6. 与原站的有意偏离和遗留
+
+### 与原站的有意偏离
+
+详见 [SPEC.md](SPEC.md) "规模分组"一节的"与原站的有意偏离"：
+
+1. null 显示 "—"、不画柱（原站当 0，无块锚点时会画出整条累计量的假柱，图 5 约 +5.27M BTC、图 6 约 +$558.8B）；Entities 下缺成员则整组缺失，图例遇缺失行显示 "—"。
+2. 百分比的分母无效显示 "—"（原站给 0）。
+3. 图 6 读数的 `vs realized cap` 在 `realized_cap` ≤ 0 时显示 "—"（原站 `n/a`）。
+4. 无块锚点的窗口在图下说明原因（`sizes.noBlock`），不显示通用的"此图暂无数据"。
+5. 读数行代替浮动 tooltip。
+6. 窄屏改排版，不整体等比缩小。
+7. 图内由 JS 生成的文字全部翻译。
+8. Net 图例色块用墨色 `#e5edf6`，与图 6 的净额竖线一致。
+9. 三栏说明是我们起草的（原站两张图只有一行 caption）。
+
+### 交用户审的文案
+
+- zh `sizes.bands` 现为"分组"，应改为"区间"：它切换的是 12 个钱包规模区间，不是分组（与旁边的"实体"拆分混淆）。
+- 全部三栏说明（`sizes.supply.shows` / `implies` / `how`、`sizes.pnl.shows` / `implies` / `how`）的中英文措辞都是我们起草的，交用户审定（OP-4）；按钮、图例、读数、两侧小字、`sizes.noBlock` 等其余文案随同一次审阅。
+
+### 遗留问题
+
+计划里已记录：
+- 页头 forming 提示在 HH:00–HH:12 之间仍写 "includes the forming hour"，与卖压、Sell side 共有，三处要一起修；
+- size 阶段持续 5xx 时，整轮每 5 分钟重试（hour1、URPD 失败时的已有行为）；
+- 无块锚点的窗口显示 "—"（OP-1）；若嫌空白，另立 O3 版本（向前沿用上一小时），本计划不做。
+
+评审留下、带到终审的项：
+- T2-M2：fixture README 里"BRK had not revised that window"应收窄到 `price_close`，并补一个 10-19 重叠区的核对（2,093 / 2,093 一致，version 124746337）；
+- T2-M3：可选，`test_onchain_sync.py:1551` 用 `str(-HOUR1_BACKFILL)`；
+- T2-M4：README 里的脚本需要 Python ≥ 3.11；
+- T3-M1：样本重新生成的说明（断言信息或 README）；
+- T3-M2：测试里"读接口不现算"的盲区。补 `monkeypatch OnchainStore.read_series = boom`，并断言 `hasattr(sizes, "size_cohorts")`；Cost basis 的同类测试有同一个盲区，两处一起修；
+- T3-M4：测试里改用 `SIZE_COMPUTED` / `SIZE_READ` 常量；
+- T3-M5：可选，补一个"某档 `supply` 或 `realized_cap` 为 null"的接口测试；
+- Task 5：三栏说明用的 `ReadColumns` 复用自 `cost-flow-charts.tsx`，而卖压、Sell side、图 2 各内联了一份；应把它移到共享模块，替换这三份内联副本。这是跨计划的重构，留到终审评审；
+- SR3-4 的 T7-M7：Flows 切换条两行时的边框，第 5 个子视图加入后在第 4 节实测；
+- 提速办法（不在本计划内）：会话级的首轮同步模板库。
