@@ -1674,6 +1674,105 @@
   }
 }
 
+/* Size cohorts: Charts 5 and 6 draw bars out from a zero line, moss for gains and profit, rust
+   for losses; the net is light ink, its tick on Chart 6 and its swatch on both legends. */
+.wh-sizes {
+  --wh-moss: #7fc98a;
+  --wh-rust: #e0805c;
+  --wh-sc-ink: #e5edf6;
+}
+.wh-sc-bar--pos {
+  fill: var(--wh-moss);
+}
+.wh-sc-bar--neg {
+  fill: var(--wh-rust);
+}
+.wh-sc-tick {
+  stroke: var(--wh-sc-ink);
+  stroke-width: 1.6;
+  shape-rendering: crispEdges;
+}
+.wh-sc-grid {
+  stroke: var(--wh-edge);
+  stroke-width: 1;
+}
+.wh-sc-zero {
+  stroke: var(--wh-muted);
+  stroke-width: 1;
+}
+.wh-sc-hover {
+  fill: var(--wh-cyan);
+  fill-opacity: 0.08;
+  pointer-events: none;
+}
+.wh-sc-val {
+  fill: var(--wh-sc-ink);
+  font:
+    11px "JetBrains Mono",
+    monospace;
+}
+.wh-sc-row {
+  fill: var(--wh-sc-ink);
+  font:
+    500 11px Inter,
+    sans-serif;
+}
+.wh-sc-head {
+  fill: var(--wh-muted);
+  font:
+    600 10px Inter,
+    sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.wh-sc-svg[data-compact="true"] .wh-sc-val,
+.wh-sc-svg[data-compact="true"] .wh-sc-row {
+  font-size: 10px;
+}
+.wh-sizes .wh-sc-sides {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin: 2px 0 0;
+  color: var(--wh-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.wh-sc-sides span:last-child {
+  margin-left: auto;
+}
+.wh-sc-swatch--pos {
+  background: var(--wh-moss);
+}
+.wh-sc-swatch--neg {
+  background: var(--wh-rust);
+}
+.wh-sc-swatch--net {
+  background: var(--wh-sc-ink);
+}
+.wh-sizes .wh-sc-read {
+  min-height: 3.2em;
+  margin: 6px 0 0;
+  color: var(--wh-muted);
+  font:
+    11px/1.6 "JetBrains Mono",
+    monospace;
+}
+.wh-sc-read b {
+  font-weight: 500;
+  color: var(--wh-sc-ink);
+}
+.wh-sizes .wh-sc-note {
+  margin: 4px 0 0;
+  color: var(--wh-muted);
+  font:
+    11px/1.6 "JetBrains Mono",
+    monospace;
+}
+
 /* Chart 2: the original's age ramp (state-report's dark theme), light for young coins and dark
    for old, so the order survives greyscale. Profit and loss are told apart by side, not colour. */
 .wh-agec {

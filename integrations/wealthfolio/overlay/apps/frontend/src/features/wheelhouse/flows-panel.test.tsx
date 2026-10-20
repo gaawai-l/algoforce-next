@@ -10,8 +10,10 @@ import {
   costFlowSchema,
   pressureSample,
   sellSideSchema,
+  sizeCohortsSchema,
 } from "./onchain-contract";
 import sellSideRaw from "./sell-side-sample.json";
+import sizeCohortsRaw from "./size-cohorts-sample.json";
 import { perpStatesSample } from "./perps-contract";
 import type { Stream } from "./client";
 
@@ -20,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   sellSide: vi.fn(),
   ageCohorts: vi.fn(),
   costFlow: vi.fn(),
+  sizes: vi.fn(),
   perpStates: vi.fn(),
   perpStatus: vi.fn(),
 }));
@@ -29,6 +32,7 @@ vi.mock("./client", async (original) => ({
   getSellSide: mocks.sellSide,
   getAgeCohorts: mocks.ageCohorts,
   getCostFlow: mocks.costFlow,
+  getSizeCohorts: mocks.sizes,
   getPerpStates: mocks.perpStates,
   getPerpStatus: mocks.perpStatus,
 }));
@@ -129,7 +133,7 @@ it("offers the flows in order and opens Cost basis from the URL", async () => {
     within(screen.getByRole("group", { name: "Flows view" }))
       .getAllByRole("button")
       .map((button) => button.textContent),
-  ).toEqual(["Seller pressure", "Sell side", "Cost basis", "Perp states"]);
+  ).toEqual(["Seller pressure", "Sell side", "Cost basis", "Size cohorts", "Perp states"]);
   expect(
     screen.getByRole("button", { name: "Cost basis" }).getAttribute("aria-pressed"),
   ).toBe("true");
@@ -138,10 +142,37 @@ it("offers the flows in order and opens Cost basis from the URL", async () => {
     mocks.pressure,
     mocks.sellSide,
     mocks.ageCohorts,
+    mocks.sizes,
     mocks.perpStates,
     mocks.perpStatus,
   ])
     expect(other).not.toHaveBeenCalled();
+});
+
+it("shows the size cohorts for flow=sizes and queries nothing else", async () => {
+  mocks.sizes.mockResolvedValue(sizeCohortsSchema.parse(sizeCohortsRaw));
+  show("?flow=sizes");
+  expect(
+    await screen.findByText("Chart 5 — Net Supply Change By Size Cohorts"),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Size cohorts" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(mocks.sizes).toHaveBeenCalledTimes(1);
+  for (const other of [
+    mocks.pressure,
+    mocks.sellSide,
+    mocks.ageCohorts,
+    mocks.costFlow,
+    mocks.perpStates,
+    mocks.perpStatus,
+  ])
+    expect(other).not.toHaveBeenCalled();
+  const names = within(screen.getByRole("group", { name: "Flows view" }))
+    .getAllByRole("button")
+    .map((button) => button.textContent);
+  expect(names).toHaveLength(5);
+  expect(names.indexOf("Size cohorts")).toBe(names.indexOf("Perp states") - 1);
 });
 
 it("falls back to seller pressure for an unknown flow value", async () => {
@@ -192,6 +223,7 @@ it.each(["ETHUSDT", "MUUSDT"] as const)(
     expect(mocks.sellSide).not.toHaveBeenCalled();
     expect(mocks.ageCohorts).not.toHaveBeenCalled();
     expect(mocks.costFlow).not.toHaveBeenCalled();
+    expect(mocks.sizes).not.toHaveBeenCalled();
     expect(mocks.perpStates).not.toHaveBeenCalled();
     expect(mocks.perpStatus).not.toHaveBeenCalled();
   },

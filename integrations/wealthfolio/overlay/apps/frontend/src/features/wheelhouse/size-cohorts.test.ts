@@ -118,7 +118,7 @@ describe("size-cohort choices", () => {
 });
 
 describe("Chart 5 against the original page", () => {
-  // Source: page-recorded (SR-5.md:24-26 and 55-61; tick labels SR-5.md:43 and 53).
+  // Source: page-recorded (SR-5.md:24-26 and 55-61; tick labels SR-5.md:50 and 53).
   it.each(expected.supply)("matches the original Chart 5 at $win / $scale", (c) => {
     const scale = c.scale as SupplyChoice["scale"];
     const rows = cohortRows(view, "groups");
@@ -351,8 +351,10 @@ describe("missing values", () => {
     expect(supplyBtc[at("addrs_1btc_to_10btc")].value).toBe(-1368.08);
     const reading = supplyRead(text, rows[at("addrs_1btc_to_10btc")], "7d");
     expect(english(reading)).toEqual([
+      // The brief's formula over the sample's (page-equal) value, −1,368.08.
       ["Net change", "−1,368 BTC"],
       ["Share of band", MISSING],
+      // The brief's formula over the supply of 0 this test sets.
       ["Band supply", "0 BTC"],
     ]);
     const pnlPct = pnlPlot(rows, { ...PNL_DEFAULT, group: "bands", scale: "pct" });
@@ -386,6 +388,7 @@ describe("missing values", () => {
     const reading = english(pnlRead(text, rows[2], "7d"));
     expect(reading).toEqual([
       ["Profit booked", MISSING],
+      // The brief's formula over the sample's (page-equal) value.
       ["Loss booked", "−$444.7M"],
       ["Net", MISSING],
       ["vs realized cap", MISSING],
@@ -404,6 +407,10 @@ describe("zeros", () => {
     expect(top.bars.map((bar) => bar.pos)).toEqual([true, false]);
     expect(top.value).toBe(0);
     expect(valueLabel(top.value, usd)).toBe("+$0");
+    // In Net the one bar is the net, 0, and positive as the original's bar-pos for v >= 0 (A:2278).
+    expect(pnlPlot(rows, { ...PNL_DEFAULT, group: "bands", view: "net" })[0].bars).toEqual([
+      { v: 0, pos: true },
+    ]);
     const reading = pnlRead(text, rows[0], "7d");
     expect(reading.head).toBe("over 100k BTC");
     expect(reading.foot).toBe("no coins from this band moved · 7d window");

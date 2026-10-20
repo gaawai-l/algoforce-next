@@ -6,18 +6,20 @@ import { useWheelhouseText } from "./i18n";
 import { PerpStates } from "./perp-states";
 import { SellerCharts } from "./seller-charts";
 import { SellSideCharts } from "./sell-side-charts";
+import { SizeCohortsCharts } from "./size-cohorts-charts";
 
-type Flow = "seller" | "sellside" | "costbasis" | "perp";
-const flows: Flow[] = ["seller", "sellside", "costbasis", "perp"];
+type Flow = "seller" | "sellside" | "costbasis" | "sizes" | "perp";
+const flows: Flow[] = ["seller", "sellside", "costbasis", "sizes", "perp"];
 const LABELS = {
   seller: "flows.seller",
   sellside: "flows.sellside",
   costbasis: "flows.costbasis",
+  sizes: "flows.sizes",
   perp: "flows.perp",
 } as const;
 
-// Four views of BTC flows, chosen with the `flow` parameter: seller pressure, the sell side, the
-// buying and selling by cost basis, and perp states.
+// Five views of BTC flows, chosen with the `flow` parameter: seller pressure, the sell side, the
+// buying and selling by cost basis, the wallet-size cohorts, and perp states.
 export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
   const { text } = useWheelhouseText();
   const [search, setSearch] = useSearchParams();
@@ -59,6 +61,8 @@ export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
         </>
       ) : flow === "costbasis" ? (
         <CostFlowCharts />
+      ) : flow === "sizes" ? (
+        <SizeCohortsCharts />
       ) : (
         <PerpStates />
       )}

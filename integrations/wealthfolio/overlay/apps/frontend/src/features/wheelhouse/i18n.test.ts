@@ -57,6 +57,28 @@ describe("wheelhouse copy", () => {
     expect(phrase("zh", "perp.estimated", { label: "清算" })).toBe("清算（估算）");
   });
 
+  it("carries the size cohorts copy in both languages", () => {
+    const copy = {
+      "flows.sizes": ["Size cohorts", "规模分组"],
+      "sizes.supply.title": [
+        "Chart 5 — Net Supply Change By Size Cohorts",
+        "图 5 — 按地址规模分组的净供应变化",
+      ],
+      "sizes.pnl.title": [
+        "Chart 6 — Net Realized Profit & Loss By Size Cohorts",
+        "图 6 — 按地址规模分组的净已实现盈亏",
+      ],
+      "sizes.noBlock": [
+        "No block was mined in the hour this {{win}} window starts from, so there is nothing to compare against. It fills in at the next hourly refresh.",
+        "这个 {{win}} 窗口起点那一小时没有出块，没有可比的值；下一次每小时刷新后会补上。",
+      ],
+    } as const;
+    for (const [key, [en, zh]] of Object.entries(copy)) {
+      expect(messages.en[key as keyof typeof messages.en], key).toBe(en);
+      expect(messages.zh[key as keyof typeof messages.zh], key).toBe(zh);
+    }
+  });
+
   it("ends the source line so the Coinalyze link follows it without a gap", () => {
     // The line renders as the string followed by the link, with no space between them.
     expect(`${messages.en["perp.source"]}Coinalyze`).toBe(

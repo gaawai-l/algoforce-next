@@ -460,6 +460,7 @@ const en = {
   "flows.perp": "Perp states",
   "flows.sellside": "Sell side",
   "flows.costbasis": "Cost basis",
+  "flows.sizes": "Size cohorts",
   "sellside.loading": "Loading the sell side…",
   "sellside.unavailable": "Sell side unavailable",
   "sellside.span": "Span",
@@ -929,6 +930,50 @@ const en = {
   "sizes.pnl.share": "{{n}}% of booked value was profit",
   "sizes.pnl.foot": "{{verdict}} · {{win}} window",
   "sizes.gap": "No data at one end of this window",
+  "sizes.loading": "Loading size cohorts…",
+  "sizes.unavailable": "Size cohorts unavailable",
+  "sizes.window": "Window",
+  "sizes.breakdown": "Breakdown",
+  "sizes.scale": "Scale",
+  "sizes.view": "View",
+  "sizes.bands": "Bands",
+  "sizes.groups": "Entities",
+  "sizes.btc": "BTC",
+  "sizes.pctBand": "% of band",
+  "sizes.usd": "USD",
+  "sizes.pctCap": "% of realized cap",
+  "sizes.net": "Net",
+  "sizes.gross": "Gross",
+  "sizes.supply.title": "Chart 5 — Net Supply Change By Size Cohorts",
+  "sizes.supply.acc": "Net accumulation",
+  "sizes.supply.dis": "Net distribution",
+  "sizes.supply.net": "Net (issuance)",
+  "sizes.supply.right": "Net accumulation → {{unit}}",
+  "sizes.supply.left": "{{unit}} ← Net distribution",
+  "sizes.pnl.title": "Chart 6 — Net Realized Profit & Loss By Size Cohorts",
+  "sizes.pnl.right.gross": "Profit booked → {{unit}}",
+  "sizes.pnl.right.net": "Net profit → {{unit}}",
+  "sizes.pnl.left.gross": "{{unit}} ← Loss booked",
+  "sizes.pnl.left.net": "{{unit}} ← Net loss",
+  "sizes.pnl.netHead": "net",
+  "sizes.noBlock":
+    "No block was mined in the hour this {{win}} window starts from, so there is nothing to compare against. It fills in at the next hourly refresh.",
+  "sizes.readHint":
+    "Hover a row, or focus the chart and use the up and down arrow keys, to read it",
+  "sizes.aria":
+    "{{title}}. Use the up and down arrow keys to read one row; Escape clears the reading.",
+  "sizes.supply.shows":
+    "How many coins each wallet-size band gained or lost over the window: the supply BRK counts in addresses holding that balance at the latest hour, which may still be forming, less the same count 24, 168, 720 or 2,160 hours earlier. Entities adds the twelve bands up into four groups; % of band divides the change by what the band holds now.",
+  "sizes.supply.implies":
+    "This chart sets no thresholds. A large gain means coins are gathering in wallets of that size, a large loss that they are leaving them. A big move matched by an opposite one in the next band is usually wallets crossing the edge between the two, not coins changing hands. Over all twelve bands the net is roughly the newly mined coins.",
+  "sizes.supply.how":
+    "Right is accumulation, left distribution. Before reading a bar as flow, look at the neighbouring band for an opposite bar. The entity names are the original author's reading of the size ladder: BRK does not group addresses into entities. A dash marks a band or window without data, never a zero.",
+  "sizes.pnl.shows":
+    "Dollars of profit and loss booked by each wallet-size band over the window: the change in BRK's cumulative realized profit and loss from 24, 168, 720 or 2,160 hours earlier to the latest hour, which may still be forming. Gross draws both sides with a tick where the net lands; Net draws one bar. % of realized cap divides by what the band paid for the coins it holds.",
+  "sizes.pnl.implies":
+    "This chart sets no thresholds. A band booking mostly losses is spending coins below what it paid for them; one booking mostly profits is spending them into strength. BRK books every on-chain spend, moves between a holder's own wallets included, so booked is not the same as sold. Against realized cap a bar reads as a realized return on what the band paid.",
+  "sizes.pnl.how":
+    "Right is profit, left is loss. Compare the two bars before the net tick: a small net can hide heavy booking on both sides. The legend always adds up dollars, whatever the scale. Entity names are a reading of the size ladder; BRK has no entity clustering. Wallets crossing a band edge move coins, not booked profit or loss.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -1372,6 +1417,7 @@ const zh: Record<MessageKey, string> = {
   "flows.perp": "永续状态",
   "flows.sellside": "卖方结构",
   "flows.costbasis": "成本分布",
+  "flows.sizes": "规模分组",
   "sellside.loading": "正在加载卖方结构…",
   "sellside.unavailable": "卖方结构数据不可用",
   "sellside.span": "时间跨度",
@@ -1821,6 +1867,48 @@ const zh: Record<MessageKey, string> = {
   "sizes.pnl.share": "入账金额中 {{n}}% 为盈利",
   "sizes.pnl.foot": "{{verdict}} · {{win}} 窗口",
   "sizes.gap": "该窗口一端缺数据",
+  "sizes.loading": "正在加载规模分组…",
+  "sizes.unavailable": "规模分组数据不可用",
+  "sizes.window": "窗口",
+  "sizes.breakdown": "拆分方式",
+  "sizes.scale": "标度",
+  "sizes.view": "视图",
+  "sizes.bands": "分组",
+  "sizes.groups": "实体",
+  "sizes.btc": "BTC",
+  "sizes.pctBand": "占本组比例",
+  "sizes.usd": "USD",
+  "sizes.pctCap": "占已实现市值比例",
+  "sizes.net": "净额",
+  "sizes.gross": "总额",
+  "sizes.supply.title": "图 5 — 按地址规模分组的净供应变化",
+  "sizes.supply.acc": "净累积",
+  "sizes.supply.dis": "净派发",
+  "sizes.supply.net": "净额（新增发行）",
+  "sizes.supply.right": "净累积 → {{unit}}",
+  "sizes.supply.left": "{{unit}} ← 净派发",
+  "sizes.pnl.title": "图 6 — 按地址规模分组的净已实现盈亏",
+  "sizes.pnl.right.gross": "入账盈利 → {{unit}}",
+  "sizes.pnl.right.net": "净盈利 → {{unit}}",
+  "sizes.pnl.left.gross": "{{unit}} ← 入账亏损",
+  "sizes.pnl.left.net": "{{unit}} ← 净亏损",
+  "sizes.pnl.netHead": "净额",
+  "sizes.noBlock":
+    "这个 {{win}} 窗口起点那一小时没有出块，没有可比的值；下一次每小时刷新后会补上。",
+  "sizes.readHint": "悬停某一行，或聚焦图表后用上下方向键，查看该行数值",
+  "sizes.aria": "{{title}}。用上下方向键逐行查看；按 Escape 清除。",
+  "sizes.supply.shows":
+    "各钱包规模区间在窗口内增减了多少币：BRK 统计的该余额区间地址持币量，取最新一小时（可能尚未收盘）减去 24、168、720 或 2,160 小时前的值。“实体”把 12 个区间合并成 4 组；“占本组比例”用变化量除以该组当前持币量。",
+  "sizes.supply.implies":
+    "本图没有设阈值。某区间大幅增加，说明币在向这一规模的钱包集中；大幅减少，说明币在离开。相邻区间一增一减的成对变动，通常是钱包越过区间边界，而不是币易手。12 个区间合计的净额大致等于新挖出的币。",
+  "sizes.supply.how":
+    "向右为累积，向左为派发。把某根条读成资金流之前，先看相邻区间有没有方向相反的条。实体名称是原作者对规模档位的解读，BRK 并不把地址归并为实体。“—”表示该区间或窗口缺数据，不是 0。",
+  "sizes.pnl.shows":
+    "各钱包规模区间在窗口内入账的盈亏美元：BRK 累计已实现盈利和亏损，从 24、168、720 或 2,160 小时前到最新一小时（可能尚未收盘）的变化。“总额”画出两边，并用短竖线标出净额位置；“净额”只画一根条。“占已实现市值比例”以该组买入所持币的成本为分母。",
+  "sizes.pnl.implies":
+    "本图没有设阈值。某区间以亏损入账为主，说明它花费的币低于买入成本；以盈利入账为主，说明它在逢高花费。BRK 记录每一笔链上花费，包括持有者在自己钱包之间的转移，所以“入账”不等于“卖出”。按已实现市值看，条形可理解为该组相对其成本的已实现回报。",
+  "sizes.pnl.how":
+    "向右为盈利，向左为亏损。先比较两根条，再看净额竖线：净额小也可能两边都有大量入账。无论选哪种标度，图例都按美元合计。实体名称只是对规模档位的解读，BRK 没有实体聚类。钱包越过区间边界移动的是币，不是已入账的盈亏。",
 };
 
 export const messages = { en, zh };
