@@ -22,7 +22,7 @@
 三个页面共 **16 张图、2 张表**，另有 Analyst Take（人工撰写的文字）、alpha-vol 两页页头的周期状态，以及 onchain-seller 的 Supplementary 标签页（见下）。
 
 目前本地做了：
-- **15 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的图 1A、1B、图 2、图 3、图 4、图 5、图 6 和图 7（刻度轨版本）。perp-squeeze 的图 1、图 2、图 4 缺的数据已用 Coinalyze 补上（2026-10-19，P6）；
+- **16 张图**：onchain-seller 的 3 张，perp-squeeze 的 4 张，state-report 的图 1A、1B、图 2、图 3、图 4、图 5、图 6、图 7（刻度轨版本）和图 8。perp-squeeze 的图 1、图 2、图 4 缺的数据已用 Coinalyze 补上（2026-10-19，P6）；
 - **页头周期**（cycle badge），对应 onchain-seller、perp-squeeze 的页头；
 - **1 张表**：state-report 的表 2；
 - **perp-squeeze 的表 1**：已实现，缺的清算和买卖差已由 Coinalyze 补上（P6），首轮取数后就有约 90 天历史。
@@ -39,7 +39,7 @@
 | 图 5 Net Supply Change By Size Cohorts | BRK hour1：12 档 `addrs_*` 的供应 | 不缺 | **已做**（2026-10-20，Flows → Size cohorts），见 [PLAN-SR5-6.md](PLAN-SR5-6.md) |
 | 图 6 Net Realized P&L By Size Cohorts | BRK hour1：12 档的已实现盈亏与已实现市值 | 不缺 | **已做**（2026-10-20，Flows → Size cohorts，接在图 5 下面），见 [PLAN-SR5-6.md](PLAN-SR5-6.md) |
 | 图 7 Supply by Cost Basis | BRK URPD | 不缺 | 做成了价格图右侧的刻度轨（已确认的 UI 方案），**不是原图样式** |
-| 图 8 Cost Basis Distribution, All Coins | BRK：365 个日快照（All 档 1461 个） | 不缺，但首次要取 365 次 | 没做（spec 划出范围） |
+| 图 8 Cost Basis Distribution, All Coins | BRK：365 个日快照（All 档 1461 个） | 不缺，但首次要取 365 次 | **已做**（2026-10-20，Flows → Cost basis），见 [PLAN-SR8.md](PLAN-SR8.md)；首次回填约 1,456 个请求，按每轮 120 个约 12–13 小时补齐 |
 | 表 2 Price Levels | BRK URPD | 不缺 | **已做**，与原站逐格一致 |
 | Analyst Take | 人工撰写；原站模板本身是空的 | — | 没做 |
 | 页头周期 | — | — | state-report 线上**没有**周期元素（"周期"只是站名的一部分）；周期显示在 onchain-seller、perp-squeeze 的页头，本地已做（cycle badge），与两页逐日一致 |

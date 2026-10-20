@@ -74,6 +74,10 @@ perps worker 启动时不从库里重新派生：启动后立即开始的第一�
 
 **迁移 003（P6）同样如此。** 它新增 `cz_series` 表，并删除旧形状的方向核对结果。应用之后，P6 之前的镜像（迁移最高到 002）读到更新的库，会以同样的 "Perps database is newer than this application" 拒绝启动，整个 analytics 服务都起不来。所以回滚到 P6 之前的版本，要连同数据卷一起处理：先停写，再按发布第 3 步取得的备份恢复 `perps.sqlite`（该备份必须在迁移 003 之前取得，并已验证能恢复）。只回滚镜像不会让服务恢复。
 
+**onchain 迁移 002（SR-8）同样如此。** 它新增 `urpd_history` 表，不改已有的表。应用之后，SR-8 之前的镜像（onchain 迁移最高到 001）打开 `onchain.sqlite` 时，会以 "On-chain database is newer than this application" 拒绝启动；onchain router 在 lifespan 里建库，所以整个 analytics 服务都起不来。发布前按第 3 步备份 `onchain.sqlite`，这份备份必须在迁移 002 之前取得，并已验证能恢复。回滚只能二选一：先停写，用这份备份恢复 `onchain.sqlite`，再回滚镜像；或者保持前进，修复后再发布。只回滚镜像不会让服务恢复。
+
+在新镜像上运行 derive CLI（`python -m wheelhouse_service.derive --data-dir <目录>`）同样会对该目录里的 `onchain.sqlite` 应用迁移 002：用它演练的只能是备份的副本，演练过的库不能再当回滚用的备份。
+
 P5 起派生载荷带有 `rules` 等新字段。回滚到 P5 之前的版本时，旧代码读这些载荷会因 `extra="forbid"` 校验失败，相关视图报错，直到下一轮派生把载荷覆盖（onchain ≤ 1 小时，perps ≤ 10 分钟）；等待即可，不要为此删除数据卷。
 
 ## test 与后续生产环境

@@ -45,3 +45,13 @@ Read by `history_urpd()` in `../../onchain_fixture.py`; do not edit the JSON by 
   cell (`close`, the sum over the $1,000 grid, the largest bucket at $84,000, and the $60k, $74k,
   $82k and $100k buckets), which `test_history_row_matches_stage_a_cell_by_cell` in
   `../../test_onchain_costbasis_history.py` asserts.
+
+## Cross-check against the costflow fixtures
+
+The four fetched files hold the same four days as `../brk-2026-10-19T0512Z-costflow/`
+(`urpd_all_lin500_2026-07-21.json`, `-09-19`, `-10-12` and `-10-18`). Compared with those, the
+`close`, `total_supply` and `buckets` of each file are equal bucket for bucket (252 buckets each,
+every field of every bucket), so BRK had not revised those days between the 2026-10-19 05:12Z
+capture and the 2026-10-20 09:27Z fetch either. The files are not byte-identical: the costflow
+copies were written out from the worker's `urpd` table and do not carry the response's `weight`
+key.
