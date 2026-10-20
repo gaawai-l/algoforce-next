@@ -1548,7 +1548,7 @@ def test_size_requests_stay_under_the_url_limit(tmp_path: Path):
     backfill = size_requests(backfill_calls)
     assert len(backfill) == 8
     assert all(len(params["series"].split(",")) == 6 for params in backfill)
-    assert all(params["start"] == "-3000" for params in backfill)
+    assert all(params["start"] == str(-HOUR1_BACKFILL) for params in backfill)
     increment = size_requests(incremental_calls)
     assert len(increment) == 2
     assert [name for params in increment for name in params["series"].split(",")] == list(

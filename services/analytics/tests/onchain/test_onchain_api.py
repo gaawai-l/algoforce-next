@@ -1469,13 +1469,18 @@ def test_cost_flow_reads_no_network(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     def boom(*args: object, **kwargs: object) -> None:
         raise AssertionError("the read route computed something")
 
-    # Nor does it compute: neither the worker's derivation nor an engine runs, wherever the route
-    # would have imported it from.
-    names = ("cost_flow", "qc_codes", "age_band", "age_groups", "weighted_kde", "find_peaks")
-    for module in (api, costflow, costbasis):
+    # Nor does it compute: neither the worker's derivation nor an engine runs. Each name must still
+    # be there, or the patch would silently patch nothing; and no series is read, which any
+    # recomputation, under whatever name, would need.
+    patched = (
+        (costflow, ("cost_flow", "qc_codes", "age_band", "age_groups")),
+        (costbasis, ("weighted_kde", "find_peaks")),
+    )
+    for module, names in patched:
         for name in names:
-            if hasattr(module, name):
-                monkeypatch.setattr(module, name, boom)
+            assert hasattr(module, name), f"{module.__name__}.{name}"
+            monkeypatch.setattr(module, name, boom)
+    monkeypatch.setattr(OnchainStore, "read_series", boom)
     client, seen = blocked_client()
     app = create_app(
         tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
@@ -1691,14 +1696,19 @@ def test_size_cohorts_unavailable_with_200_and_no_zero(tmp_path: Path):
 
 def test_size_cohorts_view_matches_the_frontend_sample(tmp_path: Path):
     path = tmp_path / "onchain.sqlite"
-    store_sizes(path, datetime(2026, 10, 19, 6, 21, tzinfo=UTC))
-    view = size_cohorts_of(path, datetime(2026, 10, 19, 6, 30, tzinfo=UTC))
+    store_sizes(path, SIZE_COMPUTED)
+    view = size_cohorts_of(path, SIZE_READ)
 
     committed = SIZE_SAMPLE.read_text()
-    assert view == json.loads(committed)
+    regenerate = (
+        f"{SIZE_SAMPLE.name} is out of date. If the change is meant, regenerate it from the same "
+        "inputs (store_sizes(path, SIZE_COMPUTED), then size_cohorts_of(path, SIZE_READ)) by "
+        'writing json.dumps(view, indent=1, ensure_ascii=False) + "\\n" to it.'
+    )
+    assert view == json.loads(committed), regenerate
     # The sample is this response written as it came, so any drift of the route or of the rows
     # shows here, down to a whole number that turned into a float.
-    assert committed == json.dumps(view, indent=1, ensure_ascii=False) + "\n"
+    assert committed == json.dumps(view, indent=1, ensure_ascii=False) + "\n", regenerate
     assert view["data_state"] == "fresh"
     assert view["last_at"] == view["forming_at"] == "2026-10-19T06:00:00Z"
     assert len(view["bands"]) == 12
@@ -1778,15 +1788,26 @@ def test_size_cohorts_expose_the_sync_state(tmp_path: Path):
 def test_size_cohorts_pass_no_block_through(tmp_path: Path):
     path = tmp_path / "onchain.sqlite"
     # The 7d anchor as an hour without a block: every series has its row there, all of them null.
-    anchor = datetime(2026, 10, 19, 6, tzinfo=UTC) - timedelta(hours=168)
+    newest = datetime(2026, 10, 19, 6, tzinfo=UTC)
+    anchor = newest - timedelta(hours=168)
     rows = {
         name: [(at, None if at == anchor else value) for at, value in series]
         for name, series in golden_rows().items()
     }
+    # And one band's supply null at the newest hour: a gap in one series, not a blockless hour.
+    gap = "addrs_1btc_to_10btc"
+    rows[f"{gap}_supply"] = [
+        (at, None if at == newest else value) for at, value in rows[f"{gap}_supply"]
+    ]
     store_sizes(path, rows=rows)
     view = size_cohorts_of(path, SIZE_READ)
 
     assert view["no_block"] == ["7d"]
+    # That band's supply and all four of its supply changes are null, never zero.
+    (band,) = [band for band in view["bands"] if band["band"] == gap]
+    assert band["supply"] is None
+    assert [window["supply_change"] for window in band["windows"]] == [None] * 4
+    assert band["realized_cap"] is not None
     assert [[w["window"] for w in band["windows"]] for band in view["bands"]] == [
         ["1d", "7d", "30d", "90d"]
     ] * 12
@@ -1826,10 +1847,12 @@ def test_size_cohorts_after_sync_never_touch_network(
         raise AssertionError("the read route computed something")
 
     # Nor does it compute: the worker's derivation does not run, wherever the route would have
-    # imported it from.
-    for module in (api, sizes, sync_module):
-        if hasattr(module, "size_cohorts"):
-            monkeypatch.setattr(module, "size_cohorts", boom)
+    # imported it from. Each name must still be there, or the patch would silently patch nothing;
+    # and no series is read, which any recomputation, under whatever name, would need.
+    for module in (sizes, sync_module):
+        assert hasattr(module, "size_cohorts"), module.__name__
+        monkeypatch.setattr(module, "size_cohorts", boom)
+    monkeypatch.setattr(OnchainStore, "read_series", boom)
     client, seen = blocked_client()
     app = create_app(
         tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
