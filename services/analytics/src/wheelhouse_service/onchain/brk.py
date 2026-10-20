@@ -111,6 +111,31 @@ AGE_SERIES = tuple(f"{cohort}{suffix}" for cohort in AGE_COHORTS for suffix in A
 AGE_ONLY_SERIES = tuple(
     name for name in AGE_SERIES if name not in {*HOUR1_SERIES, *SELL_SIDE_SERIES}
 )
+# The size-cohort charts read the original's twelve wallet-size bands, smallest first, with their
+# supply, realized profit and loss cumulatives and realized cap each. They are not part of
+# HOUR1_SERIES: a stage of their own fetches them, so their requests failing never holds up the
+# other hour1 views.
+SIZE_BANDS = (
+    "addrs_under_1k_sats",
+    "addrs_1k_sats_to_10k_sats",
+    "addrs_10k_sats_to_100k_sats",
+    "addrs_100k_sats_to_1m_sats",
+    "addrs_1m_sats_to_10m_sats",
+    "addrs_10m_sats_to_1btc",
+    "addrs_1btc_to_10btc",
+    "addrs_10btc_to_100btc",
+    "addrs_100btc_to_1k_btc",
+    "addrs_1k_btc_to_10k_btc",
+    "addrs_10k_btc_to_100k_btc",
+    "addrs_over_100k_btc",
+)
+SIZE_SUFFIXES = (
+    "_supply",
+    "_realized_profit_cumulative",
+    "_realized_loss_cumulative",
+    "_realized_cap",
+)
+SIZE_SERIES = tuple(f"{band}{suffix}" for band in SIZE_BANDS for suffix in SIZE_SUFFIXES)
 # The day1 range the age floor of Chart 4 scans for the last day price traded through each row.
 # Requested on its own inside the day1 stage: it failing, or one of them missing, only takes
 # Chart 4 down.
