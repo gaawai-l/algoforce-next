@@ -2854,6 +2854,9 @@
 .wh-market .wh-cbh-track input[type="range"]:focus-visible {
   outline: none;
 }
+.wh-market .wh-cbh-track input.wh-cbh-raised {
+  z-index: 1;
+}
 .wh-cbh-track input[type="range"]::-webkit-slider-runnable-track {
   background: transparent;
 }

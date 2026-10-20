@@ -150,11 +150,16 @@ it("draws Chart 8 with the original's default controls", async () => {
   const out = new Uint8ClampedArray(30 * 250 * 4);
   paint(vis, 0, 249, contrast(sortedCells(vis, 0, 249), 75, 95), out);
   expect(image.data).toEqual(out);
-  // The canvas sits on the plot: one pixel per day across, one per row down.
-  expect(canvas()!.style.left).toBe(`${LEFT}px`);
-  expect(canvas()!.style.top).toBe("10px");
-  expect(canvas()!.style.width).toBe(`${PLOT_W}px`);
-  expect(canvas()!.style.height).toBe(`${HEIGHT - 34}px`);
+  // The canvas sits on the plot, in shares of the svg's frame, so it stays on the plot at any
+  // drawn size: one pixel per day across, one per row down.
+  const share = (value: string) => {
+    expect(value).toMatch(/%$/);
+    return parseFloat(value);
+  };
+  expect(share(canvas()!.style.left)).toBeCloseTo((LEFT / WIDTH) * 100, 6);
+  expect(share(canvas()!.style.top)).toBeCloseTo((10 / HEIGHT) * 100, 6);
+  expect(share(canvas()!.style.width)).toBeCloseTo((PLOT_W / WIDTH) * 100, 6);
+  expect(share(canvas()!.style.height)).toBeCloseTo(((HEIGHT - 34) / HEIGHT) * 100, 6);
   expect(svg().getAttribute("viewBox")).toBe(`0 0 ${WIDTH} ${HEIGHT}`);
   expect(svg().getAttribute("role")).toBe("img");
   expect(svg().getAttribute("tabindex")).toBe("0");
@@ -247,6 +252,19 @@ it("clamps the contrast handles", async () => {
   fireEvent.change(lower(), { target: { value: "99" } });
   expect((lower() as HTMLInputElement).value).toBe("75");
   expect((upper() as HTMLInputElement).value).toBe("76");
+  // The handles share one track and the upper one is drawn over the lower: from the middle up, the
+  // lower one is raised, so at 99 and 100 it can still be grabbed.
+  const raised = () => lower().classList.contains("wh-cbh-raised");
+  expect(raised()).toBe(true);
+  fireEvent.change(upper(), { target: { value: "100" } });
+  fireEvent.change(lower(), { target: { value: "99" } });
+  expect((lower() as HTMLInputElement).value).toBe("99");
+  expect(raised()).toBe(true);
+  fireEvent.change(lower(), { target: { value: "50" } });
+  expect(raised()).toBe(true);
+  fireEvent.change(lower(), { target: { value: "49" } });
+  expect(raised()).toBe(false);
+  expect(upper().classList.contains("wh-cbh-raised")).toBe(false);
   // Both handles at the ends: the whole range, nothing below the floor, nothing clipped.
   fireEvent.change(lower(), { target: { value: "0" } });
   fireEvent.change(upper(), { target: { value: "100" } });
@@ -261,8 +279,14 @@ it("clamps the contrast handles", async () => {
 it("reads a day with the keyboard and says when it is missing", async () => {
   show(sample);
   await loaded();
+  // The live region is mounted before the first reading, so that reading is announced too.
+  const live = panel().querySelector(".wh-cbh-live")!;
+  expect(live.getAttribute("aria-live")).toBe("polite");
+  expect(live.textContent).toBe("");
   act(() => svg().focus());
   expect(fireEvent.keyDown(svg(), { key: "ArrowLeft" })).toBe(false);
+  expect(panel().querySelector(".wh-cbh-live")).toBe(live);
+  expect(live.contains(tip())).toBe(true);
   let text = tip()!.textContent;
   expect(text).toContain("2026-10-15");
   expect(text).toContain("Bucket $81.0k–$81.5k");
@@ -271,7 +295,6 @@ it("reads a day with the keyboard and says when it is missing", async () => {
   );
   expect(text).toContain("spot $82k");
   expect(text).not.toContain("forming");
-  expect(tip()!.getAttribute("aria-live")).toBe("polite");
   // The cursor crosses the cell: column 28's centre, and the middle of the $81,000 row.
   const [across, down] = [...svg().querySelectorAll("line.wh-seller-cursor")];
   expect(Number(across.getAttribute("x1"))).toBeCloseTo(LEFT + 28.5 * COL, 1);
@@ -303,6 +326,8 @@ it("reads a day with the keyboard and says when it is missing", async () => {
   expect(tip()!.textContent).toContain("2026-09-17");
   expect(fireEvent.keyDown(svg(), { key: "Escape" })).toBe(false);
   expect(tip()).toBeNull();
+  expect(panel().querySelector(".wh-cbh-live")).toBe(live);
+  expect(live.textContent).toBe("");
   // Other keys pass through to the page.
   expect(fireEvent.keyDown(svg(), { key: "Tab" })).toBe(true);
 });
@@ -533,11 +558,38 @@ it("shows unavailable when the span on screen fails to refresh", async () => {
   expect(canvas()).toBeNull();
   // Span stays, so the failed span can be asked for again, or another one picked.
   expect(pressed("Span")).toEqual(["365D"]);
-  mocks.history.mockResolvedValueOnce(sample);
+  let answer: (view: CostBasisHistoryView) => void = () => {};
+  mocks.history.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
   pick("Span", "365D");
-  await loaded();
   expect(mocks.history).toHaveBeenCalledTimes(3);
+  // The retry says it is under way.
+  expect(await within(panel()).findByText("loading 365 days…")).toBeTruthy();
+  expect(within(panel()).getByText("Cost basis history unavailable")).toBeTruthy();
+  await act(async () => answer(sample));
+  await loaded();
   expect(within(panel()).queryByText("Cost basis history unavailable")).toBeNull();
+  expect(within(panel()).queryByText("loading 365 days…")).toBeNull();
+});
+
+it("never draws an older span's days after the span on screen failed", async () => {
+  const failure = new Error("Python service did not respond. Check the local workspace and retry.");
+  const client = show(sample, failure);
+  await loaded();
+  await act(() => client.refetchQueries());
+  expect(await within(panel()).findByText("Cost basis history unavailable")).toBeTruthy();
+  let refuse: (error: Error) => void = () => {};
+  mocks.history.mockReturnValueOnce(new Promise((_resolve, reject) => (refuse = reject)));
+  pick("Span", "90D");
+  await waitFor(() => expect(mocks.history).toHaveBeenCalledTimes(3));
+  expect(mocks.history.mock.calls[2][0]).toBe("90");
+  // While 90D loads, the 365 days that failed to refresh are not shown in its place.
+  expect(await within(panel()).findByText("Loading the cost basis history…")).toBeTruthy();
+  expect(canvas()).toBeNull();
+  await act(async () => refuse(failure));
+  expect(await within(panel()).findByText("Cost basis history unavailable")).toBeTruthy();
+  expect(canvas()).toBeNull();
+  expect(within(panel()).queryByText("could not load 90 days")).toBeNull();
+  expect(pressed("Span")).toEqual(["90D"]);
 });
 
 it("polls hourly for All and every 15 minutes otherwise", async () => {

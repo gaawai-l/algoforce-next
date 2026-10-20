@@ -58,6 +58,8 @@ import { Segments } from "./sell-side-charts";
 const DAY = 864e5;
 const round = (value: number) => Math.round(value * 100) / 100;
 const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
+// A length as a share of the svg's frame, so the canvas stays on the plot at any drawn size.
+const share = (value: number, of: number) => `${(value / of) * 100}%`;
 const daysOf = (span: SpanKey) => CBH_SPANS.find((item) => item.key === span)!.days;
 // The worker writes the history once an hour; All, the longest body, is asked for no more often.
 const refetchFor = (span: SpanKey) => (span === "all" ? 3_600_000 : 900_000);
@@ -285,7 +287,12 @@ function CbhPlot({
         height={rows}
         data-cols={n}
         data-rows={rows}
-        style={{ left: f.left, top: f.top, width: round(f.plotW), height: round(f.plotH) }}
+        style={{
+          left: share(f.left, width),
+          top: share(f.top, height),
+          width: share(f.plotW, width),
+          height: share(f.plotH, height),
+        }}
         aria-hidden="true"
       />
       <svg
@@ -395,21 +402,26 @@ function CbhPlot({
           />
         ) : null}
       </svg>
-      {tip ? (
-        <div className="wh-cbh-tip" aria-live="polite" style={place}>
-          <div className="wh-cbh-tip-day">{tip.day}</div>
-          {"missing" in tip ? (
-            <div>{text(tip.missing === "absent" ? "cbh.absentDay" : "cbh.pendingDay")}</div>
-          ) : (
-            <>
-              <div>{`${text("cbh.bucket")} ${tip.bucket}`}</div>
-              <div>{`${text("cbh.supply")} ${tip.supply}`}</div>
-              {tip.spot !== null ? <div>{`${text("cbh.spot")} ${tip.spot}`}</div> : null}
-              {tipForming ? <div className="wh-cbh-tip-forming">{text("cbh.forming")}</div> : null}
-            </>
-          )}
-        </div>
-      ) : null}
+      {/* Always mounted, so a screen reader announces the first reading as well. */}
+      <div className="wh-cbh-live" aria-live="polite">
+        {tip ? (
+          <div className="wh-cbh-tip" style={place}>
+            <div className="wh-cbh-tip-day">{tip.day}</div>
+            {"missing" in tip ? (
+              <div>{text(tip.missing === "absent" ? "cbh.absentDay" : "cbh.pendingDay")}</div>
+            ) : (
+              <>
+                <div>{`${text("cbh.bucket")} ${tip.bucket}`}</div>
+                <div>{`${text("cbh.supply")} ${tip.supply}`}</div>
+                {tip.spot !== null ? <div>{`${text("cbh.spot")} ${tip.spot}`}</div> : null}
+                {tipForming ? (
+                  <div className="wh-cbh-tip-forming">{text("cbh.forming")}</div>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -429,12 +441,14 @@ export function CostBasisHistoryChart() {
     queryFn: ({ signal }) => getCostBasisHistory(span, signal),
     refetchInterval: refetchFor(span),
     retry: false,
-    // A new span keeps the chart on screen until its days arrive.
-    placeholderData: (previous) => previous,
+    // A new span keeps the chart on screen until its days arrive, unless that chart's own refresh
+    // failed: days shown as unavailable never come back in another span's place.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.state.status === "error" ? undefined : previous,
   });
   // The last span that loaded, drawn on when a newly picked span fails to load (plan R18).
   const [good, setGood] = useState<{ span: SpanKey; view: CostBasisHistoryView } | null>(null);
-  const fresh = query.isPlaceholderData ? undefined : query.data;
+  const fresh = query.isPlaceholderData || query.isError ? undefined : query.data;
   if (fresh && (good === null || good.view !== fresh || good.span !== span))
     setGood({ span, view: fresh });
   const failedNew = query.isError && good !== null && good.span !== span;
@@ -523,13 +537,22 @@ export function CostBasisHistoryChart() {
   );
 
   if (query.isError && !failedNew) {
+    // Its days failed to refresh, so no later span falls back on them.
+    if (good !== null) setGood(null);
     const failure = String(query.error.message ?? "");
     // Span stays, so another span, or this one again, can be asked for.
     return section(
       <>
         <p className="wh-onchain-warn">{text("cbh.unavailable")}</p>
         {failure ? <p className="wh-muted">{failure}</p> : null}
-        <div className="wh-ss-controls">{spanControl}</div>
+        <div className="wh-ss-controls">
+          {spanControl}
+          {query.isFetching ? (
+            <span className="wh-cbh-load" role="status">
+              {text("cbh.fetching", { n: fmtDays(daysOf(span)) })}
+            </span>
+          ) : null}
+        </div>
       </>,
     );
   }
@@ -599,6 +622,9 @@ export function CostBasisHistoryChart() {
           <span className="wh-cbh-track">
             <input
               type="range"
+              // The upper handle is drawn over the lower one; from the middle up the lower one is
+              // raised, so both can still be grabbed when they meet at the top.
+              className={lo >= 50 ? "wh-cbh-raised" : undefined}
               min={0}
               max={100}
               step={1}
