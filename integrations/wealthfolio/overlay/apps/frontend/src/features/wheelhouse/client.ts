@@ -176,7 +176,8 @@ async function query<T>(
     // The timeout covers reading the body too, which takes longest for the long spans.
     if (response.ok) body = await response.json();
   } catch (error) {
-    // A body the service sent in full but malformed keeps its own error.
+    // Unless the timeout or the caller aborted it, an error reading the body (a malformed body,
+    // a connection dropped part way) is thrown as it is.
     if (response && !signal.aborted) throw error;
     throw new Error(
       "Python service did not respond. Check the local workspace and retry.",

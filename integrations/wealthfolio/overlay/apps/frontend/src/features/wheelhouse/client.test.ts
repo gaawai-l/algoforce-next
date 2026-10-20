@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  getAgeCohorts,
   getCostBasis,
   getCostBasisHistory,
   getCostFlow,
@@ -332,13 +333,24 @@ describe("on-chain client", () => {
     }
   });
 
-  it("keeps a malformed body's own error on every endpoint", async () => {
+  it("keeps a malformed body's own error on the on-chain endpoints", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(() => Promise.resolve(new Response("{not json"))),
     );
-    await expect(getSellSide()).rejects.toThrow(SyntaxError);
-    await expect(getCostBasisHistory("30")).rejects.toThrow(SyntaxError);
+    for (const request of [
+      () => getCostBasisHistory("30"),
+      () => getCostBasisHistory("all"),
+      () => getSellSide(),
+      () => getAgeCohorts(),
+      () => getCostFlow(),
+      () => getCostBasis(),
+      () => getSizeCohorts(),
+      () => getSellerPressure(),
+      () => getOnchainCycle(),
+      () => getOnchainLevels(),
+    ])
+      await expect(request()).rejects.toThrow(SyntaxError);
   });
 
   it("rejects a cost-basis history payload outside the contract", async () => {
