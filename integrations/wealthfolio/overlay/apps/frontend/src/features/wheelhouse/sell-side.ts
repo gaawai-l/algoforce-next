@@ -101,7 +101,7 @@ const E10 = Math.sqrt(50);
 const E5 = Math.sqrt(10);
 const E2 = Math.sqrt(2);
 
-function tickSpec(start: number, stop: number, count: number): [number, number, number] {
+export function tickSpec(start: number, stop: number, count: number): [number, number, number] {
   const step = (stop - start) / Math.max(0, count);
   const power = Math.floor(Math.log10(step));
   const error = step / 10 ** power;
