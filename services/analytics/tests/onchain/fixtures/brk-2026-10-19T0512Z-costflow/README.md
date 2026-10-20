@@ -112,7 +112,8 @@ for name, render in (("cost-flow-sample-0512.json", s.render_sample_0512),
 ```
 
 - S1 and S2 are what `GET /api/wheelhouse/v1/onchain/cost-flow` serves for their stored payloads
-  at their read times:
+  at their read times. The generator stores only the payload, with no sync state, so both have
+  `brk_version` null and `refreshing` false:
   - S1 is the real `cost_flow` on the 30 snapshots here, without age snapshots: `snapshot_at`
     05:12:06Z, derived at 05:12:30Z, read at 05:20Z. Both grids have all four windows.
   - S2 is the $500 grid of the 06:04:42Z snapshot, spot 82361.33: derived at 06:05:00Z, read at
@@ -126,7 +127,18 @@ for name, render in (("cost-flow-sample-0512.json", s.render_sample_0512),
 - `cost-flow-crosscheck.json` holds four sides of S1 at Zoom All: both sides of 30d All, and both
   of 30d STH with Aging Show. Each has its rows' centers and weights, following the original
   page's udiff, segments and side weights, then `costbasis.py`'s `weighted_kde` at 0.02 times the
-  span of the centers (`h`) and its `find_peaks`.
+  span of the centers (`h`) and its `find_peaks`. Each side also holds `costbasis.py`'s mixture
+  over its rows with weight:
+  - `gmm`: `fit_gmm` for every k from 1 to the cap `select_components` allows (one per 5 rows
+    with weight, at most 5), each with its components (`mu`, `sigma`, `share`, `btc`) and its
+    log likelihood per unit weight `log_l`;
+  - `select_peaks`: `select_components(..., new_bic=False)` with the side's peak count, one bell
+    per peak up to that cap;
+  - `select_bic`: the same with no peak, so k is the lowest BIC's over the side's rows.
+
+  `cost-flow-engine.test.ts` checks the TypeScript engine against all of these within a relative
+  1e-9, so a change to `fit_gmm` or `select_components` fails the regeneration test here and,
+  once the file is regenerated, the TypeScript test until `cost-flow-engine.ts` follows.
 - S1 and S2 hold no libm result, so they are the same bytes on every platform and the test compares
   them byte for byte. The crosscheck holds `math.exp` results, whose last bits depend on the
   platform's libm, so the test compares its structure exactly and its numbers within a relative

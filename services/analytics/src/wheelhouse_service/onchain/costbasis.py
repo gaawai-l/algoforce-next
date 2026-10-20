@@ -2,6 +2,8 @@
 
 Every sum is an explicit loop in row order: since Python 3.12 the builtin `sum()` compensates for
 float rounding, which the original's JavaScript does not.
+
+Its TypeScript twin for Charts 3 and 4 is the frontend's `cost-flow-engine.ts`: change both.
 """
 
 import math

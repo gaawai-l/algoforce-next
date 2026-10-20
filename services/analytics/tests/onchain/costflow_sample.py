@@ -19,7 +19,16 @@ from fastapi.testclient import TestClient
 from wheelhouse_service.market import Model
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import Urpd
-from wheelhouse_service.onchain.costbasis import Peak, _cents, find_peaks, weighted_kde
+from wheelhouse_service.onchain.costbasis import (
+    MAX_COMPONENTS,
+    GmmComponent,
+    Peak,
+    _cents,
+    find_peaks,
+    fit_gmm,
+    select_components,
+    weighted_kde,
+)
 from wheelhouse_service.onchain.costflow import (
     COHORTS,
     WINDOWS,
@@ -76,9 +85,17 @@ class Sample:
     read_at: datetime
 
 
+class GmmFit(Model):
+    """costbasis.fit_gmm with k bells over a side's rows with weight."""
+
+    k: int
+    comps: list[GmmComponent]
+    log_l: float
+
+
 class CrossSide(Model):
     """One side of one Chart 3 view: its rows and weights (A:1304-1401), and what costbasis.py's
-    KDE and peaks make of them."""
+    KDE, peaks and mixture make of them."""
 
     window: Window
     holders: Holders
@@ -91,6 +108,11 @@ class CrossSide(Model):
     h: float
     kde: list[float]
     peaks: list[Peak]
+    # fit_gmm over the rows with weight, for k = 1 up to the cap select_components allows.
+    gmm: list[GmmFit]
+    # select_components under v1, with the side's peak count and with none (k by BIC).
+    select_peaks: list[GmmComponent]
+    select_bic: list[GmmComponent]
 
 
 class Crosscheck(Model):
@@ -263,6 +285,19 @@ def _weight(row: Row, holders: Holders, aging: bool, side: Side) -> float:
     return max(0.0, total) if side == "pos" else max(0.0, -total)
 
 
+def _gmm(centers: list[float], weights: list[float]) -> list[GmmFit]:
+    """fit_gmm for every k up to select_components' cap, over the rows it fits: those with
+    weight."""
+    xs = [x for x, w in zip(centers, weights, strict=True) if w > 0]
+    ws = [w for w in weights if w > 0]
+    fits = []
+    for k in range(1, max(1, min(MAX_COMPONENTS, len(xs) // 5)) + 1):
+        fit = fit_gmm(xs, ws, k)
+        assert fit is not None
+        fits.append(GmmFit(k=k, comps=fit[0], log_l=fit[1]))
+    return fits
+
+
 def crosscheck() -> Crosscheck:
     """Both sides of 30d All and of 30d STH with Aging Show, at Zoom All, from S1."""
     grids = {grid.step: grid for grid in sample_0512().stored.grids}
@@ -273,6 +308,7 @@ def crosscheck() -> Crosscheck:
         h = BW * (centers[-1] - centers[0])
         for side in ("pos", "neg"):
             weights = [_weight(row, holders, aging, side) for row in rows]
+            peaks = find_peaks(centers, weights)
             sides.append(
                 CrossSide(
                     window="30d",
@@ -284,7 +320,12 @@ def crosscheck() -> Crosscheck:
                     weights=weights,
                     h=h,
                     kde=weighted_kde(centers, weights, h),
-                    peaks=find_peaks(centers, weights),
+                    peaks=peaks,
+                    gmm=_gmm(centers, weights),
+                    select_peaks=select_components(
+                        centers, weights, len(peaks), len(centers), new_bic=False
+                    ),
+                    select_bic=select_components(centers, weights, 0, len(centers), new_bic=False),
                 )
             )
     return Crosscheck(sides=sides)

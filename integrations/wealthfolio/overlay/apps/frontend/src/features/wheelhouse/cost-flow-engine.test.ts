@@ -78,6 +78,49 @@ describe("cost-flow engine", () => {
     }
   });
 
+  // The same four sides through costbasis.fit_gmm for every k up to the cap, and through
+  // costbasis.select_components (v1) with the side's peaks and with none. A change to either
+  // engine's GMM, BIC or choice of k makes this fail once the crosscheck is regenerated.
+  it("agrees with costbasis.py on the GMM, BIC and k", () => {
+    const sameComps = (
+      actual: readonly { mu: number; sigma: number; w: number }[],
+      want: readonly { mu: number; sigma: number; share: number }[],
+      what: string,
+    ) => {
+      expect(actual, what).toHaveLength(want.length);
+      actual.forEach((c, j) => {
+        near(c.mu, want[j].mu, 1e-9, `${what} M${j + 1} mu`);
+        near(c.sigma, want[j].sigma, 1e-9, `${what} M${j + 1} sigma`);
+        near(c.w, want[j].share, 1e-9, `${what} M${j + 1} w`);
+      });
+    };
+    const gmm = { ...DEFAULT_SIDE, mixture: "gmm" as const };
+    for (const s of crosscheck.sides) {
+      const what = `${s.window} ${s.holders} ${s.aging ? "aging" : ""} ${s.side}`;
+      const { xs, ws } = weighted(s.centers, s.weights);
+      const kCap = Math.max(1, Math.min(5, Math.floor(xs.length / 5)));
+      expect(s.gmm.map((f) => f.k)).toEqual(Array.from({ length: kCap }, (_, i) => i + 1));
+      for (const f of s.gmm) {
+        const fit = fitGMM1D(xs, ws, f.k);
+        expect(fit).not.toBeNull();
+        near(fit!.logL, f.log_l, 1e-9, `${what} k=${f.k} logL`);
+        sameComps(fit!.comps, f.comps, `${what} k=${f.k}`);
+      }
+
+      // Auto with the KDE's peaks: one bell per peak, capped.
+      expect(s.peaks.length).toBeGreaterThan(0);
+      const auto = fitSide(s.centers, s.weights, gmm)?.mix;
+      expect(auto?.src).toBe("peaks");
+      expect(auto?.k).toBe(s.select_peaks.length);
+      sameComps(auto!.comps, s.select_peaks, `${what} peaks`);
+      // Smoothing Off marks no peak, so k is the lowest BIC's.
+      const off = fitSide(s.centers, s.weights, { ...gmm, smoothing: "none" })?.mix;
+      expect(off?.src).toBe("bic");
+      expect(off?.k).toBe(s.select_bic.length);
+      sameComps(off!.comps, s.select_bic, `${what} bic`);
+    }
+  });
+
   // Stage A fitted the same rows with costbasis.py's GMM, a port of A:1460-1511 with the same
   // initialisation; neither has a random step, so a given k gives the same bells.
   //
