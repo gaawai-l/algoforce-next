@@ -592,6 +592,38 @@ it("never draws an older span's days after the span on screen failed", async () 
   expect(pressed("Span")).toEqual(["90D"]);
 });
 
+it("says loading while a span that failed to refresh is asked for again", async () => {
+  const failure = new Error("Python service did not respond. Check the local workspace and retry.");
+  const client = show(sample);
+  await loaded();
+  // 365D's refresh, which fails, then 90D.
+  let fail: (error: Error) => void = () => {};
+  mocks.history.mockReturnValueOnce(new Promise((_resolve, reject) => (fail = reject)));
+  mocks.history.mockResolvedValueOnce(sample);
+  act(() => void client.refetchQueries());
+  await waitFor(() => expect(mocks.history).toHaveBeenCalledTimes(2));
+  // A refresh of the span on screen is no new span loading.
+  expect(within(panel()).queryByText("loading 365 days…")).toBeNull();
+  await act(async () => fail(failure));
+  expect(await within(panel()).findByText("Cost basis history unavailable")).toBeTruthy();
+  pick("Span", "90D");
+  await loaded();
+  // Back on 365D: its cached days failed, so they are asked for again as it mounts. With days
+  // cached the query stays in error while it fetches.
+  let refuse: (error: Error) => void = () => {};
+  mocks.history.mockReturnValueOnce(new Promise((_resolve, reject) => (refuse = reject)));
+  pick("Span", "365D");
+  await waitFor(() => expect(mocks.history).toHaveBeenCalledTimes(4));
+  expect(mocks.history.mock.calls[3][0]).toBe("365");
+  expect(await within(panel()).findByText("loading 365 days…")).toBeTruthy();
+  expect(within(panel()).queryByText("could not load 365 days")).toBeNull();
+  expect(canvas()).not.toBeNull();
+  await act(async () => refuse(failure));
+  expect(await within(panel()).findByText("could not load 365 days")).toBeTruthy();
+  expect(within(panel()).queryByText("loading 365 days…")).toBeNull();
+  expect(canvas()).not.toBeNull();
+});
+
 it("polls hourly for All and every 15 minutes otherwise", async () => {
   const client = show(sample, "pending");
   await loaded();
@@ -636,6 +668,42 @@ it("says when a failed refresh holds the backfill", async () => {
   show(stored);
   await loaded();
   expect(meta()).toContain("2 of 2 days stored");
+  expect(meta()).not.toContain("paused");
+});
+
+it("says the backfill waits when there is no newest snapshot", async () => {
+  // BRK had no D: the round succeeded with no error, yet the gate is shut, whatever the last
+  // backfill did.
+  show({
+    ...sample,
+    data_state: "stale",
+    reasons: ["urpd_missing"],
+    backfill_error: "brk_unavailable",
+  });
+  await loaded();
+  expect(meta()).toContain(
+    "history fetch waits for the newest snapshot; it resumes once BRK has it",
+  );
+  expect(meta()).not.toContain("the rest is still being fetched");
+  expect(meta()).not.toContain("BRK returned");
+  cleanup();
+  // A failed round is still said first.
+  show({ ...sample, reasons: ["urpd_missing"], last_error: "brk_unavailable" });
+  await loaded();
+  expect(meta()).toContain("the last refresh failed (brk_unavailable)");
+  expect(meta()).not.toContain("waits for the newest snapshot");
+  cleanup();
+  // Nothing pending: there is no backfill to wait for.
+  show({
+    ...sample,
+    reasons: ["urpd_missing"],
+    days: sample.days.slice(-2),
+    close: sample.close.slice(-2),
+    supply: sample.supply.slice(-2),
+    status: sample.status.slice(-2),
+  });
+  await loaded();
+  expect(meta()).not.toContain("waits");
   expect(meta()).not.toContain("paused");
 });
 

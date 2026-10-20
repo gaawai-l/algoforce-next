@@ -929,6 +929,7 @@ const en = {
   "cbh.paused": "history fetch paused: BRK returned {{code}}; retrying next hour",
   "cbh.held":
     "history fetch paused: the last refresh failed ({{code}}); it resumes after the next successful refresh",
+  "cbh.waiting": "history fetch waits for the newest snapshot; it resumes once BRK has it",
   "cbh.absentOne": "1 day has no snapshot at BRK",
   "cbh.absentMany": "{{n}} days have no snapshot at BRK",
   "cbh.stale": "Latest snapshot is {{day}}; the data is stale",
@@ -1911,6 +1912,7 @@ const zh: Record<MessageKey, string> = {
   "cbh.backfilling": "其余仍在抓取；缺失的日期画斜线，不是 0",
   "cbh.paused": "历史回填暂停：BRK 返回 {{code}}，下一小时重试",
   "cbh.held": "历史回填暂停：上一轮刷新失败（{{code}}），下一次刷新成功后继续",
+  "cbh.waiting": "历史回填在等最新快照：BRK 有了之后继续",
   "cbh.absentOne": "BRK 缺 1 天的快照",
   "cbh.absentMany": "BRK 缺 {{n}} 天的快照",
   "cbh.stale": "最新快照是 {{day}}，数据已过期",

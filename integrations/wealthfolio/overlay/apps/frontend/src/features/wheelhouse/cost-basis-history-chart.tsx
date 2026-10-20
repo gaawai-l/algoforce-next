@@ -577,14 +577,17 @@ export function CostBasisHistoryChart() {
     text("cbh.meta", { day: view.latest_day ?? missing }),
     text("cbh.coverage", { have: fmtDays(cov.have), want: fmtDays(cov.want) }),
   ];
-  // A failed round keeps the backfill gate shut, whatever the last backfill did (plan R21).
+  // A failed round keeps the backfill gate shut, whatever the last backfill did (plan R21); so
+  // does a round without D, which records no error.
   if (cov.pending)
     status.push(
       view.last_error !== null
         ? text("cbh.held", { code: view.last_error })
-        : view.backfill_error !== null
-          ? text("cbh.paused", { code: view.backfill_error })
-          : text("cbh.backfilling"),
+        : view.reasons.includes("urpd_missing")
+          ? text("cbh.waiting")
+          : view.backfill_error !== null
+            ? text("cbh.paused", { code: view.backfill_error })
+            : text("cbh.backfilling"),
     );
   if (cov.absent)
     status.push(
@@ -658,7 +661,8 @@ export function CostBasisHistoryChart() {
             </button>
           ) : null}
         </div>
-        {query.isPlaceholderData ? (
+        {/* A span whose cached days failed stays in error while it is asked for again. */}
+        {query.isPlaceholderData || (failedNew && query.isFetching) ? (
           <span className="wh-cbh-load" role="status">
             {text("cbh.fetching", { n: days })}
           </span>
