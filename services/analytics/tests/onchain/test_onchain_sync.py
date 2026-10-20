@@ -3659,3 +3659,61 @@ def test_derive_from_store_rederives_chart_8_without_brk(tmp_path: Path):
     store.clear_derived("costbasis_history")
     sync_for(store, transport, later).derive_from_store()
     assert store.derived("costbasis_history") is None and calls == []
+
+
+def started_and_stopped(sync: OnchainSync, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start the worker, wait for its first check whether a round is due, which comes after what
+    it does as it starts, then stop it."""
+    checked = threading.Event()
+    run_once = sync.run_once
+
+    def first_check(*, now: datetime | None = None) -> bool:
+        worked = run_once(now=now)
+        checked.set()
+        return worked
+
+    monkeypatch.setattr(sync, "run_once", first_check)
+    sync.start()
+    try:
+        assert checked.wait(5)
+    finally:
+        sync.stop()
+
+
+def test_worker_start_derives_chart_8_even_when_the_copy_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    store.save_urpd(golden_urpd("all", "lin500", D), NOW)
+    # The next round is an hour away, so only what the worker does as it starts runs.
+    store.set_state(next_due=timestamp(datetime.now(UTC) + timedelta(hours=1)))
+    transport, calls = recorded(httpx.MockTransport(lambda request: httpx.Response(503)))
+    sync = sync_for(store, transport, NOW, history_budget=5, history_pause=0)
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("secret value 123")
+
+    monkeypatch.setattr(sync, "_urpd_history", boom)
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        started_and_stopped(sync, monkeypatch)
+
+    assert calls == []
+    # Only D, forming: the copy failed, the derive still ran.
+    result = payload(store)
+    assert result.status[-1] == "forming" and result.status.count("pending") == 1460
+    assert "onchain_urpd_history_failed code=history_failed" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_worker_start_leaves_a_stored_chart_8(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    plain, _ = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, plain, NOW) is True
+    store.set_state(next_due=timestamp(datetime.now(UTC) + timedelta(hours=1)))
+    transport, calls = recorded(httpx.MockTransport(lambda request: httpx.Response(503)))
+    started_and_stopped(sync_for(store, transport, NOW), monkeypatch)
+
+    # Chart 8 is still the one derived at NOW: a stored one is never derived again as it starts.
+    assert calls == []
+    derived = store.derived("costbasis_history")
+    assert derived is not None and derived[1] == NOW

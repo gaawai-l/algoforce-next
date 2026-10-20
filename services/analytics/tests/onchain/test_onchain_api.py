@@ -30,6 +30,7 @@ from sizes_fixture import golden_rows
 
 from wheelhouse_service import rules as rules_module
 from wheelhouse_service.http import create_app
+from wheelhouse_service.market import timestamp
 from wheelhouse_service.onchain import (
     api,
     costbasis,
@@ -2000,6 +2001,40 @@ def test_cost_basis_history_is_unavailable_without_a_payload(tmp_path: Path):
     assert (body["backfill_error"], body["last_error"]) == (None, None)
     assert (body["rules"], body["rules_pending"], body["refreshing"]) == ([], False, False)
     assert body["brk_version"] is None
+
+
+def test_worker_start_derives_chart_8_from_the_stored_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A store from before Chart 8: D is stored, Chart 8 is not, and the next round is an hour away.
+    path = tmp_path / "onchain.sqlite"
+    store = OnchainStore(path)
+    seed_history_sample(store)
+    store.set_state(next_due=timestamp(datetime.now(UTC) + timedelta(hours=1)))
+    assert store.derived("costbasis_history") is None
+    # The worker's first check whether a round is due comes after what it does as it starts.
+    checked = threading.Event()
+    run_once = OnchainSync.run_once
+
+    def first_check(self: OnchainSync, *, now: datetime | None = None) -> bool:
+        worked = run_once(self, now=now)
+        checked.set()
+        return worked
+
+    monkeypatch.setattr(OnchainSync, "run_once", first_check)
+    client, seen = blocked_client()
+    app = FastAPI()
+    app.include_router(create_router(path, client, rules=frozenset(), clock=lambda: SAMPLE_NOW))
+    with TestClient(app) as http:
+        assert checked.wait(5)
+        body = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+
+    # Derived from the store alone, before the round is due.
+    assert seen == []
+    assert store.derived("costbasis_history") is not None
+    assert (body["data_state"], body["reasons"]) == ("fresh", [])
+    assert body["latest_day"] == "2026-10-16" and len(body["days"]) == 30
+    assert Counter(body["status"]) == {"pending": 24, "absent": 1, "closed": 4, "forming": 1}
 
 
 @pytest.mark.parametrize(

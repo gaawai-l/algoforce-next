@@ -160,6 +160,7 @@ class OnchainSync:
         def loop() -> None:
             try:
                 self.rederive_if_rules_changed(datetime.now(UTC))
+                self.derive_history_if_missing(datetime.now(UTC))
             except Exception:
                 # Never log the exception: it may carry values. The next refresh derives anyway.
                 logger.error("onchain_rederive_failed")
@@ -196,6 +197,21 @@ class OnchainSync:
         self.store.set_state(next_due=timestamp(now))
         self.derive_from_store()
         return True
+
+    def derive_history_if_missing(self, now: datetime) -> None:
+        """Derive Chart 8 at `now` when D is stored but Chart 8 is not, as in a store from before
+        Chart 8, rather than at the next refresh, up to an hour away. BRK is never asked: what
+        `_urpd` holds is only copied."""
+        if self.store.derived("costbasis_history") is not None:
+            return
+        if self.store.latest_urpd(URPD_COHORT, URPD_AGG) is None:
+            return
+        try:
+            self._urpd_history(now, fetch=False)
+        except Exception:
+            # Never log the exception: it may carry values. A fixed code is enough here.
+            logger.warning("onchain_urpd_history_failed code=history_failed")
+        self._derive_history(now)
 
     def derive_from_store(self) -> None:
         """Derive every stored view again under `self.rules`, reading only the store.
