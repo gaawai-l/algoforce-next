@@ -335,7 +335,8 @@ export const costFlowSchema: z.ZodType<CostFlowView, z.ZodTypeDef, unknown> = z
       .object({
         // The four young groups, <1d to 1m–3m; Chart 4 reads one to four of them by the window.
         groups: z.array(z.array(z.number())).length(4),
-        band: z.array(z.number().int()),
+        // Each row's age floor: one of the twelve sold bands, 11 when price never traded there.
+        band: z.array(z.number().int().min(0).max(11)),
       })
       .nullable(),
     qc: z.array(z.string()),

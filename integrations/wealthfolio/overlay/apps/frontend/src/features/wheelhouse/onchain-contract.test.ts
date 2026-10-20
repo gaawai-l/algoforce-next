@@ -689,6 +689,19 @@ describe("on-chain cost-flow contract", () => {
         .success,
     ).toBe(false);
   });
+
+  // A row's age floor is one of the twelve sold bands, 0 to 11 (11: price never traded through
+  // it). Another value would leave its sold bar undrawn and its label "undefined", so it is
+  // refused.
+  it("refuses an age band outside the twelve sold bands", () => {
+    const age = s2.age;
+    expect(Math.min(...age.band)).toBe(0);
+    expect(Math.max(...age.band)).toBe(11);
+    for (const wrong of [-1, 12]) {
+      const band = [wrong, ...age.band.slice(1)];
+      expect(costFlowSchema.safeParse({ ...s2, age: { ...age, band } }).success).toBe(false);
+    }
+  });
 });
 
 describe("on-chain rules label", () => {
