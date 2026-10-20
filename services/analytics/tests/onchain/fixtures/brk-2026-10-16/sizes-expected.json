@@ -1,0 +1,759 @@
+{
+ "source": "Offline recompute from the 48 hour1_addrs_*.json files in this directory (BRK, fetched 2026-10-20T01:07Z, window 153338-155937), following the stage-A scripts verify/sr5/sr5_expected.py and sr6/chart6_oracle.py; rounding as the original page (toFixed(2) half up, Math.round). Not a reading of the original page.",
+ "last_at": "2026-10-16T09:00:00Z",
+ "no_block": [],
+ "bands": [
+  {
+   "band": "addrs_under_1k_sats",
+   "supply": 30.16,
+   "realized_cap": 1507256,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": 0.01,
+     "profit": 56,
+     "loss": 33
+    },
+    {
+     "window": "7d",
+     "supply_change": -0.01,
+     "profit": 2729,
+     "loss": 382
+    },
+    {
+     "window": "30d",
+     "supply_change": 0.16,
+     "profit": 6582,
+     "loss": 1797
+    },
+    {
+     "window": "90d",
+     "supply_change": 0.92,
+     "profit": 10434,
+     "loss": 5475
+    }
+   ]
+  },
+  {
+   "band": "addrs_1k_sats_to_10k_sats",
+   "supply": 505.13,
+   "realized_cap": 19936788,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": 0.03,
+     "profit": 2673,
+     "loss": 3203
+    },
+    {
+     "window": "7d",
+     "supply_change": 0.87,
+     "profit": 19774,
+     "loss": 10162
+    },
+    {
+     "window": "30d",
+     "supply_change": 2.49,
+     "profit": 110458,
+     "loss": 71945
+    },
+    {
+     "window": "90d",
+     "supply_change": 9.81,
+     "profit": 261379,
+     "loss": 228769
+    }
+   ]
+  },
+  {
+   "band": "addrs_10k_sats_to_100k_sats",
+   "supply": 5302.46,
+   "realized_cap": 239851207,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": 5.81,
+     "profit": 54280,
+     "loss": 34237
+    },
+    {
+     "window": "7d",
+     "supply_change": -5.31,
+     "profit": 590337,
+     "loss": 299056
+    },
+    {
+     "window": "30d",
+     "supply_change": 53.36,
+     "profit": 2893506,
+     "loss": 1055422
+    },
+    {
+     "window": "90d",
+     "supply_change": 27.29,
+     "profit": 8063006,
+     "loss": 4435193
+    }
+   ]
+  },
+  {
+   "band": "addrs_100k_sats_to_1m_sats",
+   "supply": 44948.3,
+   "realized_cap": 2031048813,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": 27.85,
+     "profit": 540307,
+     "loss": 287902
+    },
+    {
+     "window": "7d",
+     "supply_change": 68.18,
+     "profit": 4357167,
+     "loss": 2026031
+    },
+    {
+     "window": "30d",
+     "supply_change": 237.88,
+     "profit": 23419073,
+     "loss": 7688356
+    },
+    {
+     "window": "90d",
+     "supply_change": -8.46,
+     "profit": 60586754,
+     "loss": 38687794
+    }
+   ]
+  },
+  {
+   "band": "addrs_1m_sats_to_10m_sats",
+   "supply": 277990.36,
+   "realized_cap": 13543809215,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": 26.73,
+     "profit": 5799933,
+     "loss": 1507435
+    },
+    {
+     "window": "7d",
+     "supply_change": -7.78,
+     "profit": 48554121,
+     "loss": 11282066
+    },
+    {
+     "window": "30d",
+     "supply_change": 349.62,
+     "profit": 176425864,
+     "loss": 44063438
+    },
+    {
+     "window": "90d",
+     "supply_change": -5001.92,
+     "profit": 481487126,
+     "loss": 277808203
+    }
+   ]
+  },
+  {
+   "band": "addrs_10m_sats_to_1btc",
+   "supply": 1065525.75,
+   "realized_cap": 51686345674,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": -106.11,
+     "profit": 28501142,
+     "loss": 7118091
+    },
+    {
+     "window": "7d",
+     "supply_change": -2346.56,
+     "profit": 290916884,
+     "loss": 48897103
+    },
+    {
+     "window": "30d",
+     "supply_change": -2032.85,
+     "profit": 1005062485,
+     "loss": 168242801
+    },
+    {
+     "window": "90d",
+     "supply_change": -18727.82,
+     "profit": 2364740511,
+     "loss": 1176543874
+    }
+   ]
+  },
+  {
+   "band": "addrs_1btc_to_10btc",
+   "supply": 2038051.71,
+   "realized_cap": 101776604486,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": -196.26,
+     "profit": 52183021,
+     "loss": 24469383
+    },
+    {
+     "window": "7d",
+     "supply_change": -1881.68,
+     "profit": 402066443,
+     "loss": 155098656
+    },
+    {
+     "window": "30d",
+     "supply_change": -4766.44,
+     "profit": 1865460263,
+     "loss": 436004890
+    },
+    {
+     "window": "90d",
+     "supply_change": -14538.49,
+     "profit": 5066952843,
+     "loss": 2620168088
+    }
+   ]
+  },
+  {
+   "band": "addrs_10btc_to_100btc",
+   "supply": 4221026.0,
+   "realized_cap": 120075208781,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": -339.28,
+     "profit": 93808658,
+     "loss": 29725293
+    },
+    {
+     "window": "7d",
+     "supply_change": -1369.09,
+     "profit": 520395954,
+     "loss": 173398304
+    },
+    {
+     "window": "30d",
+     "supply_change": 2398.53,
+     "profit": 2438604029,
+     "loss": 646820494
+    },
+    {
+     "window": "90d",
+     "supply_change": -13872.88,
+     "profit": 6770117179,
+     "loss": 3371236583
+    }
+   ]
+  },
+  {
+   "band": "addrs_100btc_to_1k_btc",
+   "supply": 5266660.58,
+   "realized_cap": 357673071585,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": 856.94,
+     "profit": 141573803,
+     "loss": 105387681
+    },
+    {
+     "window": "7d",
+     "supply_change": 4645.9,
+     "profit": 691956994,
+     "loss": 500940147
+    },
+    {
+     "window": "30d",
+     "supply_change": 31138.19,
+     "profit": 4237312108,
+     "loss": 1792066763
+    },
+    {
+     "window": "90d",
+     "supply_change": 126878.18,
+     "profit": 9826493626,
+     "loss": 7329401790
+    }
+   ]
+  },
+  {
+   "band": "addrs_1k_btc_to_10k_btc",
+   "supply": 4204076.51,
+   "realized_cap": 263701829917,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": 300.47,
+     "profit": 126936839,
+     "loss": 85259934
+    },
+    {
+     "window": "7d",
+     "supply_change": 7490.59,
+     "profit": 832291753,
+     "loss": 440576481
+    },
+    {
+     "window": "30d",
+     "supply_change": 50763.65,
+     "profit": 6433787278,
+     "loss": 2414742135
+    },
+    {
+     "window": "90d",
+     "supply_change": -37604.14,
+     "profit": 14362507724,
+     "loss": 8413455060
+    }
+   ]
+  },
+  {
+   "band": "addrs_10k_btc_to_100k_btc",
+   "supply": 2275365.45,
+   "realized_cap": 122214165895,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": -6831.22,
+     "profit": 49616138,
+     "loss": 145611245
+    },
+    {
+     "window": "7d",
+     "supply_change": -9925.12,
+     "profit": 245869945,
+     "loss": 572156876
+    },
+    {
+     "window": "30d",
+     "supply_change": -16956.15,
+     "profit": 3837692078,
+     "loss": 2280133667
+    },
+    {
+     "window": "90d",
+     "supply_change": 7942.28,
+     "profit": 8630155968,
+     "loss": 5999820291
+    }
+   ]
+  },
+  {
+   "band": "addrs_over_100k_btc",
+   "supply": 696799.16,
+   "realized_cap": 49233147382,
+   "windows": [
+    {
+     "window": "1d",
+     "supply_change": 6711.27,
+     "profit": 0,
+     "loss": 0
+    },
+    {
+     "window": "7d",
+     "supply_change": 6711.27,
+     "profit": 0,
+     "loss": 0
+    },
+    {
+     "window": "30d",
+     "supply_change": -47341.57,
+     "profit": 725827714,
+     "loss": 111217218
+    },
+    {
+     "window": "90d",
+     "supply_change": -3979.64,
+     "profit": 957406175,
+     "loss": 111217218
+    }
+   ]
+  }
+ ],
+ "cut_at_155802": {
+  "last_at": "2026-10-10T18:00:00Z",
+  "no_block": [
+   "7d"
+  ],
+  "bands": [
+   {
+    "band": "addrs_under_1k_sats",
+    "supply": 30.17,
+    "realized_cap": 1505939,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": -0.0,
+      "profit": 75,
+      "loss": 197
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": 0.22,
+      "profit": 4464,
+      "loss": 1849
+     },
+     {
+      "window": "90d",
+      "supply_change": 0.97,
+      "profit": 7997,
+      "loss": 5727
+     }
+    ]
+   },
+   {
+    "band": "addrs_1k_sats_to_10k_sats",
+    "supply": 504.57,
+    "realized_cap": 19885544,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": 0.17,
+      "profit": 2258,
+      "loss": 893
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": 2.8,
+      "profit": 104837,
+      "loss": 70941
+     },
+     {
+      "window": "90d",
+      "supply_change": 8.64,
+      "profit": 253878,
+      "loss": 243598
+     }
+    ]
+   },
+   {
+    "band": "addrs_10k_sats_to_100k_sats",
+    "supply": 5316.91,
+    "realized_cap": 240823028,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": 4.03,
+      "profit": 55560,
+      "loss": 27011
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": 60.26,
+      "profit": 2782452,
+      "loss": 1151959
+     },
+     {
+      "window": "90d",
+      "supply_change": 38.77,
+      "profit": 8128486,
+      "loss": 4533271
+     }
+    ]
+   },
+   {
+    "band": "addrs_100k_sats_to_1m_sats",
+    "supply": 44903.92,
+    "realized_cap": 2025867129,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": 4.86,
+      "profit": 506978,
+      "loss": 254409
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": 189.3,
+      "profit": 22692072,
+      "loss": 8025403
+     },
+     {
+      "window": "90d",
+      "supply_change": -43.53,
+      "profit": 58884446,
+      "loss": 39586392
+     }
+    ]
+   },
+   {
+    "band": "addrs_1m_sats_to_10m_sats",
+    "supply": 277943.46,
+    "realized_cap": 13522442401,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": -50.84,
+      "profit": 5527144,
+      "loss": 1691147
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": 427.62,
+      "profit": 154782915,
+      "loss": 44275545
+     },
+     {
+      "window": "90d",
+      "supply_change": -4857.93,
+      "profit": 449951793,
+      "loss": 282339828
+     }
+    ]
+   },
+   {
+    "band": "addrs_10m_sats_to_1btc",
+    "supply": 1067591.71,
+    "realized_cap": 51639482298,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": -179.22,
+      "profit": 31732303,
+      "loss": 7085734
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": 591.61,
+      "profit": 836046771,
+      "loss": 165235830
+     },
+     {
+      "window": "90d",
+      "supply_change": -17327.71,
+      "profit": 2153655537,
+      "loss": 1221374232
+     }
+    ]
+   },
+   {
+    "band": "addrs_1btc_to_10btc",
+    "supply": 2039865.92,
+    "realized_cap": 101751882587,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": 88.6,
+      "profit": 52271399,
+      "loss": 12772051
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": -2164.86,
+      "profit": 1739016830,
+      "loss": 380767283
+     },
+     {
+      "window": "90d",
+      "supply_change": -14253.67,
+      "profit": 4840596825,
+      "loss": 2657352941
+     }
+    ]
+   },
+   {
+    "band": "addrs_10btc_to_100btc",
+    "supply": 4222898.18,
+    "realized_cap": 119931519643,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": 271.63,
+      "profit": 68259948,
+      "loss": 23421024
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": 3325.15,
+      "profit": 2290989810,
+      "loss": 640509440
+     },
+     {
+      "window": "90d",
+      "supply_change": -9064.62,
+      "profit": 6514694688,
+      "loss": 3688972833
+     }
+    ]
+   },
+   {
+    "band": "addrs_100btc_to_1k_btc",
+    "supply": 5261150.36,
+    "realized_cap": 357233467690,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": 626.44,
+      "profit": 195865533,
+      "loss": 13004766
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": 27059.88,
+      "profit": 4215688462,
+      "loss": 1684042694
+     },
+     {
+      "window": "90d",
+      "supply_change": 118244.66,
+      "profit": 9720688939,
+      "loss": 7743870075
+     }
+    ]
+   },
+   {
+    "band": "addrs_1k_btc_to_10k_btc",
+    "supply": 4194000.31,
+    "realized_cap": 262585987982,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": -2158.09,
+      "profit": 48662456,
+      "loss": 30570527
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": 37488.36,
+      "profit": 6048443355,
+      "loss": 2426965033
+     },
+     {
+      "window": "90d",
+      "supply_change": -66605.82,
+      "profit": 14571196943,
+      "loss": 9032649753
+     }
+    ]
+   },
+   {
+    "band": "addrs_10k_btc_to_100k_btc",
+    "supply": 2289222.55,
+    "realized_cap": 123615881038,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": 1829.93,
+      "profit": 11446423,
+      "loss": 5847958
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": -4753.71,
+      "profit": 3796368828,
+      "loss": 2225059155
+     },
+     {
+      "window": "90d",
+      "supply_change": 45391.88,
+      "profit": 8801363615,
+      "loss": 6045849844
+     }
+    ]
+   },
+   {
+    "band": "addrs_over_100k_btc",
+    "supply": 690087.9,
+    "realized_cap": 48693494071,
+    "windows": [
+     {
+      "window": "1d",
+      "supply_change": 0.0,
+      "profit": 0,
+      "loss": 0
+     },
+     {
+      "window": "7d",
+      "supply_change": null,
+      "profit": null,
+      "loss": null
+     },
+     {
+      "window": "30d",
+      "supply_change": -48429.7,
+      "profit": 725827714,
+      "loss": 111217218
+     },
+     {
+      "window": "90d",
+      "supply_change": -10690.91,
+      "profit": 957406175,
+      "loss": 1616559675
+     }
+    ]
+   }
+  ]
+ }
+}

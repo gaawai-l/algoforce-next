@@ -19,6 +19,7 @@ from .brk import (
     HOUR1_BACKFILL,
     HOUR1_SERIES,
     SELL_SIDE_SERIES,
+    SIZE_SERIES,
     START,
     URPD_AGG,
     URPD_COHORT,
@@ -43,6 +44,7 @@ from .levels import ModelLine, last_complete, model_lines
 from .models import closed_day, day_start, final_from
 from .pressure import V1_LOOKBACK, lookback, seller_pressure
 from .sellside import INPUTS, sell_side
+from .sizes import DEPTH, size_cohorts
 from .store import OnchainStore
 
 logger = logging.getLogger("wheelhouse.onchain")
@@ -69,7 +71,7 @@ IDLE_SECONDS = 30
 STOP_TIMEOUT_SECONDS = 25
 # The derived views: those from the day1 series and URPD, then the hour1 ones.
 DAY1_VIEWS: tuple[View, ...] = ("cycle", "levels", "costbasis", "costflow")
-VIEWS: tuple[View, ...] = (*DAY1_VIEWS, "pressure", "sellside", "agecohorts")
+VIEWS: tuple[View, ...] = (*DAY1_VIEWS, "pressure", "sellside", "agecohorts", "sizes")
 
 
 def next_slot(at: datetime) -> datetime:
@@ -171,8 +173,8 @@ class OnchainSync:
         """Derive every stored view again under `self.rules`, reading only the store.
 
         Each view keeps the time it was computed: the day1 ones the latest of theirs, which also
-        gives their closed day, the seller pressure its own and so do the age cohorts. A view group
-        with nothing stored is left alone.
+        gives their closed day, the seller pressure its own and so do the age cohorts and the sizes.
+        A view group with nothing stored is left alone.
         """
         stamps = [
             derived[1] for view in DAY1_VIEWS if (derived := self.store.derived(view)) is not None
@@ -189,6 +191,8 @@ class OnchainSync:
             self._derive_sell_side(hour1_missing, hour1_at)
         ages = self.store.derived("agecohorts")
         self._derive_age_cohorts(hour1_missing, ages[1] if ages else None)
+        sizes = self.store.derived("sizes")
+        self._derive_sizes(hour1_missing, sizes[1] if sizes else None)
 
     def _refresh(self, at: datetime, clock: Callable[[], datetime]) -> BrkError | None:
         """Run one refresh; return the error of an hour1 or URPD stage when only those failed."""
@@ -221,7 +225,7 @@ class OnchainSync:
         except BrkError as exc:
             hour1_error = exc
             # What a failed request could not tell stands as it was, and so does the pressure.
-            hour1_missing = self._stored_hour1_missing() - set(AGE_ONLY_SERIES)
+            hour1_missing = self._stored_hour1_missing() - set(AGE_ONLY_SERIES) - set(SIZE_SERIES)
 
         # The age cohorts' own series take several requests more, so they have a stage of their
         # own: when it fails, only the age-cohort chart stays as it was.
@@ -233,6 +237,19 @@ class OnchainSync:
             age_error = exc
             age_missing = self._stored_hour1_missing() & set(AGE_ONLY_SERIES)
         hour1_missing |= age_missing
+
+        # The size cohorts' 48 series likewise: when their stage fails, only the sizes stay as
+        # they were. They read no other stage's series, so they are as of this stage's end.
+        size_missing: set[str] = set()
+        size_error: BrkError | None = None
+        size_done: datetime | None = None
+        try:
+            self._increment(SIZE_SERIES, "hour1", at, size_missing)
+            size_done = clock()
+        except BrkError as exc:
+            size_error = exc
+            size_missing = self._stored_hour1_missing() & set(SIZE_SERIES)
+        hour1_missing |= size_missing
 
         urpd_error: BrkError | None = None
         try:
@@ -250,10 +267,11 @@ class OnchainSync:
         # The age cohorts read the first stage's series too: they are derived only when both stages
         # fetched, and are as of the first, like the pressure.
         self._derive_age_cohorts(hour1_missing, None if age_error else hour1_done)
+        self._derive_sizes(hour1_missing, size_done)
         absent = [name for name in DAY1_FETCH if name in missing | range_missing]
         absent_hour1 = [
             name
-            for name in (*HOUR1_SERIES, *SELL_SIDE_SERIES, *AGE_ONLY_SERIES)
+            for name in (*HOUR1_SERIES, *SELL_SIDE_SERIES, *AGE_ONLY_SERIES, *SIZE_SERIES)
             if name in hour1_missing
         ]
         # `price_close` is in both indexes, so day1 reasons keep their form and hour1 ones add it.
@@ -269,7 +287,9 @@ class OnchainSync:
             ),
             reasons=json.dumps(reasons),
         )
-        errors = [error for error in (hour1_error, age_error, urpd_error) if error is not None]
+        errors = [
+            error for error in (hour1_error, age_error, size_error, urpd_error) if error is not None
+        ]
         if errors:
             # Retrying soon is worth it when any one of the failed stages can be retried.
             return next((error for error in errors if error.retryable), errors[0])
@@ -651,6 +671,32 @@ class OnchainSync:
             self.store.clear_derived("agecohorts")
         else:
             self.store.save_derived("agecohorts", result.model_dump_json(), at)
+
+    def _derive_sizes(self, hour1_missing: set[str], size_at: datetime | None) -> None:
+        """Derive the size cohorts and stamp them `size_at`, like the sell side.
+
+        With `size_at` None the stored ones are kept as they are. With any of their series missing
+        there are none: an absent series is not a zero.
+        """
+        if size_at is None:
+            return
+        result = None
+        if not hour1_missing.intersection(SIZE_SERIES):
+            try:
+                result = size_cohorts(
+                    {
+                        name: self.store.read_series(name, "hour1", tail=DEPTH)
+                        for name in SIZE_SERIES
+                    }
+                )
+            except Exception:
+                # The other views and the run's state must not depend on the sizes. Never log the
+                # exception: it may carry values. A fixed code is enough here.
+                logger.warning("onchain_derive_failed code=sizes_failed")
+        if result is None:
+            self.store.clear_derived("sizes")
+        else:
+            self.store.save_derived("sizes", result.model_dump_json(), size_at)
 
     def _cost_basis(
         self, day: date, lines_as_of: date, lines: list[ModelLine], *, latest_day: date | None

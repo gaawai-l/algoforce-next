@@ -11,6 +11,7 @@ import httpx
 import pytest
 from onchain_fixture import (
     EPOCH,
+    FIXTURES,
     GOLDEN_DAYS,
     brk_transport,
     golden_urpd,
@@ -26,7 +27,9 @@ from wheelhouse_service.onchain.brk import (
     DAY1_SERIES,
     HOUR1_BACKFILL,
     HOUR1_SERIES,
+    MAX_SERIES_CHARS,
     SELL_SIDE_SERIES,
+    SIZE_SERIES,
     START,
     BrkClient,
     SeriesData,
@@ -39,6 +42,7 @@ from wheelhouse_service.onchain.levels import median_cost
 from wheelhouse_service.onchain.models import closed_day
 from wheelhouse_service.onchain.pressure import Pressure, lookback
 from wheelhouse_service.onchain.sellside import SellSide
+from wheelhouse_service.onchain.sizes import SizeCohorts
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import DAY1_FETCH, URPD_SET, OnchainSync, closed_days
 from wheelhouse_service.rules import Rules
@@ -49,8 +53,8 @@ LINES = {"true_mean", "short_term", "average", "long_term", "median"}
 GOLDEN = Path(__file__).parent / "fixtures" / "brk-2026-10-16T1829Z"
 D = date(2026, 10, 16)
 # Every hour1 series the sync fetches: the seller pressure's, then those only the sell side needs,
-# then, in a stage of their own, those only the age cohorts need.
-HOUR1 = (*HOUR1_SERIES, *SELL_SIDE_SERIES, *AGE_ONLY_SERIES)
+# then, in a stage of their own, those only the age cohorts need, and in another the size cohorts'.
+HOUR1 = (*HOUR1_SERIES, *SELL_SIDE_SERIES, *AGE_ONLY_SERIES, *SIZE_SERIES)
 
 
 def instant(value: str | None) -> datetime:
@@ -548,8 +552,8 @@ def test_first_run_backfills_hour1_from_minus_3000(tmp_path: Path):
     assert all(params["start"] == str(-HOUR1_BACKFILL) for params in hour1)
     assert requested(hour1) == set(HOUR1)
     # 3,000 points per series is over the weight cap past 6 series a request: the 29 series of the
-    # first stage take 5 requests, the 126 of the age cohorts' stage 21.
-    assert len(hour1) == 5 + 21
+    # first stage take 5 requests, the 126 of the age cohorts' stage 21, and the 48 size series 8.
+    assert len(hour1) == 5 + 21 + 8
     assert [store.last_position(name, "hour1") for name in HOUR1_SERIES] == [155937] * 11
     pressure = pressure_of(store)
     assert pressure.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
@@ -1300,6 +1304,304 @@ def test_age_cohorts_failure_still_derives_everything_else(
     assert state["last_error"] is None
     assert instant(state["last_success_at"]) == second
     assert "code=agecohorts_failed" in caplog.text
+    assert "secret" not in caplog.text
+
+
+# Every cell of the size cohorts, recomputed offline from the fixture files (see their README),
+# never from the code under test.
+EXPECTED = json.loads((FIXTURES / "sizes-expected.json").read_text())
+# Every view but the sizes.
+OTHER_VIEWS = ("cycle", "levels", "costbasis", "costflow", "pressure", "sellside", "agecohorts")
+
+
+def test_size_cohorts_are_derived_in_their_own_stage(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    assert run(store, transport, NOW) is True
+    derived = store.derived("sizes")
+    assert derived is not None and derived[1] == NOW
+    sizes = SizeCohorts.model_validate_json(derived[0])
+    assert sizes.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
+    assert sizes.rules == [] and sizes.no_block == []
+    # All 168 cells against the independent recompute.
+    assert [band.model_dump() for band in sizes.bands] == EXPECTED["bands"]
+
+
+def test_sizes_are_stamped_when_their_stage_finished(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport()
+    start = datetime(2026, 10, 16, 9, 12, tzinfo=UTC)
+    hour1_done = start + timedelta(minutes=1)
+    size_done = start + timedelta(minutes=2)
+    done = start + timedelta(minutes=3)
+    ticks = [start]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        names = bulk_names(request)
+        if names and request.url.params["index"] == "hour1":
+            ticks.append(size_done if names <= set(SIZE_SERIES) else hour1_done)
+        elif request.url.path.startswith("/api/urpd"):
+            ticks.append(done)
+        return inner.handler(request)
+
+    sync = sync_for(store, httpx.MockTransport(handler), start)
+    assert sync._refresh(start, lambda: ticks[-1]) is None
+
+    # The sizes read their own stage's series only, so they are as of that stage's end.
+    pressure, sizes = store.derived("pressure"), store.derived("sizes")
+    assert pressure is not None and pressure[1] == hour1_done
+    assert sizes is not None and sizes[1] == size_done
+
+
+def test_a_real_no_block_anchor_blanks_only_that_window(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    # Cut every size series after 155802 (2026-10-10 18:00Z): the 7d anchor is then 155634,
+    # 2026-10-03 18:00Z, a real hour without a block. 1d/30d/90d land on 155778, 155082, 153642.
+    with store.connection() as db:
+        db.executemany(
+            "DELETE FROM series WHERE series=? AND idx='hour1' AND position>155802",
+            [(name,) for name in SIZE_SERIES],
+        )
+    sync_for(store, brk_transport()[0], NOW).derive_from_store()
+    derived = store.derived("sizes")
+    assert derived is not None
+    sizes = SizeCohorts.model_validate_json(derived[0])
+    assert sizes.last_at == datetime(2026, 10, 10, 18, tzinfo=UTC)
+    assert sizes.no_block == ["7d"]
+    for band in sizes.bands:
+        week = band.windows[1]
+        assert (week.supply_change, week.profit, week.loss) == (None, None, None)
+        assert band.supply is not None and band.realized_cap is not None
+        assert all(
+            v is not None
+            for w in (band.windows[0], *band.windows[2:])
+            for v in (w.supply_change, w.profit, w.loss)
+        )
+    # And every cell against the independent recompute of that cut.
+    assert [band.model_dump() for band in sizes.bands] == EXPECTED["cut_at_155802"]["bands"]
+
+
+def test_sizes_read_deep_enough_for_a_series_that_runs_ahead(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    # Every size series but the first ends two hours early, so the newest hour all of them have
+    # is 07:00Z; the first still reaches 09:00Z and must be read back past its 90d anchor.
+    with store.connection() as db:
+        db.executemany(
+            "DELETE FROM series WHERE series=? AND idx='hour1' AND position>155935",
+            [(name,) for name in SIZE_SERIES[1:]],
+        )
+    sync_for(store, brk_transport()[0], NOW).derive_from_store()
+    derived = store.derived("sizes")
+    assert derived is not None
+    sizes = SizeCohorts.model_validate_json(derived[0])
+    assert sizes.last_at == datetime(2026, 10, 16, 7, tzinfo=UTC)
+    assert all(
+        v is not None
+        for band in sizes.bands
+        for w in band.windows
+        for v in (w.supply_change, w.profit, w.loss)
+    )
+
+
+def test_size_stage_failure_keeps_every_other_view(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    before = store.derived("sizes")
+    assert before is not None and before[1] == NOW
+
+    second = NOW + timedelta(hours=1)
+    assert run(store, failing_for(set(SIZE_SERIES)), second) is True
+
+    for kind in OTHER_VIEWS:
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == second, kind
+    # The sizes stay as they were, with the time they were computed.
+    assert store.derived("sizes") == before
+    state = store.state()
+    assert state["last_error"] == "brk_unavailable"
+    assert instant(state["next_due"]) == second + timedelta(minutes=5)
+    assert strings(state["reasons"]) == []
+
+
+def test_size_stage_failure_on_first_run_leaves_no_sizes(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    assert run(store, failing_for(set(SIZE_SERIES)), NOW) is True
+
+    assert store.derived("sizes") is None
+    assert store.derived("pressure") is not None
+
+
+def test_hour1_stage_failure_still_derives_sizes(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+
+    second = NOW + timedelta(hours=1)
+    assert run(store, failing_for({*HOUR1_SERIES, *SELL_SIDE_SERIES}), second) is True
+
+    # The size stage fetched, and the sizes read no other stage's series.
+    sizes, pressure = store.derived("sizes"), store.derived("pressure")
+    assert sizes is not None and sizes[1] == second
+    assert pressure is not None and pressure[1] == NOW
+
+
+def test_a_missing_size_series_clears_only_the_sizes(tmp_path: Path):
+    gap = "addrs_over_100k_btc_realized_cap"
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={gap})
+    assert run(store, partial, NOW) is True
+
+    state = store.state()
+    assert strings(state["missing_series"]) == [f"hour1:{gap}"]
+    assert strings(state["reasons"]) == [f"series_missing:hour1:{gap}"]
+    assert state["last_error"] is None
+    assert store.derived("sizes") is None
+    for kind in ("pressure", "sellside", "agecohorts"):
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == NOW, kind
+
+
+def test_a_size_series_gone_missing_clears_the_stored_sizes(tmp_path: Path):
+    gap = "addrs_over_100k_btc_realized_cap"
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("sizes") is not None
+
+    second = NOW + timedelta(hours=1)
+    partial, _ = brk_transport(missing={gap})
+    assert run(store, partial, second) is True
+
+    # Its rows of the first run are still stored, but an absent series is not a zero.
+    assert len(store.read_series(gap, "hour1")) == 2600
+    assert store.derived("sizes") is None
+    assert strings(store.state()["reasons"]) == [f"series_missing:hour1:{gap}"]
+    for kind in OTHER_VIEWS:
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == second, kind
+
+
+def test_stored_size_missing_survives_a_failed_size_stage(tmp_path: Path):
+    gap = SIZE_SERIES[5]
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={gap})
+    run(store, partial, NOW)
+
+    second = NOW + timedelta(hours=1)
+    assert run(store, failing_for(set(SIZE_SERIES)), second) is True
+
+    # Whether the series exists is not known from a failed request, so the last answer stands.
+    state = store.state()
+    assert strings(state["missing_series"]) == [f"hour1:{gap}"]
+    assert f"series_missing:hour1:{gap}" in strings(state["reasons"])
+    assert store.derived("sizes") is None
+
+
+def test_a_failed_size_stage_keeps_only_its_own_missing_series(tmp_path: Path):
+    side_gap = "lth_transfer_volume_in_loss_cumulative_usd"
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={side_gap, SIZE_SERIES[5]})
+    run(store, partial, NOW)
+
+    second = NOW + timedelta(hours=1)
+    assert run(store, failing_for(set(SIZE_SERIES)), second) is True
+
+    # The first stage found its series again; what the size stage last found missing stands.
+    assert strings(store.state()["missing_series"]) == [f"hour1:{SIZE_SERIES[5]}"]
+    sellside = store.derived("sellside")
+    assert sellside is not None and sellside[1] == second
+
+
+def test_a_successful_size_stage_clears_its_old_missing_entries_even_when_hour1_fails(
+    tmp_path: Path,
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={SIZE_SERIES[5]})
+    run(store, partial, NOW)
+
+    second = NOW + timedelta(hours=1)
+    assert run(store, failing_for({*HOUR1_SERIES, *SELL_SIDE_SERIES}), second) is True
+
+    state = store.state()
+    assert strings(state["missing_series"]) == []
+    assert strings(state["reasons"]) == []
+    sizes = store.derived("sizes")
+    assert sizes is not None and sizes[1] == second
+
+
+def test_size_requests_stay_under_the_url_limit(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, backfill_calls = brk_transport()
+    run(store, transport, NOW)
+    later = datetime(2026, 10, 16, 11, 30, tzinfo=UTC)
+    incremental, incremental_calls = brk_transport()
+    run(store, incremental, later)
+
+    def size_requests(calls: list[tuple[str, dict[str, str]]]) -> list[dict[str, str]]:
+        return [params for params in hour1_calls(calls) if "addrs_" in params["series"]]
+
+    backfill = size_requests(backfill_calls)
+    assert len(backfill) == 8
+    assert all(len(params["series"].split(",")) == 6 for params in backfill)
+    assert all(params["start"] == "-3000" for params in backfill)
+    increment = size_requests(incremental_calls)
+    assert len(increment) == 2
+    assert [name for params in increment for name in params["series"].split(",")] == list(
+        SIZE_SERIES
+    )
+    assert all(params["start"] == "155934" for params in increment)
+    assert all(len(params["series"]) <= MAX_SERIES_CHARS for params in backfill + increment)
+    # Why the hourly increment is split: all 48 names would not fit in one request.
+    assert len(",".join(SIZE_SERIES)) > MAX_SERIES_CHARS
+
+
+def test_derive_from_store_keeps_the_size_stamp(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    sync = sync_for(store, transport, NOW)
+    sync.run_once(now=NOW)
+    before = store.derived("sizes")
+    assert before is not None and before[1] == NOW
+
+    sync.derive_from_store()
+    assert store.derived("sizes") == before
+
+    # With nothing stored there is no time to stamp them with, so none are derived.
+    store.clear_derived("sizes")
+    sync.derive_from_store()
+    assert store.derived("sizes") is None
+
+
+def test_size_failure_still_derives_everything_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    assert store.derived("sizes") is not None
+
+    def boom(*args: object) -> None:
+        raise RuntimeError("secret value 123")
+
+    monkeypatch.setattr("wheelhouse_service.onchain.sync.size_cohorts", boom)
+    second = NOW + timedelta(hours=1)
+    again, _ = brk_transport()
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert run(store, again, second) is True
+
+    assert store.derived("sizes") is None
+    for kind in OTHER_VIEWS:
+        derived = store.derived(kind)
+        assert derived is not None and derived[1] == second, kind
+    state = store.state()
+    assert state["last_error"] is None
+    assert instant(state["last_success_at"]) == second
+    assert "code=sizes_failed" in caplog.text
     assert "secret" not in caplog.text
 
 
@@ -2061,11 +2363,11 @@ def test_o2_reaches_the_derived_pressure(tmp_path: Path, monkeypatch: pytest.Mon
     (v1, v1_lengths), (o2, o2_lengths) = derived(frozenset()), derived(o2_rules)
 
     # The pressure reads first; the sell side then reads its 25 series and the age cohorts their
-    # 139, both over the v1 lookback.
+    # 139, both over the v1 lookback, and the sizes their 48.
     pressure_v1, pressure_o2 = v1_lengths[: len(HOUR1_SERIES)], o2_lengths[: len(HOUR1_SERIES)]
     assert pressure_v1 == [lookback(frozenset()) + 1] * len(HOUR1_SERIES) == [2601] * 11
     assert pressure_o2 == [lookback(o2_rules) + 1] * len(HOUR1_SERIES) == [2882] * 11
-    assert len(v1_lengths) == len(o2_lengths) == 11 + 25 + 139
+    assert len(v1_lengths) == len(o2_lengths) == 11 + 25 + 139 + 48
     assert (v1.rules, o2.rules) == ([], ["O2"])
     assert v1.last_at == o2.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
     # Each point carries its own thresholds and level under O2 only.

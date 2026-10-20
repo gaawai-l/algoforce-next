@@ -5,7 +5,15 @@ from typing import Literal, get_args
 Rule = Literal["O1", "O2", "O3", "O4", "O5", "O6"]
 Rules = frozenset[Rule]
 View = Literal[
-    "cycle", "levels", "costbasis", "costflow", "pressure", "sellside", "agecohorts", "perps"
+    "cycle",
+    "levels",
+    "costbasis",
+    "costflow",
+    "pressure",
+    "sellside",
+    "agecohorts",
+    "perps",
+    "sizes",
 ]
 
 ALL_RULES: Rules = frozenset(get_args(Rule))
