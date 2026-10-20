@@ -112,7 +112,8 @@ AGE_ONLY_SERIES = tuple(
     name for name in AGE_SERIES if name not in {*HOUR1_SERIES, *SELL_SIDE_SERIES}
 )
 # The day1 range the age floor of Chart 4 scans for the last day price traded through each row.
-# Fetched with DAY1_SERIES but kept apart: one of them missing only takes Chart 4 down.
+# Requested on its own inside the day1 stage: it failing, or one of them missing, only takes
+# Chart 4 down.
 AGE_FLOOR_SERIES = ("price_high", "price_low")
 # First fill and full refetch of hour1 ask for the last N points (`start=-N`), never for `START`.
 HOUR1_BACKFILL = 3000
