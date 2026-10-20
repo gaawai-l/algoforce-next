@@ -2778,6 +2778,13 @@
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+/* A close whose neighbours have none: the line's colours, its case under the fill. */
+.wh-cbh-spot {
+  fill: #f4f7fb;
+  stroke: #05080d;
+  stroke-width: 1;
+  paint-order: stroke;
+}
 .wh-cbh-drag {
   fill: rgba(89, 230, 205, 0.08);
   stroke: var(--wh-cyan);
@@ -2826,6 +2833,8 @@
    grabbed; the focus ring goes on the moved handle. */
 .wh-cbh-track {
   position: relative;
+  /* Keeps the raised handle's z-index inside the track. */
+  isolation: isolate;
   flex: 0 1 160px;
   min-width: 120px;
   height: 32px;

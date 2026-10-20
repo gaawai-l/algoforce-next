@@ -119,20 +119,21 @@ function missingRuns(vis: Visible) {
 }
 
 // The spot line through each column's centre, broken where a day has no close and held to the
-// plot where the close is off the price axis (A:4100).
+// plot where the close is off the price axis (A:4100). A day with a close whose neighbours have
+// none has no segment to draw, so it is a dot.
 function spotPath(vis: Visible, f: ReturnType<typeof frame>) {
   let d = "";
-  let pen = false;
+  const dots: Point[] = [];
+  const has = (i: number) => i >= 0 && i < vis.close.length && vis.close[i] !== null;
   vis.close.forEach((close, i) => {
-    if (close === null) {
-      pen = false;
-      return;
-    }
-    const y = clamp(f.y(close), f.top, f.top + f.plotH);
-    d += `${pen ? "L" : "M"}${round(f.x(i))},${round(y)}`;
-    pen = true;
+    if (close === null) return;
+    const x = round(f.x(i));
+    const y = round(clamp(f.y(close), f.top, f.top + f.plotH));
+    if (has(i - 1)) d += `L${x},${y}`;
+    else if (has(i + 1)) d += `M${x},${y}`;
+    else dots.push({ x, y });
   });
-  return d;
+  return { d, dots };
 }
 
 function CbhPlot({
@@ -372,8 +373,11 @@ function CbhPlot({
             height={round(f.plotH)}
           />
         ) : null}
-        <path className="wh-cbh-price-case" d={spot} />
-        <path className="wh-cbh-price" d={spot} />
+        <path className="wh-cbh-price-case" d={spot.d} />
+        <path className="wh-cbh-price" d={spot.d} />
+        {spot.dots.map((dot) => (
+          <circle key={dot.x} className="wh-cbh-spot" cx={dot.x} cy={dot.y} r="1.5" />
+        ))}
         {reading ? (
           <>
             <line

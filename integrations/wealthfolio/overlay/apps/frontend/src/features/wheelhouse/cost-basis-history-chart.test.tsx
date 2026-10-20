@@ -215,6 +215,41 @@ it("hatches missing days and outlines the forming one", async () => {
   expect(status).toContain("the rest is still being fetched");
   expect(status).toContain("1 day has no snapshot at BRK");
   expect(status).toContain("The last column is today's snapshot, still forming");
+  // Every day with a close has a neighbour with one: no dots.
+  expect(svg().querySelectorAll("circle.wh-cbh-spot")).toHaveLength(0);
+});
+
+it("draws a dot for a day whose neighbours have no close", async () => {
+  // Days that stand alone, as D-7, D-30 and D-90 do after the first copy: the first day in view
+  // (given 10-08's snapshot), and, without 10-15 (column 28), 10-14 and the last day.
+  expect(sample.days[28]).toBe("2026-10-15");
+  const edited = <T,>(column: T[], start: T, dropped: T) =>
+    column.map((value, i) => (i === 0 ? start : i === 28 ? dropped : value));
+  show({
+    ...sample,
+    close: edited(sample.close, sample.close[21], null),
+    supply: edited(sample.supply, sample.supply[21], null),
+    status: edited(sample.status, "closed", "pending"),
+  });
+  await loaded();
+  // The line runs only where days join: 10-08 to 10-09.
+  const price = panel().querySelector("path.wh-cbh-price")!.getAttribute("d")!;
+  expect(price.match(/M/g)).toHaveLength(1);
+  expect(price.match(/L/g)).toHaveLength(1);
+  expect(price.startsWith("M")).toBe(true);
+  expect(Number(price.slice(1).split(",")[0])).toBeCloseTo(LEFT + 21.5 * COL, 1);
+  // Each lone day is a dot on its column's centre, at its close.
+  const dots = [...svg().querySelectorAll("circle.wh-cbh-spot")];
+  expect(dots.map((dot) => Number(dot.getAttribute("cx")))).toEqual(
+    [0, 27, 29].map((i) => expect.closeTo(LEFT + (i + 0.5) * COL, 1)),
+  );
+  const at = (close: number) => 10 + (304 * (126000 - close)) / 125000;
+  expect(dots.map((dot) => Number(dot.getAttribute("cy")))).toEqual(
+    [sample.close[21]!, sample.close[27]!, sample.close[29]!].map((close) =>
+      expect.closeTo(at(close), 1),
+    ),
+  );
+  for (const dot of dots) expect(dot.getAttribute("r")).toBe("1.5");
 });
 
 it("Range ±25 narrows the rows", async () => {
