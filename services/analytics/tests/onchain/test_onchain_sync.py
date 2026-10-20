@@ -2552,6 +2552,29 @@ def test_a_failed_daily_range_keeps_what_the_last_run_found_missing(tmp_path: Pa
     assert strings(state["reasons"]) == ["series_missing:price_high"]
 
 
+def test_a_failed_daily_range_keeps_only_the_range_from_the_last_run(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    partial, _ = brk_transport(missing={"price_close", "price_high"})
+    assert run(store, partial, NOW) is True
+    assert {"day1:price_close", "day1:price_high"} <= set(strings(store.state()["missing_series"]))
+
+    # This run's main day1 request gets price_close and the range request fails: only what the
+    # last run found of the range stands.
+    inner, _ = brk_transport()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if bulk_names(request) & {"price_high", "price_low"}:
+            return httpx.Response(503)
+        return inner.handler(request)
+
+    assert run(store, httpx.MockTransport(handler), NOW + timedelta(hours=1)) is True
+
+    state = store.state()
+    assert state["last_error"] is None
+    assert strings(state["missing_series"]) == ["day1:price_high"]
+    assert strings(state["reasons"]) == ["series_missing:price_high"]
+
+
 def test_missing_daily_range_only_takes_chart_4_down(tmp_path: Path):
     store = OnchainStore(tmp_path / "onchain.sqlite")
     # The golden sample, whose snapshots of D share one close: the P1 fixtures' do not, and

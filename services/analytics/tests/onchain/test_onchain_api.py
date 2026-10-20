@@ -9,6 +9,7 @@ import httpx
 import pytest
 from costflow_sample import (
     WHEELHOUSE,
+    _rows,
     crosscheck,
     render_sample_0512,
     render_sample_0604,
@@ -19,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from onchain_fixture import GOLDEN_DAYS, brk_transport, seed_golden
 
+from wheelhouse_service import rules as rules_module
 from wheelhouse_service.http import create_app
 from wheelhouse_service.onchain import api, costbasis, costflow, models
 from wheelhouse_service.onchain.api import create_router
@@ -1440,6 +1442,23 @@ def test_cost_flow_reasons_filtered(tmp_path: Path):
     ]
 
 
+def test_cost_flow_rules_pending_until_the_worker_derives_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "onchain.sqlite"
+    store_cost_flow(path, snapshot_at=FLOW_SYNC, computed_at=FLOW_SYNC)
+    # Were O1 to apply to the cost flow, the payload derived under no rule would be pending while
+    # a worker runs; the worker's thread itself is not started.
+    monkeypatch.setitem(rules_module.IMPLEMENTED, "costflow", frozenset({"O1"}))
+    monkeypatch.setattr(OnchainSync, "start", lambda self: None)
+    with TestClient(router_app(path, FLOW_READ, start_worker=True, rules=O1)) as http:
+        response = http.get(f"{PREFIX}/cost-flow")
+
+    assert response.status_code == 200
+    view = response.json()
+    assert (view["rules"], view["rules_pending"]) == ([], True)
+
+
 def test_cost_flow_reads_no_network(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     synced(tmp_path, at=FLOW_SYNC, urpd_dir=COSTFLOW)
 
@@ -1458,8 +1477,10 @@ def test_cost_flow_reads_no_network(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
     )
     with TestClient(app) as http:
-        view = http.get(f"{PREFIX}/cost-flow").json()
+        response = http.get(f"{PREFIX}/cost-flow")
 
+    assert response.status_code == 200
+    view = response.json()
     assert view["now_day"] == "2026-10-19"
     assert [grid["step"] for grid in view["grids"]] == [500, 200]
     assert seen == []
@@ -1489,6 +1510,37 @@ def mismatches(committed: Any, fresh: Any, at: str = "$") -> list[str]:
         elif committed == fresh:
             return []
     return [f"{at}: {committed!r} != {fresh!r}"]
+
+
+def test_mismatches_reports_a_number_beyond_a_relative_1e_12():
+    committed = {"sides": [{"h": 2000.0, "k": 1}]}
+
+    def moved(by: float) -> dict[str, Any]:
+        return {"sides": [{"h": 2000.0 * (1 + by), "k": 1}]}
+
+    assert mismatches(committed, moved(5e-13)) == []
+    for by in (2e-12, 1e-11):
+        assert mismatches(committed, moved(by)) == [
+            f"$.sides[0].h: 2000.0 != {2000.0 * (1 + by)!r}"
+        ]
+
+
+def test_sample_rows_trim_as_stage_a_does():
+    grids = {grid.step: grid for grid in sample_0512().stored.grids}
+    stage_a = json.loads((COSTFLOW / "expected_chart3.json").read_text())["views"]
+    # `_rows` draws All and STH, the holders of the crosscheck: STH on the $200 grid, All on the
+    # $500 one, both at Zoom All.
+    views = [v for v in stage_a if v["zoom"] == 0 and v["cohort"] in ("all", "sth")]
+    assert len(views) == 12
+    counts = {}
+    for view in views:
+        step = 200 if view["cohort"] == "sth" else 500
+        assert view["bin"] == step
+        rows = _rows(grids[step], view["win"], view["cohort"], view["aging"] == "on")
+        counts[(view["win"], view["cohort"], view["aging"])] = len(rows)
+    assert counts == {(v["win"], v["cohort"], v["aging"]): v["rows"] for v in views}
+    # 1d All draws no bar in its two highest buckets, which Zoom All trims.
+    assert counts[("1d", "all", "off")] == 250
 
 
 def test_samples_regenerate_identically(tmp_path: Path):

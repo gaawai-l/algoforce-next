@@ -665,8 +665,8 @@ describe("cost-flow chart 3 readings", () => {
     );
   });
 
-  // "all" is the whole supply and reads as a phrase of its own, as for a missing snapshot (the
-  // controller's wording for cycle.reason.urpdMismatchAll).
+  // "all" is the whole supply and reads as a phrase of its own, as for a missing snapshot: it has
+  // its own key, cycle.reason.urpdMismatchAll, like cycle.reason.urpdMissingAll.
   it("names the all-holder snapshot mismatch", () => {
     expect(reasonText(en, "urpd_mismatch:all:lin200")).toBe(
       "The all-holder $200 snapshot is from another block; not used",

@@ -183,7 +183,7 @@ const meta4 = () => table("clusters", chart4()).querySelector(".wh-cf-fit-meta")
 // The bars of one legend row: a bought group's ("a<g>") or a sold band's ("s<band>").
 const barsOf = (key: string) =>
   svg4()!.querySelectorAll(
-    `.wh-cf-bar--${key[0] === "a" ? "bought" : "sold"}.wh-cf-age-${key.slice(1)}`,
+    `.wh-cf-bar--${key.startsWith("a") ? "bought" : "sold"}.wh-cf-age-${key.slice(1)}`,
   );
 // The rows Chart 4 draws for a window and zoom of S2.
 const rows4 = (w: "1d" | "7d" | "30d" | "90d", z: 0 | 50 | 25 | 10) => {
@@ -839,6 +839,34 @@ it("says the flows are unavailable without inventing numbers", async () => {
   );
   expect(screen.getByText("Loading the cost-basis flows…")).toBeTruthy();
   expect(container.textContent ?? "").not.toMatch(/\d/);
+});
+
+it("says the flows are unavailable when the request fails, also over older data", async () => {
+  const drawsNothing = () => {
+    expect(screen.getByText("Cost-basis flows unavailable")).toBeTruthy();
+    expect(document.querySelector("svg")).toBeNull();
+    expect(document.querySelector(".wh-cf-legend")).toBeNull();
+    expect(document.querySelectorAll(".wh-seller-key b")).toHaveLength(0);
+  };
+  mocks.costFlow.mockRejectedValue(new Error("HTTP 502"));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <CostFlowCharts />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Cost-basis flows unavailable");
+  drawsNothing();
+  cleanup();
+
+  // A poll that fails after a good one: the older charts must not stay up looking current.
+  const shown = show();
+  await screen.findByText(TITLE3);
+  expect(svg3()).not.toBeNull();
+  mocks.costFlow.mockRejectedValue(new Error("HTTP 502"));
+  await act(() => shown.client.refetchQueries({ queryKey: ["wh", "onchain", "cost-flow"] }));
+  await screen.findByText("Cost-basis flows unavailable");
+  drawsNothing();
 });
 
 it("does not refit when an option already on is picked again", async () => {

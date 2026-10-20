@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getCostBasis,
+  getCostFlow,
   getOnchainCycle,
   getOnchainLevels,
   getPerpStates,
@@ -8,6 +9,7 @@ import {
   getSellerPressure,
   getServiceStatus,
 } from "./client";
+import costFlowSample from "./cost-flow-sample.json";
 import {
   costBasisSample,
   cycleSample,
@@ -212,10 +214,18 @@ describe("on-chain client", () => {
     await expect(getSellerPressure()).rejects.toThrow("incompatible");
   });
 
-  it("reads the cost basis from the read-only endpoint", async () => {
+  it("reads the cost basis and the cost flow from the read-only endpoints", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(new Response(JSON.stringify(costBasisSample)));
+      .mockImplementation((url: string) =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify(
+              url.endsWith("/cost-flow") ? costFlowSample : costBasisSample,
+            ),
+          ),
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
     const view = await getCostBasis(new AbortController().signal);
     expect(view.data_state).toBe("fresh");
@@ -223,8 +233,11 @@ describe("on-chain client", () => {
       200, 500, 1000,
     ]);
     expect(view.buckets[1].resistance).toEqual([86000, 88000, 96000, 104000]);
+    const flow = await getCostFlow(new AbortController().signal);
+    expect(flow.now_day).toBe("2026-10-19");
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       "/api/wheelhouse/v1/onchain/cost-basis",
+      "/api/wheelhouse/v1/onchain/cost-flow",
     ]);
   });
 
