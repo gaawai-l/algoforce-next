@@ -258,6 +258,22 @@ it("places bars, ticks and labels as the original", async () => {
     "wh-sc-bar wh-sc-bar--pos",
     "wh-sc-bar wh-sc-bar--neg",
   ]);
+  // The longest bar negative: at 90d as % of band, Retail's −1.732% (page-recorded, SR-5.md). Its
+  // tip is 0.12 / 2.24 of the plot from the left, at 21.32, so 7px left of it the 7-character label
+  // would run into "Retail" (the final review's M1): it goes inside the bar's end instead. Small's
+  // shorter −0.437% keeps its label outside.
+  pick("supply", "Window", "90d");
+  pick("supply", "Scale", "% of band");
+  expect(values("supply")).toEqual(expected.supply[7].labels);
+  const [, , small, retail] = [...bars("supply")];
+  const [, , smallLabel, retailLabel] = [...panel("supply").querySelectorAll(".wh-sc-val")];
+  expect(num(retail, "x")).toBeCloseTo(21.32, 2);
+  expect(num(retailLabel, "x")).toBeCloseTo(28.32, 2);
+  expect(retailLabel.getAttribute("text-anchor")).toBe("start");
+  expect(retailLabel.getAttribute("class")).toBe("wh-sc-val wh-sc-val--in");
+  expect(num(smallLabel, "x")).toBeCloseTo(num(small, "x") - 7, 1);
+  expect(smallLabel.getAttribute("text-anchor")).toBe("end");
+  expect(smallLabel.getAttribute("class")).toBe("wh-sc-val");
 });
 
 // Source: page-recorded (SR-5.md:22, the twelve band names; SR-6.md:23-26, the % labels).

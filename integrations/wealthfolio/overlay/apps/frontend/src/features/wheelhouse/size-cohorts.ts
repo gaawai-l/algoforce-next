@@ -269,6 +269,36 @@ export function usdTip(v: number) {
 // A bar's label, "—" when its value is missing.
 export const valueLabel = (value: number | null, fmt: (v: number) => string) =>
   value == null ? DASH : fmt(value);
+
+// What a value label (11px JetBrains Mono) is taken to be wide: 6.6px a character.
+export const LABEL_CHAR_PX = 6.6;
+
+export interface LabelSpot {
+  x: number;
+  anchor: "start" | "end";
+  inside: boolean; // over the bar's end rather than past its tip
+}
+
+// Where a row's value label goes (A:2092-2100, A:2296-2307): 7px past the bar's tip, left of a
+// negative one; just right of the zero line when the value is missing; Gross parks every label at
+// plotW + 12. One departure: in the wide layout the row's name ends at x = −10 on the same line,
+// so a negative label that would start left of −6 goes inside the bar's end instead. A positive
+// label has no such neighbour: past the longest bar's tip lie 0.12 / 2.24 of the plot and the
+// 158px margin, over 150px less the 7px gap, room for more than 20 characters.
+export function labelSpot(
+  value: number | null,
+  label: string,
+  x: (v: number) => number,
+  frame: { plotW: number; gross: boolean; compact: boolean },
+): LabelSpot {
+  if (frame.gross) return { x: frame.plotW + 12, anchor: "start", inside: false };
+  if (value === null) return { x: x(0) + 7, anchor: "start", inside: false };
+  const tip = x(value);
+  if (value >= 0) return { x: tip + 7, anchor: "start", inside: false };
+  if (!frame.compact && tip - 7 - label.length * LABEL_CHAR_PX < -6)
+    return { x: tip + 7, anchor: "start", inside: true };
+  return { x: tip - 7, anchor: "end", inside: false };
+}
 // An axis tick's label: "0" at zero, else the bar labels' format (A:2102, A:2244).
 export const tickLabel = (v: number, fmt: (v: number) => string) => (v === 0 ? "0" : fmt(v));
 

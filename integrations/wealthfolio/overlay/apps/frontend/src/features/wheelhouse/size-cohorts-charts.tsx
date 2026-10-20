@@ -13,6 +13,7 @@ import {
   axis,
   band,
   cohortRows,
+  labelSpot,
   layout,
   pnlLabel,
   pnlLegend,
@@ -193,23 +194,17 @@ function DivergingBars({
         ))}
         {scale ? <line className="wh-sc-zero" x1={x(0)} x2={x(0)} y1={0} y2={plotH} /> : null}
         {rows.map((row, i) => {
-          // Gross parks every label in the right margin; Net and Chart 5 put it past the bar's
-          // tip, a missing one just right of the zero line.
-          const left = !gross && row.value !== null && row.value < 0;
-          const labelX = gross
-            ? plotW + 12
-            : row.value === null
-              ? x(0) + 7
-              : x(row.value) + (left ? -7 : 7);
+          const label = valueLabel(row.value, fmt);
+          const spot = labelSpot(row.value, label, x, { plotW, gross, compact: frame.compact });
           return (
             <text
               key={row.key}
-              className="wh-sc-val"
-              x={round(labelX)}
+              className={spot.inside ? "wh-sc-val wh-sc-val--in" : "wh-sc-val"}
+              x={round(spot.x)}
               y={middle(i)}
-              textAnchor={left ? "end" : "start"}
+              textAnchor={spot.anchor}
             >
-              {valueLabel(row.value, fmt)}
+              {label}
             </text>
           );
         })}

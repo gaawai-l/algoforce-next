@@ -12,11 +12,13 @@ import { ticks } from "./sell-side";
 import {
   DASH,
   GROUPS,
+  LABEL_CHAR_PX,
   PNL_DEFAULT,
   SUPPLY_DEFAULT,
   axis,
   band,
   cohortRows,
+  labelSpot,
   layout,
   pnlLabel,
   pnlLegend,
@@ -559,5 +561,52 @@ describe("geometry", () => {
     expect(rows.step).toBeCloseTo(69.15888, 4);
     expect(rows.start).toBeCloseTo(19.36449, 4);
     expect(rows.width).toBeCloseTo(49.79439, 4);
+  });
+
+  // Source: the final review's M1 and the controller's ruling. The original puts a negative label
+  // 7px left of the tip, end-anchored (A:2092-2100); the row's name ends at x = −10 on the same
+  // line, so a label that would start left of −6 (6.6px a character) goes inside the bar's end,
+  // start-anchored at the tip + 7. The rows are Chart 5's Bands at 7d as the original drew them at
+  // 2026-10-20 03:00Z (SR5-6-VERIFICATION §5): −15,237 BTC is the longest bar. The axis is
+  // ±1.12 × that, so its tip sits 0.12 / 2.24 of the plot from the left.
+  it("moves a wide label that would run into its row's name inside the bar", () => {
+    const values = [6711, -15237, 14806, 2371, -1393, -1231, -2958, 162, 106, -0.4, 0, 0];
+    const rows: PlotRow[] = values.map((v, i) => ({
+      key: view.bands[values.length - 1 - i].band as BandKey,
+      group: false,
+      bars: [{ v, pos: v >= 0 }],
+      value: v,
+    }));
+    const spot = (width: number, v: number | null, gross = false) => {
+      const frame = layout(width, rows.length);
+      const plotW = width - frame.left - frame.right;
+      const scale = axis(rows, frame.ticks)!;
+      // The chart's x: the value's place on the axis over the plot, to 0.01px.
+      const x = (u: number) =>
+        Math.round(((u - scale.lo) / (scale.hi - scale.lo)) * plotW * 100) / 100;
+      return labelSpot(v, valueLabel(v, btc), x, { plotW, gross, compact: frame.compact });
+    };
+    const at = (x: number, anchor: string, inside: boolean) => ({
+      x: expect.closeTo(x, 2),
+      anchor,
+      inside,
+    });
+    expect(LABEL_CHAR_PX).toBe(6.6);
+    // 720px: plot 398, the tip at 21.32; "−15,237" is 7 × 6.6 = 46.2px wide, so it would start at
+    // 21.32 − 7 − 46.2 = −31.88.
+    expect(spot(720, -15237)).toEqual(at(28.32, "start", true));
+    // A shorter negative bar keeps its label outside: −2,958's tip is at 164.51.
+    expect(spot(720, -2958)).toEqual(at(157.51, "end", false));
+    // A positive label, a missing one and Gross's are where the original puts them.
+    expect(spot(720, 14806)).toEqual(at(378.65, "start", false));
+    expect(spot(720, null)).toEqual(at(206, "start", false));
+    expect(spot(720, -15237, true)).toEqual(at(410, "start", false));
+    // 1,160px: plot 838, the tip at 44.89, the label would start at −8.31.
+    expect(spot(1160, -15237)).toEqual(at(51.89, "start", true));
+    // 1,280px: plot 958, the tip at 51.32, the label starts at −1.88: room enough outside.
+    expect(spot(1280, -15237)).toEqual(at(44.32, "end", false));
+    // The narrow layout writes the names above the bars, so its labels stay outside: at 390px the
+    // plot is 270 and the tip at 14.46.
+    expect(spot(390, -15237)).toEqual(at(7.46, "end", false));
   });
 });
