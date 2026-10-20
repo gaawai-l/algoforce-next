@@ -80,7 +80,14 @@ IDLE_SECONDS = 30
 STOP_TIMEOUT_SECONDS = 25
 # The derived views: those from the day1 series and URPD, then the hour1 ones.
 DAY1_VIEWS: tuple[View, ...] = ("cycle", "levels", "costbasis", "costflow")
-VIEWS: tuple[View, ...] = (*DAY1_VIEWS, "pressure", "sellside", "agecohorts", "sizes")
+VIEWS: tuple[View, ...] = (
+    *DAY1_VIEWS,
+    "pressure",
+    "sellside",
+    "agecohorts",
+    "sizes",
+    "costbasis_history",
+)
 
 
 def next_slot(at: datetime) -> datetime:
@@ -194,8 +201,8 @@ class OnchainSync:
         """Derive every stored view again under `self.rules`, reading only the store.
 
         Each view keeps the time it was computed: the day1 ones the latest of theirs, which also
-        gives their closed day, the seller pressure its own and so do the age cohorts and the sizes.
-        A view group with nothing stored is left alone.
+        gives their closed day, the seller pressure its own and so do the age cohorts, the sizes
+        and Chart 8. A view group with nothing stored is left alone.
         """
         stamps = [
             derived[1] for view in DAY1_VIEWS if (derived := self.store.derived(view)) is not None
@@ -214,6 +221,9 @@ class OnchainSync:
         self._derive_age_cohorts(hour1_missing, ages[1] if ages else None)
         sizes = self.store.derived("sizes")
         self._derive_sizes(hour1_missing, sizes[1] if sizes else None)
+        history = self.store.derived("costbasis_history")
+        if history is not None:
+            self._derive_history(history[1])
 
     def _refresh(self, at: datetime, clock: Callable[[], datetime]) -> BrkError | None:
         """Run one refresh; return the error of an hour1 or URPD stage when only those failed."""

@@ -3627,3 +3627,35 @@ def test_history_copy_replaces_an_absent_row(tmp_path: Path):
 
     row = history_of(store)[week]
     assert row.close == golden_urpd("all", "lin500", week).close and row.fetched_at == NOW
+
+
+def test_derive_from_store_rederives_chart_8_without_brk(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    plain, _ = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, plain, NOW) is True
+    before = payload(store)
+    stamped = store.derived("costbasis_history")
+    assert stamped is not None and stamped[1] == NOW
+    # What the store holds changes after the round: a backfill error, and a pending day BRK had no
+    # snapshot of.
+    gone = date(2026, 10, 1)
+    assert before.status[before.days.index(gone)] == "pending" and before.backfill_error is None
+    store.set_state(history_error="brk_unavailable")
+    store.save_urpd_history_absent(gone, NOW)
+
+    later = NOW + timedelta(hours=3)
+    transport, calls = recorded(httpx.MockTransport(lambda request: httpx.Response(503)))
+    sync_for(store, transport, later).derive_from_store()
+
+    assert calls == []
+    after = payload(store)
+    assert after.status[after.days.index(gone)] == "absent"
+    assert after.backfill_error == "brk_unavailable"
+    # Chart 8 keeps the time it was computed, as the other views do.
+    derived = store.derived("costbasis_history")
+    assert derived is not None and derived[1] == NOW
+
+    # With nothing stored there is no time to stamp it with, so it is not derived.
+    store.clear_derived("costbasis_history")
+    sync_for(store, transport, later).derive_from_store()
+    assert store.derived("costbasis_history") is None and calls == []
