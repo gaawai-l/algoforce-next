@@ -214,7 +214,7 @@
 ## 6. 遗留
 
 终审修复轮之后仍留下的项：
-- 中文三栏说明里用了英文的控件名（`costflow.c3.how`、`costflow.c3.shows`），与全部三栏说明的中英文措辞一起交用户审；
+- 中文三栏说明里用了英文的控件名（如 `costflow.c3.how`、`c3.shows`、`c4.how`、`c4.implies`），与全部三栏说明的中英文措辞一起交用户审；
 - 仓库原有的 Starlette/httpx 弃用警告，与本功能无关；
 - 终审 M6 的小处重复（`stackBars` 与 `stackAge`、重复查 `then_day`、`MONTHS`、`COHORTS`），按外科手术原则有意不改；
 - 终审 T7-M7 的 Flows 切换条两行时的边框：4 个按钮时一行放得下，等第 5 个子视图加入时再查。
