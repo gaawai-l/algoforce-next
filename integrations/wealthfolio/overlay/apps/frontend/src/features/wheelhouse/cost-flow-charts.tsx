@@ -1396,10 +1396,13 @@ export function CostFlowCharts() {
   return (
     <div className="wh-seller wh-costflow">
       <p className="wh-seller-meta">
-        {text("costflow.meta", {
-          day: dayLabel(data.snapshot_at) ?? missing,
-          time: timeLabel(data.snapshot_at) ?? missing,
-        })}
+        {/* The snapshot's day, D: fetched after D ended, it is D's close, not the fetch's day. */}
+        {data.forming_at
+          ? text("costflow.meta", {
+              day: dayLabel(data.now_day) ?? missing,
+              time: timeLabel(data.snapshot_at) ?? missing,
+            })
+          : text("costflow.metaClosed", { day: dayLabel(data.now_day) ?? missing })}
       </p>
       {data.forming_at ? (
         <p className="wh-seller-meta">

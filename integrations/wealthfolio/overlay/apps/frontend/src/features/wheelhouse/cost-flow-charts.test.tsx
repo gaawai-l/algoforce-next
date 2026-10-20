@@ -787,6 +787,15 @@ it("marks the forming snapshot by its day", async () => {
   expect(screen.queryByText(/forming snapshot/)).toBeNull();
 });
 
+// At 00:12 BRK may not have the new day's snapshot yet, so D is the day before, fetched closed.
+it("dates the header by the snapshot day, not the day it was fetched", async () => {
+  show({ ...s1, snapshot_at: "2026-10-20T00:12:00Z", forming_at: null });
+  await screen.findByText(TITLE3);
+  const header = document.querySelector(".wh-costflow > .wh-seller-meta")!;
+  expect(header.textContent).toBe("URPD snapshot 19 Oct 2026 close · Source Bitcoin Research Kit");
+  expect(chart3().querySelector(".wh-cf-span")!.textContent).toBe("30d · 19 Sep close → 19 Oct close");
+});
+
 it("warns when the snapshot is out of date or fails QC", async () => {
   show({
     ...s2,

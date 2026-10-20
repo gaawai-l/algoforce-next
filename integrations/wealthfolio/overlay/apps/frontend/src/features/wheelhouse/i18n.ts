@@ -825,6 +825,7 @@ const en = {
   "costflow.unavailable": "Cost-basis flows unavailable",
   "costflow.meta":
     "URPD snapshot {{day}} · {{time}} UTC · Source Bitcoin Research Kit",
+  "costflow.metaClosed": "URPD snapshot {{day}} close · Source Bitcoin Research Kit",
   "costflow.forming": "includes the forming snapshot of {{day}}",
   "costflow.stale": "Snapshot out of date · {{day}}",
   "costflow.spanForming": "{{window}} · {{then}} close → {{day}} {{time}} UTC",
@@ -1683,6 +1684,7 @@ const zh: Record<MessageKey, string> = {
   "costflow.loading": "正在加载成本价买卖分布…",
   "costflow.unavailable": "成本价买卖分布不可用",
   "costflow.meta": "URPD 快照 {{day}} · {{time}} UTC · 来源 Bitcoin Research Kit",
+  "costflow.metaClosed": "URPD 快照 {{day}} 收盘 · 来源 Bitcoin Research Kit",
   "costflow.forming": "含 {{day}} 尚未收盘的快照",
   "costflow.stale": "快照已过期 · {{day}}",
   "costflow.spanForming": "{{window}} · {{then}} 收盘 → {{day}} {{time}} UTC",
