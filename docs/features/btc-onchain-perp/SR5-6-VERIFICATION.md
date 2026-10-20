@@ -2,7 +2,7 @@
 
 日期：2026-10-20。分支 `claude/size-cohorts`（从 main f304735 新建），范围见 [PLAN-SR5-6](PLAN-SR5-6.md)：state-report 图 5（Net Supply Change By Size Cohorts）和图 6（Net Realized Profit & Loss By Size Cohorts），界面在 Flows → Size cohorts（`flow=sizes`）。规则见 [SPEC.md](SPEC.md) 的"规模分组"一节。
 
-本文件是骨架：第 1、2 节和第 3 节的请求数已按任务报告与评审填入；第 3 节的库体积、第 4 节浏览器、第 5 节实时对照由 controller 在 Task 7 填写，标"待 controller 填写"。
+第 1、2 节和第 3 节的请求数按任务报告与评审填写；第 3 节的库体积、第 4 节浏览器、第 5 节实时对照由 controller 在 Task 7 实测填写（2026-10-20）。
 
 提交：
 - Task 1：`9aaaa83`、`bc3fa22`（纯计算 `sizes.py`、原站黄金样本、`SIZE_SERIES`；后一个只补测试和文档）；
@@ -89,50 +89,63 @@ fixture：`services/analytics/tests/onchain/fixtures/brk-2026-10-16/hour1_addrs_
 | 首次回填 | 8 次 | 每次 6 条、`start=-3000`，每片 `series` 最长 273 字符 |
 | 增量（每小时） | 2 次 | 47 + 1 个名字，较长的一次约 1,970 字符；48 个名字拼起来是 2,003 字符，大于 `MAX_SERIES_CHARS`（2,000），所以必须拆 |
 
-**controller 的验证实例**（首轮实时同步，含 size 回填）：
-- 同步用时约 22.6 s；
-- `/onchain/size-cohorts` 返回 fresh，`last_at` 为 2026-10-20 03:00 UTC，12 档，`no_block` 为 `[]`；
-- forming 状态：待 controller 填写。
+**controller 的验证实例**
 
-**库体积**：待 controller 填写。
+实例配置：分支 `claude/size-cohorts` @1278897，analytics 起在 8797（`WHEELHOUSE_RULES=v1`、`WHEELHOUSE_PERPS=off`，数据目录是主检出 `onchain.sqlite` 的备份副本），overlay 起在 1430。
+
+- **首轮实时同步（含 size 回填）**：用时约 22.6 s，之后每轮 17–19 s。
+- **`/onchain/size-cohorts` 返回**：fresh，`last_at` 2026-10-20 03:00 UTC。
+  - `forming_at` 也是 03:00，页头写 "includes the forming hour"；
+  - 12 档，`no_block` 为 `[]`。
+
+**库体积**
 
 | 项目 | 回填前 | 回填后 |
 |---|---|---|
-| `series` 表行数 | 待 controller 填写 | 待 controller 填写（设计值：首次回填新增 48 × 3,000 = 144,000 行） |
-| `.local/analytics/onchain.sqlite` 体积 | 待 controller 填写 | 待 controller 填写 |
+| `series` 表中 `addrs_*` 的行数 | 0 | 144,000（= 48 × 3,000，与设计值一致） |
+| 验证实例 `onchain.sqlite` 体积 | 63,545,344 B（10-19 23:18 UTC 的副本） | 80,838,656 B（10-20 03:58 UTC） |
+
+注：体积的差值不全是 size 回填。还包括这几小时里图 3/4 的输入（年龄快照、日高低价）以及各 hour1 序列的正常增长，所以只能作为上限参考。
 
 之后每天新增 48 × 24 = 1,152 行（hour1 不裁剪）。
 
 ## 4. 浏览器检查
 
-待 controller 填写。检查方法同 SR3-4：1440 px 直接在全宽窗口下检查；390 px 用真实点击打开 390 宽的同源弹窗，再读它的 DOM。en、zh 各做一遍。
+2026-10-20 03:31–03:58 UTC 检查。
+- 宽屏：自动化窗口是全屏的 2,056 px，`resize_window` 无效，所以直接在全宽下检查。
+- 390 px：用真实点击打开 390 宽的同源弹窗，再读它的 DOM。
 
-| 项目 | 1440 px | 390 px |
+| 项目 | 宽屏（2,056 px） | 390 px |
 |---|---|---|
-| 打开 `/market-intelligence?symbol=BTCUSDT&method=flows&flow=sizes` | 待 controller 填写 | 待 controller 填写 |
-| 图 5 默认：7d / Entities / BTC；行序（最大在上）、标签、图例、x 轴（宽版 7 个刻度，窄版 3 个） | 待 controller 填写 | 待 controller 填写 |
-| 图 6 默认：7d / Entities / Gross / USD；净额竖线与 `net` 列头、图例 | 待 controller 填写 | 待 controller 填写 |
-| 4 组控件逐个切换：Window、Breakdown、Scale、View（图 6 的按钮顺序为 Net、Gross） | 待 controller 填写 | 待 controller 填写 |
-| 键盘读数：聚焦图后 ↑ / ↓ / Home / End / Esc；焦点环可见 | 待 controller 填写 | 待 controller 填写 |
-| 5 个子视图按钮的排列 | 待 controller 填写 | 待 controller 填写：换行、无截断；并看 SR3-4 遗留的 T7-M7（两行时的边框） |
-| 窄屏版式：行标签在条上方不压条；12 档 Gross 的 `−$211.6M` 等标签在 64 px 右边距内放得下（真实字体）；两侧小字换行 | — | 待 controller 填写 |
-| 三栏说明 | 待 controller 填写 | 待 controller 填写：纵向全部展开 |
-| `scrollWidth` | 待 controller 填写 | 待 controller 填写（应为 390） |
-| zh：全部文字为中文 | 待 controller 填写 | 待 controller 填写 |
-| 控制台 | 待 controller 填写 | 待 controller 填写 |
+| 打开 `?method=flows&flow=sizes` | 两张图都正常渲染 | 正常 |
+| 图 5 默认（7d / Entities / BTC） | 4 行、标签、图例、7 个刻度（±15,000，步长 5,000） | SVG 宽 330、高 300，无越界文字 |
+| 图 6 默认 | 4 行、净额标签、刻度 ±$1.00B / $500.0M、图例 | SVG 宽 330、高 300，无越界文字 |
+| 控件切换 | Bands、Gross、30d 切换后数值与原站一致（见第 5 节） | 切到 Bands 和 Gross 后两张图都是 330×354，无越界文字 |
+| 键盘读数 | 聚焦图 6 后按 ArrowDown，读数为 "10k–100k BTC · Profit booked +$273.4M · Loss booked −$412.4M · Net −$139.0M · vs realized cap −0.114% · 40% of booked value was profit · 7d window"。Home、End、Esc 由单测覆盖，浏览器里没有逐个按。焦点环没有目视检查 | — |
+| 5 个子视图按钮 | 一行 | 换成两行（容器宽 352 px），没有截断。两行时的边框问题（SR3-4 遗留的 T7-M7）未目视检查 |
+| 12 档 Gross 的标签 | 都在 SVG 内 | 都在 SVG 内 |
+| 三栏说明 | 横排 | 纵向全部展开，每栏宽 330 |
+| `scrollWidth` | 等于窗口宽 | 390 |
+| zh | 切换条显示：卖压、卖方结构、成本分布、规模分组、永续状态。图内文字、档名（如"高于 100k BTC"、"10M 聪–1 BTC"）、图例和三栏说明都已翻译，数值不变 | — |
+| 控制台 | 重新加载并切换控件后无报错 | — |
 
-已有的非实测材料：Task 5 在提交前用无头 Chrome 给 jsdom 渲染出的静态 DOM 配上 `market.css` 截过图（940 和 336 两个宽度），版式正常；这不能替代上表，没有启动任何服务。
+## 5. 与原站同刻对照
 
-## 5. 与原站同刻对照（可选）
-
-待 controller 填写。同一小时、默认视图（7d / Entities），对比原站与本地：
+本地先在 03:50:46 UTC 重新同步，随后立即重新加载原站。两边读到的是同一个仍在形成的小时（03:00 UTC），对照结果如下：
 
 | 项目 | 原站 | 本地 | 结果 |
 |---|---|---|---|
-| 图 5 四行的标签（Large / Mid / Small / Retail） | 待 controller 填写 | 待 controller 填写 | 待 controller 填写 |
-| 图 5 图例（Net accumulation / Net distribution / Net） | 待 controller 填写 | 待 controller 填写 | 待 controller 填写 |
-| 图 6 四行的标签（Gross 的净额） | 待 controller 填写 | 待 controller 填写 | 待 controller 填写 |
-| 图 6 图例（Profit booked / Loss booked / Net） | 待 controller 填写 | 待 controller 填写 | 待 controller 填写 |
+| 图 5 默认四行（Large / Mid / Small / Retail） | −8,526 / +17,177 / −2,624 / −2,690 | 同左 | 相同 |
+| 图 5 刻度 | ±15,000，步长 5,000 | 同左 | 相同 |
+| 图 5 图例 | +17,177 / −13,840 / +3,337 BTC | 同左 | 相同 |
+| 图 5 Bands · 7d 的 12 行 | +6,711 / −15,237 / +14,806 / +2,371 / −1,393 / −1,231 / −2,958 / +162 / +106 / −0 / +0 / +0 | 同左（含原站的 "−0 / +0"） | 相同 |
+| 图 5 Bands 图例 | +24,157 / −20,820 / +3,338 BTC | 同左 | 相同 |
+| 图 6 默认四行 | −$139.0M / +$189.1M / +$550.2M / +$276.7M | 同左 | 相同 |
+| 图 6 刻度 | ±$1.00B，步长 $500.0M | 同左 | 相同 |
+| 图 6 图例 | Profit booked +$2.54B / Loss booked −$1.66B | 同左（本地 Net +$877M） | 相同 |
+| 图 6 Gross · 30d 四行净额 | +$1.67B / +$6.47B / +$3.18B / +$1.05B，刻度 ±$10.00B | 同左 | 相同 |
+
+第一次对照时两边不一致。原因是本地在 03:31 算出的那个仍在形成的小时，到 03:50 原站加载时已经多了几个区块；重新同步后完全一致。
 
 ## 6. 与原站的有意偏离和遗留
 
