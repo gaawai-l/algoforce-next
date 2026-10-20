@@ -94,11 +94,18 @@ function DivergingBars({
   const rowTop = (i: number) => start + i * step;
   const middle = (i: number) => round(rowTop(i) + barH / 2 + 3.5);
   const last = rows.length - 1;
+  // Between a row's top and the next row's top lies the gap the narrow layout writes its name in.
+  const gap = step - barH;
+  // Wide: the row whose bar's middle is nearest. Narrow: the row whose block (its name in the gap
+  // above, then its bar) holds the pointer, as the read row's shade does.
   const at = (event: PointerEvent<SVGSVGElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
     if (box.height <= 0) return;
     const y = ((event.clientY - box.top) / box.height) * frame.height - frame.top;
-    onSelect(Math.min(last, Math.max(0, Math.round((y - start - barH / 2) / step))));
+    const row = frame.compact
+      ? Math.floor((y - start + gap) / step)
+      : Math.round((y - start - barH / 2) / step);
+    onSelect(Math.min(last, Math.max(0, row)));
   };
   const key = (event: KeyboardEvent<SVGSVGElement>) => {
     const next: Record<string, number | null> = {
@@ -114,7 +121,6 @@ function DivergingBars({
   };
   // The read row's shade: the whole band step, with the gap above it in the narrow layout, where
   // the row's name sits.
-  const gap = step - barH;
   return (
     <svg
       ref={ref}
@@ -190,7 +196,7 @@ function DivergingBars({
           // Gross parks every label in the right margin; Net and Chart 5 put it past the bar's
           // tip, a missing one just right of the zero line.
           const left = !gross && row.value !== null && row.value < 0;
-          const at = gross
+          const labelX = gross
             ? plotW + 12
             : row.value === null
               ? x(0) + 7
@@ -199,7 +205,7 @@ function DivergingBars({
             <text
               key={row.key}
               className="wh-sc-val"
-              x={round(at)}
+              x={round(labelX)}
               y={middle(i)}
               textAnchor={left ? "end" : "start"}
             >
@@ -219,7 +225,7 @@ function DivergingBars({
           </text>
         ))}
         {gross ? (
-          <text className="wh-sc-head" x={plotW + 12} y={-4}>
+          <text className="wh-sc-head" x={plotW + 12} y={-4} textAnchor="start">
             {text("sizes.pnl.netHead")}
           </text>
         ) : null}
@@ -280,7 +286,15 @@ function CohortPanel({
           fmt={fmt}
           gross={gross}
           selected={selected}
-          onSelect={(index) => setPicked(index === null ? null : { plot, index })}
+          onSelect={(index) =>
+            setPicked((current) =>
+              index === null
+                ? null
+                : current?.plot === plot && current.index === index
+                  ? current
+                  : { plot, index },
+            )
+          }
           ariaLabel={text("sizes.aria", { title })}
         />
       ) : null}

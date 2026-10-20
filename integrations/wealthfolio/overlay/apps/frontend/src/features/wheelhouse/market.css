@@ -1351,7 +1351,7 @@
   .wh-flows-switch {
     display: flex;
   }
-  /* When the four views do not fit one row, the buttons keep their labels on one line and
+  /* When the five views do not fit one row, the buttons keep their labels on one line and
      wrap to a second row instead of overflowing. */
   .wh-market .wh-flows-switch button {
     flex: 1 1 auto;

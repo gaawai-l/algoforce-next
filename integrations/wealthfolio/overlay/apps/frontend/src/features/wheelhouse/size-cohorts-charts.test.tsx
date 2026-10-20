@@ -173,6 +173,17 @@ it("draws the default readings", async () => {
   expect(readout("pnl")).toBe(HINT);
 });
 
+// Source: the brief (a plot 480px wide or more asks for 7 ticks: 1000 − 164 − 158 = 678).
+it("puts seven ticks under a 1000px chart", async () => {
+  stubWidth(1000);
+  show();
+  await screen.findByText(TITLE5);
+  const scale = axis(supplyPlot(cohortRows(sample, "groups"), SUPPLY_DEFAULT), 7)!;
+  const fmt = (v: number) => supplyLabel(v, "btc");
+  expect(texts("supply", ".wh-seller-tick")).toEqual(scale.ticks.map((v) => tickLabel(v, fmt)));
+  expect(scale.ticks).toHaveLength(7);
+});
+
 // Source: the brief (jsdom's 720px chart is the wide layout with 3 ticks, "0" at zero).
 it("puts three ticks under a 720px chart", async () => {
   show();
@@ -224,7 +235,9 @@ it("places bars, ticks and labels as the original", async () => {
   for (const label of panel("pnl").querySelectorAll(".wh-sc-val"))
     expect([label.getAttribute("x"), label.getAttribute("text-anchor")]).toEqual(["410", "start"]);
   const head = [...panel("pnl").querySelectorAll("svg text")].find((t) => t.textContent === "net")!;
-  expect([head.getAttribute("x"), head.getAttribute("y")]).toEqual(["410", "-4"]);
+  expect([head.getAttribute("x"), head.getAttribute("y"), head.getAttribute("text-anchor")]).toEqual(
+    ["410", "-4", "start"],
+  );
   for (const row of panel("pnl").querySelectorAll("[data-row]")) {
     const [profit, loss] = [...row.querySelectorAll("rect")];
     expect(profit.getAttribute("class")).toBe("wh-sc-bar wh-sc-bar--pos");
@@ -475,6 +488,8 @@ it("puts the row names above the bars on a narrow chart", async () => {
   const names = [...panel("supply").querySelectorAll(".wh-sc-row")];
   const tops = [...bars("supply")].map((bar) => Number(bar.getAttribute("y")));
   names.forEach((name, i) => {
+    // The brief's compact left margin is 56 and the name starts 4px in from the edge: 4 − 56.
+    expect(name.getAttribute("x")).toBe("-52");
     expect(name.getAttribute("text-anchor")).toBe("start");
     expect(Number(name.getAttribute("y"))).toBeLessThan(tops[i]);
   });
@@ -488,6 +503,30 @@ it("puts the row names above the bars on a narrow chart", async () => {
     num(bar, "y") + num(bar, "height"),
     1,
   );
+});
+
+// Source: the brief (narrow layout: a row's name sits in the gap above its bar, and the read row's
+// shade takes that gap in, so pointing at the name reads its row).
+it("reads the row whose name the pointer is on in the narrow layout", async () => {
+  stubWidth(336);
+  show();
+  await screen.findByText(TITLE5);
+  pick("supply", "Breakdown", "Bands");
+  const chart = svg("supply");
+  // 336px, 12 rows: the compact chart is 12 × 26 + 42 = 354 tall, its plot 16px down.
+  expect(chart.getAttribute("viewBox")).toBe("0 0 336 354");
+  chart.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width: 336, height: 354, right: 336, bottom: 354 }) as DOMRect;
+  const names = [...panel("supply").querySelectorAll(".wh-sc-row")];
+  expect(names).toHaveLength(12);
+  names.forEach((name) => {
+    const baseline = 16 + Number(name.getAttribute("y"));
+    // The upper half of the 10px name, then just above its baseline.
+    for (const clientY of [baseline - 6, baseline - 1]) {
+      fireEvent.pointerMove(chart, { clientX: 100, clientY, pointerType: "mouse" });
+      expect(readout("supply").split(" · ")[0]).toBe(name.textContent);
+    }
+  });
 });
 
 it("says when the hour is forming", async () => {
