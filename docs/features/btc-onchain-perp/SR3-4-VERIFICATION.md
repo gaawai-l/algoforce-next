@@ -24,6 +24,8 @@
 | types、frontend type-check | 通过 |
 | vitest `src/features/wheelhouse` | 29 个文件，584 个测试全部通过 |
 
+终审修复轮之后在 `328719e` 再跑一次，退出码 0：ruff、mypy、type-check 均通过；pytest 1024 passed（新增 6 个，warning 同上）；vitest 29 个文件、589 个测试全部通过（新增 5 个）。
+
 各任务完成时的测试数（基线 main 48dd7e9：pytest 973，vitest 517）和变异核对：
 
 | 任务 | pytest | vitest | 变异核对 |
@@ -100,6 +102,7 @@
 |---|---|---|
 | `cost-flow-crosscheck.json` 四个侧（30d All 的两侧、30d STH Show 的两侧，行数 252 / 252 / 629 / 629）的 KDE，共 1,762 个值 | 相对误差 1e-12 | 最大 4.59e-16，只有 49 个值有末位差 |
 | 同四个侧的 8 个峰（price、width、btc、share、strength） | 相对误差 1e-12 | 全部逐位相同，峰数相同 |
+| 同四个侧的 GMM（终审 M3）：`fit_gmm` 在 k = 1 到上限（2 / 5 / 5 / 5）上共 17 组的成分与 logL；`select_components`（v1）有峰、无峰各 4 个侧的结果 | 相对误差 1e-9 | 最大 4.09e-12；k 全部一致（有峰时 1 / 4 / 1 / 2，无峰时 BIC 都选 1） |
 | 同一份引擎，分别在 Python 和 JS 里的运算顺序 | 逐行移植 | Task 4 评审：把移植版与原站 `script_2_app.js` 的引擎在同一个 V8 里对比，**43,459 项检查，0 处差异**（逐位相同） |
 | 再生测试 | crosscheck 按结构相同、数值相对误差 ≤ 1e-12；S1、S2 逐字节 | 通过（S1、S2 不含 libm 运算的结果，跨平台一致） |
 
@@ -144,6 +147,7 @@
   - 图 4 点击图例隐藏后会重算聚类（7 → 3）。
 - 重新加载并切换窗口、Zoom、Holders 之后，控制台没有报错。
 - 页面顶部的 "Python service unavailable (HTTP 403)" 来自 :1430 的 POST 来源检查（只接受 :1420），与本功能无关。
+- 1440 px 弹窗检查：待 controller 填写
 
 **390 px**
 检查方法：用真实点击打开一个 390 px 的同源弹窗，再检查它的 DOM。
@@ -165,6 +169,22 @@
 - 每一步记到两条 measure，是开发模式下 React StrictMode 对 `useMemo` 双调用造成的，生产构建只有一条。
 - 按 4 倍降速估算，最多约 18 ms，远低于 100 ms 的门槛，所以不做 Web Worker。
 
+**BIC 路径（终审 M4，估算）**
+
+上表没有覆盖最重的 BIC 路径（Smoothing Off + Bells On）。终审在 Node 里补测了引擎本身，下表是**估算**，不是浏览器里的实测：
+- 测法：把 `cost-flow-engine.ts` 复制到 scratchpad，用 Node 24 在本机跑 S1（`cost-flow-sample-0512.json`），每种情形跑 21 次，取中位数和最大值，单位 ms。
+
+| 情形 | 中位数 | 最大值 |
+|---|---|---|
+| BIC，629 行，卖方 | 13.5 | 27.7 |
+| BIC，629 行，买方 | 1.2 | 1.8 |
+| BIC，252 行，卖方 | 6.1 | 6.3 |
+| Manual + Bells | 0.5–4.8 | 5.0 |
+
+- 按 4 倍估算，BIC 两侧合计约 60 ms，偶发最大值约 110 ms。
+- BIC 只在点击时重算，不在拖动时重算：滑杆只在 Manual 下可拖，那时 k 取 KDE 的峰数；只有一个峰都没留下时，才会在拖动中走 BIC。
+- 第二轮计划评审给出的 72–190 ms，是在 `vm` 上下文里跑原站脚本测的，跨 realm 有额外开销，测的不是这份移植。
+
 ## 5. QC 变弱的说明（U3）
 
 按用户裁定（U3），只取 6 个年轻 cohort（<1h 到 2m–3m）的年龄快照，不补齐 23 个 cohort。所以本地的 QC 比原站弱：
@@ -184,10 +204,8 @@
 
 ## 6. 遗留
 
-Task 8 完成时挂起、留给终审修复轮处理的 Minor 项，详见台账：
-- 读接口：`rules_pending` 无测试（`IMPLEMENTED["costflow"]` 为空时恒为 False）；样本 README 注明 `brk_version` 为 null；生成器里 Zoom All 裁剪、`mismatches()` 辅助函数的测试；`test_cost_flow_reads_no_network` 先断言 200；
-- BRK 版本变化的一轮里，高低价请求失败会丢掉完整重取（仅影响图 4 的年龄下界，由逐序列的版本检查兜住）；`sync.py` 里一处回退过滤未固定；`what=age` 的重取无测试；`brk.py` 一处过期注释；
-- 契约里 `age.band` 应为 `int().min(0).max(11)`；`getCostFlow` 的 URL 无测试；`ageRows` 在 $500 网格没有 floor 时返回 ok 加空数组（不可达）；可选 `Object.freeze(ALL_ON)`；`cost-flow.test.ts` 里一处测试注释写着"controller's wording"，需改写；
-- 界面：滑杆 `<output>` 与 chip 的格式重复；`picked.ok` 但无行时的 `noGrid` 文案；`cost-flow-charts.test.tsx` 一处 eslint `prefer-string-starts-ends-with`（`make check` 不检查）；
-- 中文的三栏说明里 `costflow.c3.how` 用了英文的控件名；三栏说明的中英文全部交用户审；
-- 仓库原有的 Starlette/httpx 弃用警告。
+终审修复轮之后仍留下的项：
+- 中文三栏说明里用了英文的控件名（`costflow.c3.how`、`costflow.c3.shows`），与全部三栏说明的中英文措辞一起交用户审；
+- 仓库原有的 Starlette/httpx 弃用警告，与本功能无关；
+- 终审 M6 的小处重复（`stackBars` 与 `stackAge`、重复查 `then_day`、`MONTHS`、`COHORTS`），按外科手术原则有意不改；
+- 终审 T7-M7 的 Flows 切换条两行时的边框：4 个按钮时一行放得下，等第 5 个子视图加入时再查。

@@ -262,7 +262,7 @@ flowchart LR
 **分工（"方案 C"，用户 2026-10-19 裁定；与 D7 的数据源方案 C 无关）**
 - worker 只取数、存输入，相当于原站的 loader（L = `script_3_app.js`）。读接口 `GET /onchain/cost-flow` 只读库、原样返回，不访问网络，不做任何计算。
 - 浏览器用 TypeScript 做全部计算，从原站 A（`script_2_app.js`）逐行移植：取行、分段、KDE、峰检测、GMM、BIC、图例、表格。每个函数注明行号。文件：`cost-flow-engine.ts`（引擎）、`cost-flow.ts`（行、分段、图例、表格、tooltip、开关、格式化、几何）、`cost-flow-charts.tsx`（界面）。
-- **两套引擎**：图 7 用服务端的 Python `costbasis.py`，图 3、图 4 用浏览器的 `cost-flow-engine.ts`，两者都移植自 A:1404-1557。以后若改算法，两处都要改。
+- **两套引擎**：图 7 用服务端的 Python `costbasis.py`，图 3、图 4 用浏览器的 `cost-flow-engine.ts`，两者都移植自 A:1404-1557。以后若改算法，两处都要改：`cost-flow-crosscheck.json` 记着 Python 的 KDE、峰、各 k 的 GMM 和 v1 的 k 选择，只改一处时，再生测试或 `cost-flow-engine.test.ts` 会失败（终审 M3）。
   - TS 对 Python 的比对属于跨实现核对：阶段 A 参考实现 = `chart3_recompute.py` 中 udiff/segments 的移植，加 `costbasis.py` 的 KDE、峰和 GMM；`costbasis.py` 本身在 24 个状态上已与页面逐格一致（[CHART-VERIFICATION](CHART-VERIFICATION.md) SR-3）。对原站页面的锚，在读数测试里（页面记录的块和状态）。
   - 实测误差（Node/V8，macOS arm64）：KDE（对 crosscheck 样本）最大相对误差 4.6e-16；峰（对阶段 A）7.7e-16；GMM（对阶段 A）6.0e-14；BIC 选出的 k 在 46 个侧上全部一致。
   - `fitGMM1D` 不含随机数，初始化、σ 下限、120 次迭代和 1e-9 收敛阈值一律照原站（A:1465-1511），不改成 k-means++ 之类。
@@ -274,6 +274,8 @@ flowchart LR
 - **取数**：
   - 6 个年龄快照在 `URPD_SET` 之后抓取，每小时多 6 个请求。
   - `price_high`/`price_low` 在 day1 阶段里**单独请求**（`_day1_range`），不并入 day1 主请求（执行中的裁定）。它失败时只影响图 4，不连累周期、价位和图 7：记 `onchain_day1_range_failed`，不计入 `last_error`，库里已有的行以及上一轮记下的缺失原样保留。代价是每轮多 1 个请求；首次回填和 BRK 版本变化时，主请求仍分 2 片，高低价另有 1 个请求。
+    - BRK 版本变化的那一轮里高低价请求若失败，这次整段重取不再补做，要等之后的轮次在增量请求中由逐序列的版本检查发现版本变化再整段重取（BRK 修订了旧历史却没有提升序列版本时就不会重取），受影响的只有图 4 的下界档（终审 RR-M1）。
+  - 12 份快照的 close 不一致时（见下文"12 份快照的 close 校验"），同一轮再多 12 个请求：`all lin500`、5 份网格快照和 6 个年龄快照，每轮最多一次。
   - 两者都单独定义，不并进 `DAY1_SERIES`、`URPD_SET`。
 
 **then 快照只要收盘就可用**
@@ -282,8 +284,9 @@ flowchart LR
 
 **12 份快照的 close 校验**
 - 图 3 和图 4 用到 D 的 12 份快照：all/sth/lth × lin500/lin200 共 6 份，加 6 个年龄快照。它们的 close 必须都等于 spot（D 的 `all lin500` 的 close）。
-- 不相等（BRK 在一轮内出了新区块）时，worker 在同一轮把 `all lin500`、5 份网格快照和 6 个年龄快照重取一次，也只重取一次。重取 D 返回 404 时，保留第一次取到的 D。
-- **重取失败（执行中的裁定）**：重取中出任何 `BrkError`（含非 404），一律保留第一次取到的快照，记 `onchain_costflow_refetch_failed code=… what=<all|grid|age>`，结束重取；没取到的快照维持库里的原样。它**不会使 URPD 阶段失败**（否则会拖垮图 7、表 2 和周期），只让派生时的 close 校验把仍不一致的部分标成缺失。代价是重取出错不如失败显眼，但日志和原因码都在。
+- 不相等（BRK 在一轮内出了新区块）时，worker 在同一轮把 `all lin500`、5 份网格快照和 6 个年龄快照重取一次，也只重取一次。
+- **重取要么全存、要么不存（终审 M1）**：12 个请求的结果先留在内存里，全部成功之后才逐份 `save_urpd`。重取 D 返回 404 时，保留第一次取到的 D，其余取到的快照照常落库；BRK 已没有的快照不存，库里维持原样。
+- **重取失败（执行中的裁定）**：重取中途出任何 `BrkError`（404 以外），这次重取到的快照一份都不存，库里保持第一次取到的那一组，记 `onchain_costflow_refetch_failed code=… what=<all|grid|age>`，结束重取。所以中途失败不会让新区块的 D 和旧区块的网格同时留在库里：触发重取的若只是某个年龄快照换了块，派生时仍只有图 4 缺失，图 3 照常。它**不会使 URPD 阶段失败**（否则会拖垮图 7、表 2 和周期），只让派生时的 close 校验把仍不一致的部分标成缺失。代价是重取出错不如失败显眼，但日志和原因码都在。
 - 派生时再检查一次：某网格不一致，记 `urpd_mismatch:<cohort>:<agg>`，丢掉这个网格；年龄快照不一致，记 `age_urpd_mismatch`，`age` 置为 None。**任何时候都不混用两份快照。**
 
 **空快照即缺失**：`buckets` 为空的快照按缺失处理，绝不当 0。D 的记 `urpd_missing:<cohort>:<agg>`，then 的记 `window_missing:<w>:<agg>`，年龄的记 `age_urpd_missing`。
@@ -435,7 +438,7 @@ flowchart LR
 - **Cost basis**（图 3、图 4，规则见 §3.5）：
   - 图 3（Buy & Sell Side By Cost Basis）在上，图 4（同图的 Age Breakdown）在下；Window 和 Zoom 两图共用，Holders、Aging 只属于图 3，两侧的 Smoothing / Bell curves / How many / ⚙ 微调每张图各有一套；
   - 每张图一张大图，加图例、两侧控件、悬停或键盘读数块、Clusters 表（图 3 另有 Bell curve components 表），以及下方三栏说明；
-  - 页头一行写 URPD 快照的日期、时刻和来源；快照仍在形成时写明 `includes the forming snapshot of <日期>`；
+  - 页头一行写 URPD 快照的日子 D 和来源：形成中时加取数时刻（`URPD snapshot 19 Oct 2026 · 05:12 UTC`），已收盘时写 `URPD snapshot 19 Oct 2026 close`；日期一律取 D，不取取数那天（终审 M2，00:12 那一轮 D 可能退回前一天）；快照仍在形成时写明 `includes the forming snapshot of <日期>`；
   - 缺窗口、缺网格、缺年龄快照时只留标题、控件行和一句说明，不画图，也不显示 0。
 - **Perp states**：
   - P4 之前：显示 "Not connected" 横幅，写明缺哪个数据源。不放示例数据。
