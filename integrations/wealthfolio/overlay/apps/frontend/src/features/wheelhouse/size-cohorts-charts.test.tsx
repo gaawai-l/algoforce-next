@@ -7,6 +7,8 @@ import {
   axis,
   band,
   cohortRows,
+  layout,
+  namesMet,
   supplyLabel,
   supplyLegend,
   supplyPlot,
@@ -543,6 +545,40 @@ it("reads the row whose name the pointer is on in the narrow layout", async () =
       expect(readout("supply").split(" · ")[0]).toBe(name.textContent);
     }
   });
+});
+
+// Source: the controller's browser check at 390px (Chart 5, Bands, 7d: the longest bar's label ran
+// into the name of the row below it) and its ruling: in the compact layout too, a label that would
+// run into a row's name goes inside its bar's end.
+it("keeps the narrow chart's value labels off the row names", async () => {
+  stubWidth(336);
+  show();
+  await screen.findByText(TITLE5);
+  pick("supply", "Breakdown", "Bands");
+  // The sample's longest bar at 7d is the second row's, 10k–100k BTC's −14,096: its tip is 0.12 /
+  // 2.24 of the 216px plot from the left, at 11.57.
+  const labels = [...panel("supply").querySelectorAll(".wh-sc-val")];
+  const bar = bars("supply")[1];
+  expect(num(bar, "x")).toBeCloseTo(11.57, 2);
+  expect(labels[1].textContent).toBe("−14,096");
+  expect(labels[1].getAttribute("class")).toBe("wh-sc-val wh-sc-val--in");
+  expect(labels[1].getAttribute("text-anchor")).toBe("start");
+  expect(num(labels[1], "x")).toBeCloseTo(18.57, 2);
+  // Where the chart put them, no value label runs into a row's name, by the placement's estimate.
+  const frame = layout(336, 12);
+  const names = [...panel("supply").querySelectorAll(".wh-sc-row")].map((name) => ({
+    text: name.textContent!,
+    y: num(name, "y"),
+  }));
+  for (const label of labels) {
+    const spot = {
+      x: num(label, "x"),
+      anchor: label.getAttribute("text-anchor") as "start" | "end",
+      inside: label.classList.contains("wh-sc-val--in"),
+    };
+    const y = num(label, "y");
+    expect(namesMet(spot, label.textContent!, y, names, frame), label.textContent!).toEqual([]);
+  }
 });
 
 it("says when the hour is forming", async () => {

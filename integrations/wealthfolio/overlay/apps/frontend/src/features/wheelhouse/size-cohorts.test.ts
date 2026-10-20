@@ -12,14 +12,16 @@ import { ticks } from "./sell-side";
 import {
   DASH,
   GROUPS,
-  LABEL_CHAR_PX,
+  NAME_GAP,
   PNL_DEFAULT,
   SUPPLY_DEFAULT,
+  TEXT_EM,
   axis,
   band,
   cohortRows,
   labelSpot,
   layout,
+  namesMet,
   pnlLabel,
   pnlLegend,
   pnlPlot,
@@ -30,11 +32,13 @@ import {
   supplyLegend,
   supplyPlot,
   supplyRead,
+  textPx,
   tickLabel,
   usdLegend,
   usdTip,
   valueLabel,
   type Breakdown,
+  type LabelSpot,
   type PlotRow,
   type PnlChoice,
   type Reading,
@@ -563,50 +567,109 @@ describe("geometry", () => {
     expect(rows.width).toBeCloseTo(49.79439, 4);
   });
 
+  // Chart 5's Bands at 7d as the original drew them at 2026-10-20 03:00Z (SR5-6-VERIFICATION §5),
+  // largest band first: the longest bar is the 10k–100k BTC band's −15,237. The axis is ±1.12 ×
+  // that, so its tip sits 0.12 / 2.24 of the plot from the left.
+  const LIVE_7D = [6711, -15237, 14806, 2371, -1393, -1231, -2958, 162, 106, -0.4, 0, 0];
+  const plotRows = (values: number[], keys: PlotRow["key"][]): PlotRow[] =>
+    values.map((v, i) => ({ key: keys[i], group: false, bars: [{ v, pos: v >= 0 }], value: v }));
+  const BANDS_DOWN = view.bands.map((b) => b.band as BandKey).reverse();
+  const GROUPS_DOWN = GROUPS.map((g) => g.key).reverse();
+  const at = (x: number, anchor: string, inside: boolean) => ({
+    x: expect.closeTo(x, 2),
+    anchor,
+    inside,
+  });
+  // The chart at `width`, as it places a row's value label: x is the value's place on the axis
+  // over the plot, to 0.01px; d3's scaleBand gives row i's top, the value label's baseline is the
+  // bar's middle + 3.5, and the name's is that line when wide, 4px above the bar compact.
+  function chartAt(rows: PlotRow[], width: number, gross = false, say: TextFn = text) {
+    const frame = layout(width, rows.length);
+    const plotW = width - frame.left - frame.right;
+    const scale = axis(rows, frame.ticks)!;
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const x = (u: number) => r2(((u - scale.lo) / (scale.hi - scale.lo)) * plotW);
+    const plotH = frame.height - frame.top - frame.bottom;
+    const { start, step, width: barH } = band(rows.length, plotH, frame.padding);
+    const valueY = rows.map((_, i) => r2(start + i * step + barH / 2 + 3.5));
+    const names = rows.map((row, i) => ({
+      text: rowName(say, row.key),
+      y: frame.compact ? r2(start + i * step - 4) : valueY[i],
+    }));
+    const box = { plotW, gross, compact: frame.compact, left: frame.left };
+    const label = (value: number | null) => valueLabel(value, btc);
+    return {
+      spot: (i: number, value = rows[i].value) =>
+        labelSpot(value, label(value), x, box, valueY[i], names),
+      // The names a label at `spot` would run into, by the same estimate.
+      met: (i: number, spot: LabelSpot) =>
+        namesMet(spot, label(rows[i].value), valueY[i], names, box).map((name) => name.text),
+    };
+  }
+
   // Source: the final review's M1 and the controller's ruling. The original puts a negative label
   // 7px left of the tip, end-anchored (A:2092-2100); the row's name ends at x = −10 on the same
-  // line, so a label that would start left of −6 (6.6px a character) goes inside the bar's end,
-  // start-anchored at the tip + 7. The rows are Chart 5's Bands at 7d as the original drew them at
-  // 2026-10-20 03:00Z (SR5-6-VERIFICATION §5): −15,237 BTC is the longest bar. The axis is
-  // ±1.12 × that, so its tip sits 0.12 / 2.24 of the plot from the left.
+  // line, so a label that would start left of −6 (a 4px gap, 0.6em = 6.6px a character at 11px)
+  // goes inside the bar's end, start-anchored at the tip + 7.
   it("moves a wide label that would run into its row's name inside the bar", () => {
-    const values = [6711, -15237, 14806, 2371, -1393, -1231, -2958, 162, 106, -0.4, 0, 0];
-    const rows: PlotRow[] = values.map((v, i) => ({
-      key: view.bands[values.length - 1 - i].band as BandKey,
-      group: false,
-      bars: [{ v, pos: v >= 0 }],
-      value: v,
-    }));
-    const spot = (width: number, v: number | null, gross = false) => {
-      const frame = layout(width, rows.length);
-      const plotW = width - frame.left - frame.right;
-      const scale = axis(rows, frame.ticks)!;
-      // The chart's x: the value's place on the axis over the plot, to 0.01px.
-      const x = (u: number) =>
-        Math.round(((u - scale.lo) / (scale.hi - scale.lo)) * plotW * 100) / 100;
-      return labelSpot(v, valueLabel(v, btc), x, { plotW, gross, compact: frame.compact });
-    };
-    const at = (x: number, anchor: string, inside: boolean) => ({
-      x: expect.closeTo(x, 2),
-      anchor,
-      inside,
-    });
-    expect(LABEL_CHAR_PX).toBe(6.6);
+    expect([TEXT_EM.char * textPx(false), textPx(true), NAME_GAP]).toEqual([6.6, 10, 4]);
+    const rows = plotRows(LIVE_7D, BANDS_DOWN);
+    const wide = chartAt(rows, 720);
     // 720px: plot 398, the tip at 21.32; "−15,237" is 7 × 6.6 = 46.2px wide, so it would start at
-    // 21.32 − 7 − 46.2 = −31.88.
-    expect(spot(720, -15237)).toEqual(at(28.32, "start", true));
+    // 21.32 − 7 − 46.2 = −31.88, into its own row's name.
+    expect(wide.met(1, { x: 14.32, anchor: "end", inside: false })).toEqual(["10k–100k BTC"]);
+    expect(wide.spot(1)).toEqual(at(28.32, "start", true));
+    expect(wide.met(1, wide.spot(1))).toEqual([]);
     // A shorter negative bar keeps its label outside: −2,958's tip is at 164.51.
-    expect(spot(720, -2958)).toEqual(at(157.51, "end", false));
+    expect(wide.spot(6)).toEqual(at(157.51, "end", false));
     // A positive label, a missing one and Gross's are where the original puts them.
-    expect(spot(720, 14806)).toEqual(at(378.65, "start", false));
-    expect(spot(720, null)).toEqual(at(206, "start", false));
-    expect(spot(720, -15237, true)).toEqual(at(410, "start", false));
+    expect(wide.spot(2)).toEqual(at(378.65, "start", false));
+    expect(wide.spot(0, null)).toEqual(at(206, "start", false));
+    expect(chartAt(rows, 720, true).spot(1)).toEqual(at(410, "start", false));
     // 1,160px: plot 838, the tip at 44.89, the label would start at −8.31.
-    expect(spot(1160, -15237)).toEqual(at(51.89, "start", true));
+    expect(chartAt(rows, 1160).spot(1)).toEqual(at(51.89, "start", true));
     // 1,280px: plot 958, the tip at 51.32, the label starts at −1.88: room enough outside.
-    expect(spot(1280, -15237)).toEqual(at(44.32, "end", false));
-    // The narrow layout writes the names above the bars, so its labels stay outside: at 390px the
-    // plot is 270 and the tip at 14.46.
-    expect(spot(390, -15237)).toEqual(at(7.46, "end", false));
+    expect(chartAt(rows, 1280).spot(1)).toEqual(at(44.32, "end", false));
+  });
+
+  // Source: the controller's browser check at 390px (Chart 5, Bands, 7d: "−15,781" ran into
+  // "1k–10k BTC") and its ruling. In the compact layout a row's name sits 4px above its bar, from
+  // x = 4 − 56 = −52, so a label on the bar's middle line can run into the name of the row below.
+  // Text boxes are estimated from 1.02em above the baseline to 0.3em below, at 10px.
+  it("moves a compact label that would run into the next row's name inside the bar", () => {
+    // 336px, 12 rows: plot 216 × 312, each row 24.96 tall with a 12.48px bar; the longest bar's
+    // tip at 11.57. Row 1's label line spans 36.98–50.18 and the name below it 48.2–61.4; its own
+    // name above ends at 36.44, so only the name below is in the way.
+    const narrow = chartAt(plotRows(LIVE_7D, BANDS_DOWN), 336);
+    // Outside, "−15,237" (7 × 6 = 42px) would span −37.43 to 4.57, over "1k–10k BTC" (−52 to 8).
+    expect(narrow.met(1, { x: 4.57, anchor: "end", inside: false })).toEqual(["1k–10k BTC"]);
+    expect(narrow.spot(1)).toEqual(at(18.57, "start", true));
+    expect(narrow.met(1, narrow.spot(1))).toEqual([]);
+    // With the longest bar on top the name below, "10k–100k BTC", ends at 20: inside the bar the
+    // label starts the gap of 4 past it, at 24, and still ends well short of the zero line (108).
+    const swapped = [LIVE_7D[1], LIVE_7D[0], ...LIVE_7D.slice(2)];
+    const top = chartAt(plotRows(swapped, BANDS_DOWN), 336);
+    expect(top.spot(0)).toEqual(at(24, "start", true));
+    expect(top.met(0, top.spot(0))).toEqual([]);
+    // A label that would not fit in its bar stays outside: −5,133's tip is at 75.52, and inside
+    // it would end at 118.52, past the zero line.
+    const mid = plotRows(
+      LIVE_7D.map((v, i) => (i === 5 ? -5133 : v)),
+      BANDS_DOWN,
+    );
+    expect(chartAt(mid, 336).spot(5)).toEqual(at(68.52, "end", false));
+    // Four rows are 57.33 apart: the name below starts under the label's line, so the label stays
+    // where the original puts it.
+    const groups = chartAt(plotRows([-15237, 6711, 2371, -1393], GROUPS_DOWN), 336);
+    expect(groups.spot(0)).toEqual(at(4.57, "end", false));
+    expect(groups.met(0, groups.spot(0))).toEqual([]);
+    // A CJK character counts 1em: "低于 1k 聪" (3 × 10 + 4 × 6 = 54px) ends at 2, so "−9,797",
+    // whose tip is at 46, would start at 3 and meet it; counted 0.6em it would end at −10.
+    const zh: TextFn = (key, vars) => phrase("zh", key, vars);
+    const under = plotRows(
+      LIVE_7D.map((v, i) => (i === 10 ? -9797 : v)),
+      BANDS_DOWN,
+    );
+    expect(chartAt(under, 336, false, zh).spot(10)).toEqual(at(53, "start", true));
   });
 });

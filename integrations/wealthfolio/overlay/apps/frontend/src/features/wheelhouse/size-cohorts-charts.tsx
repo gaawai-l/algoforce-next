@@ -15,6 +15,7 @@ import {
   cohortRows,
   labelSpot,
   layout,
+  nameAt,
   pnlLabel,
   pnlLegend,
   pnlPlot,
@@ -94,6 +95,12 @@ function DivergingBars({
     round(scale ? ((v - scale.lo) / (scale.hi - scale.lo)) * plotW : plotW / 2);
   const rowTop = (i: number) => start + i * step;
   const middle = (i: number) => round(rowTop(i) + barH / 2 + 3.5);
+  // Each row's name, on its bar's line when wide, 4px above the bar when compact.
+  const nameX = nameAt(frame);
+  const names = rows.map((row, i) => ({
+    text: rowLabel(row),
+    y: frame.compact ? round(rowTop(i) - 4) : middle(i),
+  }));
   const last = rows.length - 1;
   // Between a row's top and the next row's top lies the gap the narrow layout writes its name in.
   const gap = step - barH;
@@ -195,7 +202,8 @@ function DivergingBars({
         {scale ? <line className="wh-sc-zero" x1={x(0)} x2={x(0)} y1={0} y2={plotH} /> : null}
         {rows.map((row, i) => {
           const label = valueLabel(row.value, fmt);
-          const spot = labelSpot(row.value, label, x, { plotW, gross, compact: frame.compact });
+          const box = { plotW, gross, compact: frame.compact, left: frame.left };
+          const spot = labelSpot(row.value, label, x, box, middle(i), names);
           return (
             <text
               key={row.key}
@@ -212,11 +220,11 @@ function DivergingBars({
           <text
             key={row.key}
             className="wh-sc-row"
-            x={frame.compact ? 4 - frame.left : -10}
-            y={frame.compact ? round(rowTop(i) - 4) : middle(i)}
-            textAnchor={frame.compact ? "start" : "end"}
+            x={nameX.x}
+            y={names[i].y}
+            textAnchor={nameX.anchor}
           >
-            {rowLabel(row)}
+            {names[i].text}
           </text>
         ))}
         {gross ? (

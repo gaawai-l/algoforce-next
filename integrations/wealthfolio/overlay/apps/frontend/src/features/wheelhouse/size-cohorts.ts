@@ -269,8 +269,43 @@ export function usdTip(v: number) {
 export const valueLabel = (value: number | null, fmt: (v: number) => string) =>
   value == null ? DASH : fmt(value);
 
-// What a value label (11px JetBrains Mono) is taken to be wide: 6.6px a character.
-export const LABEL_CHAR_PX = 6.6;
+// What a value label or a row's name is taken to cover, to tell whether they meet: 0.6em a
+// character (1em a CJK one), from 1.02em above the baseline to 0.3em below. These are JetBrains
+// Mono's advance, ascent and descent, the values' font; Inter, the names', is narrower and no
+// taller. Both are 11px, 10px in the compact layout (market.css).
+export const TEXT_EM = { char: 0.6, cjk: 1, ascent: 1.02, descent: 0.3 } as const;
+export const textPx = (compact: boolean) => (compact ? 10 : 11);
+// How near a value label may come to a row's name across: the wide name ends at x = −10, and a
+// label may start no further left than −6.
+export const NAME_GAP = 4;
+const CJK = /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef]/;
+
+interface Box {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+function textBox(text: string, x: number, anchor: "start" | "end", y: number, px: number): Box {
+  let width = 0;
+  for (const ch of text) width += (CJK.test(ch) ? TEXT_EM.cjk : TEXT_EM.char) * px;
+  const x0 = anchor === "start" ? x : x - width;
+  return { x0, x1: x0 + width, y0: y - TEXT_EM.ascent * px, y1: y + TEXT_EM.descent * px };
+}
+
+// Where the rows' names go across: wide, ending 10px left of the plot on the bar's line; compact,
+// from 4px inside the chart's left edge, above the bar.
+export const nameAt = (frame: { compact: boolean; left: number }) =>
+  frame.compact
+    ? { x: 4 - frame.left, anchor: "start" as const }
+    : { x: -10, anchor: "end" as const };
+
+// A row's name as the chart draws it: its text and its baseline.
+export interface RowName {
+  text: string;
+  y: number;
+}
 
 export interface LabelSpot {
   x: number;
@@ -278,25 +313,55 @@ export interface LabelSpot {
   inside: boolean; // over the bar's end rather than past its tip
 }
 
+// The names a value label at `spot`, on baseline `y`, runs into: their lines overlap and across
+// they come nearer than NAME_GAP.
+export function namesMet(
+  spot: LabelSpot,
+  label: string,
+  y: number,
+  names: readonly RowName[],
+  frame: { compact: boolean; left: number },
+): RowName[] {
+  const px = textPx(frame.compact);
+  const at = nameAt(frame);
+  const own = textBox(label, spot.x, spot.anchor, y, px);
+  return names.filter((name) => {
+    const box = textBox(name.text, at.x, at.anchor, name.y, px);
+    return (
+      own.y0 < box.y1 && box.y0 < own.y1 && own.x0 < box.x1 + NAME_GAP && box.x0 < own.x1 + NAME_GAP
+    );
+  });
+}
+
 // Where a row's value label goes (A:2092-2100, A:2296-2307): 7px past the bar's tip, left of a
 // negative one; just right of the zero line when the value is missing; Gross parks every label at
-// plotW + 12. One departure: in the wide layout the row's name ends at x = −10 on the same line,
-// so a negative label that would start left of −6 goes inside the bar's end instead. A positive
-// label has no such neighbour: past the longest bar's tip lie 0.12 / 2.24 of the plot and the
-// 158px margin, over 150px less the 7px gap, room for more than 20 characters.
+// plotW + 12. One departure: a negative label that would run into a row's name goes inside its
+// bar's end, from the tip + 7, or past the name it would still meet there. That is its own row's
+// name in the wide layout (on its line, ending at −10), and in the compact one the name of the row
+// below, written in the gap under its bar. A label that would then run past the zero line stays
+// outside. A positive label has no name near it: past the longest bar's tip lie 0.12 / 2.24 of
+// the plot and the right margin.
 export function labelSpot(
   value: number | null,
   label: string,
   x: (v: number) => number,
-  frame: { plotW: number; gross: boolean; compact: boolean },
+  frame: { plotW: number; gross: boolean; compact: boolean; left: number },
+  y: number,
+  names: readonly RowName[],
 ): LabelSpot {
   if (frame.gross) return { x: frame.plotW + 12, anchor: "start", inside: false };
   if (value === null) return { x: x(0) + 7, anchor: "start", inside: false };
   const tip = x(value);
   if (value >= 0) return { x: tip + 7, anchor: "start", inside: false };
-  if (!frame.compact && tip - 7 - label.length * LABEL_CHAR_PX < -6)
-    return { x: tip + 7, anchor: "start", inside: true };
-  return { x: tip - 7, anchor: "end", inside: false };
+  const outside: LabelSpot = { x: tip - 7, anchor: "end", inside: false };
+  if (!namesMet(outside, label, y, names, frame).length) return outside;
+  const px = textPx(frame.compact);
+  const inside: LabelSpot = { x: tip + 7, anchor: "start", inside: true };
+  for (const name of namesMet(inside, label, y, names, frame)) {
+    const box = textBox(name.text, nameAt(frame).x, nameAt(frame).anchor, name.y, px);
+    inside.x = Math.max(inside.x, box.x1 + NAME_GAP);
+  }
+  return textBox(label, inside.x, "start", y, px).x1 <= x(0) ? inside : outside;
 }
 // An axis tick's label: "0" at zero, else the bar labels' format (A:2102, A:2244).
 export const tickLabel = (v: number, fmt: (v: number) => string) => (v === 0 ? "0" : fmt(v));
