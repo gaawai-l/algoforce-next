@@ -595,9 +595,11 @@ class OnchainSync:
         ]
         started = time.monotonic()
         error: str | None = None
+        stopped = False
         fetched = absent = 0
         for n, day in enumerate(todo[: self.history_budget]):
             if self.stopping.wait(self.history_pause if n else 0):
+                stopped = True
                 break
             if time.monotonic() - started >= HISTORY_DEADLINE_SECONDS:
                 logger.info("onchain_urpd_history_paused reason=deadline")
@@ -620,10 +622,20 @@ class OnchainSync:
             else:
                 self.store.save_urpd_history(snapshot, at)
                 fetched += 1
-        logger.info("onchain_urpd_history copied=%d fetched=%d absent=%d", copied, fetched, absent)
+        # The backfill's own time: the round's onchain_sync_ok duration_ms includes it.
+        duration_ms = round((time.monotonic() - started) * 1000)
+        logger.info(
+            "onchain_urpd_history copied=%d fetched=%d absent=%d duration_ms=%d",
+            copied,
+            fetched,
+            absent,
+            duration_ms,
+        )
         if error is not None:
             logger.warning("onchain_urpd_history_failed code=%s", error)
-        self.store.set_state(history_error=error)
+        # A backfill cut short by a stop ends in no outcome: the last one's error stands.
+        if not stopped:
+            self.store.set_state(history_error=error)
 
     def _derive_history(self, at: datetime) -> None:
         """Derive Chart 8 and stamp it `at`: the history rows, and for the days of the window they

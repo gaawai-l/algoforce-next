@@ -3511,6 +3511,56 @@ def test_history_stops_promptly_when_the_worker_stops(
     assert waits == [0, 60]
 
 
+def test_history_error_survives_a_stop(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport(urpd_dir=GOLDEN)
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503) if is_history(request) else inner.handler(request)
+
+    assert history_round(store, httpx.MockTransport(failing), NOW, budget=5) is True
+    assert store.state()["history_error"] == "brk_unavailable"
+
+    # The next backfill is cut short as the worker stops: that is no outcome to record.
+    second, calls = brk_transport(urpd_dir=GOLDEN)
+    syncs: list[OnchainSync] = []
+
+    def stopping(request: httpx.Request) -> httpx.Response:
+        if is_history(request):
+            syncs[0].stopping.set()
+        return second.handler(request)
+
+    later = NOW + timedelta(hours=1)
+    sync = sync_for(
+        store, httpx.MockTransport(stopping), later, history_budget=5, history_pause=60
+    )
+    syncs.append(sync)
+    assert sync.run_once(now=later) is True
+
+    # The day that failed is still the newest gap.
+    assert history_requests(calls, D) == ["2026-10-14"]
+    assert store.state()["history_error"] == "brk_unavailable"
+    assert payload(store).backfill_error == "brk_unavailable"
+
+
+def test_history_logs_the_backfills_own_duration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, calls = brk_transport(urpd_dir=GOLDEN)
+    # Read as the requests start, before each request and as they end: 0, 100, 200, then 300.
+    ticks = iter(range(0, 100_000, 100))
+    monkeypatch.setattr("wheelhouse_service.onchain.sync.time.monotonic", lambda: next(ticks))
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert history_round(store, transport, NOW, budget=2) is True
+
+    assert len(history_requests(calls, D)) == 2
+    # Its own line: the round's onchain_sync_ok duration_ms includes it.
+    assert "onchain_urpd_history copied=0 fetched=2 absent=0 duration_ms=300000" in caplog.text
+    assert "onchain_sync_ok duration_ms=" in caplog.text
+
+
 def test_history_does_not_change_what_the_cost_basis_views_read(tmp_path: Path):
     plain = OnchainStore(tmp_path / "plain.sqlite")
     backfilled = OnchainStore(tmp_path / "backfilled.sqlite")
