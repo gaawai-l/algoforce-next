@@ -14,7 +14,7 @@
 
 ## 1. 全量检查（`make check`）
 
-2026-10-20 在 `1278897`（Task 5 完成，文档提交前）运行，退出码 0。Task 6 只改文档，若 Task 7 因核验发现问题新增代码提交，需在其后复跑一次并更新本表。
+2026-10-20 在 `044c06f`（终审修复轮完成后）运行，退出码 0；`deploy/test/test_composition.py` 1 passed。此前在 `1278897` 跑过一次（vitest 677）。
 
 | 项目 | 结果 |
 |---|---|
@@ -22,7 +22,7 @@
 | mypy strict | 55 个源文件，无问题 |
 | pytest | 1069 passed（1 个 warning，是仓库原有的 Starlette/httpx 弃用提示），用时 294 s |
 | types、frontend type-check | 通过 |
-| vitest `src/features/wheelhouse` | 31 个文件，677 个测试全部通过 |
+| vitest `src/features/wheelhouse` | 31 个文件，680 个测试全部通过 |
 
 各任务完成时的测试数（基线 main f304735：pytest 1024，vitest 589）和变异核对：
 
@@ -138,7 +138,11 @@ fixture：`services/analytics/tests/onchain/fixtures/brk-2026-10-16/hour1_addrs_
 
   这只核对了样式，不是在真实页面里看的。
 
-1440/1024 弹窗检查（M1、M5）：待 controller 填写
+1440/1024 弹窗检查（M1、M5，终审修复轮之后，2026-10-20）：
+- 1024 px：`scrollWidth` 1024；Bands 视图下两张图在 1d/7d/30d/90d × Net/Gross 共 16 种组合里，值标签与行名的文字框 0 处相交；最长负值条的 −15,781 移进条内，深色字（`--wh-surface`，约 6:1）。
+- 1440 px：`scrollWidth` 1440；没有相交，也不需要移进条内；切换条一行（469 px）。
+- 390 px：`scrollWidth` 390；切换条两行，第一行 4 个按钮铺满、第二行 Perp states 占满，分隔为单线；16 种组合里只剩图 6 Bands · 7d · Net 的 −$171.7M 与下一行行名文字框有一处 3.4 × 0.8 px 的角接触（条只有 43 px 宽，放不进条内），字形不相碰，接受。
+- 焦点环：键盘聚焦图 5 的 SVG 时 `:focus-visible` 生效，2 px 青色实线（rgb(89, 230, 205)），目视可见。
 
 ## 5. 与原站同刻对照
 
