@@ -74,8 +74,9 @@
 | `derived.costbasis_history` 的大小（计划约 3.3 MB） | 125 天时 332,718 B；满 1,461 天时待补记 |
 | `?span=365` 的响应体积，未压缩 / gzip（估计 0.84 MB / 0.38 MB） | 125 天时 296,723 B / 130,468 B；补齐后待补记 |
 | `?span=all` 的响应体积，未压缩 / gzip（估计 3.35 MB / 1.51 MB） | 125 天时 332,891 B / 133,855 B（gzip 生效）；补齐后待补记 |
-| 重启续传：重启后第一轮请求的第一天 | 由任务 2 的 `test_history_resumes_after_a_restart` 覆盖；实例上待补记 |
-| 重启后没有立刻再跑一轮的证据 | 由 `test_history_requests_come_after_the_round_state_is_written` 覆盖；实例上待补记 |
+| 经 Wealthfolio 代理（:1430）取 `?span=all`：浏览器网络面板里的 `content-encoding: gzip` 和用时（计划要求 30 秒内） | 待 controller 补记（不依赖回填，补记 commit 之前做）。上一行的 "gzip 生效" 没有写明是否经过代理、用了多久 |
+| 重启续传：重启后第一轮请求的第一天 | 由任务 2 的 `test_history_resumes_after_a_restart` 覆盖；实例上待 controller 补记（不依赖回填：重启 8797 一次，记下重启前后的日志） |
+| 重启后没有立刻再跑一轮的证据 | 由 `test_history_requests_come_after_the_round_state_is_written` 覆盖；实例上待 controller 补记（与上一行同一次重启） |
 | 迁移 | 首轮后 `onchain_schema` 为 1 和 2 |
 
 ## 3. 历史不全时的显示
@@ -117,14 +118,24 @@
 
 宽屏在全屏的 2,056 px 窗口下目视；390 px 用真实点击打开的同源弹窗读 DOM。另记：Range 收窄时，收盘价低于可见范围的日子，价格线贴在底边画，与原站相同。
 
-| 项目 | 1440 px | 390 px |
+| 项目 | 全屏宽屏（2,056 px 窗口） | 390 px |
 |---|---|---|
 | 横向溢出（`scrollWidth`） | 等于窗口宽 | 390 |
 | 控件换行（Span / Range / Contrast / Reset zoom） | 一行 | 换行，没有控件越过 390 |
 | 刻度字号 | 正常 | SVG 315×300，canvas 259×266 完全落在 SVG 内，没有越界的 SVG 文字 |
-| 读数行是否越界 | 否 | 否 |
+| 读数浮窗是否越界 | 否 | 否 |
 | 三种暗色（below floor `#233142`、空格、最暗一级 `#164a52`）能否分清 | 宽屏目视可分（below floor 偏蓝灰，最暗一级偏青） | 未在 390 px 目视（弹窗无法截图）；待用户在手机上确认 |
 | 三栏说明 | 横排 | 全部纵向展开（每栏 315 宽） |
+
+1440 px 和约 1,024 px 两档还没有看过（与 SR5-6 终审 M1 是同一个缺口）。不依赖回填，待 controller 在补记 commit 之前用真实点击打开的同源弹窗，按上表各项补记：
+
+| 项目 | 1440 px（弹窗） | 约 1,024 px（弹窗） |
+|---|---|---|
+| 横向溢出（`scrollWidth`） | 待补记 | 待补记 |
+| 控件换行（Span / Range / Contrast / Reset zoom） | 待补记 | 待补记 |
+| 刻度字号，canvas 是否落在 SVG 内 | 待补记 | 待补记 |
+| 读数浮窗是否越界 | 待补记 | 待补记 |
+| 三栏说明 | 待补记 | 待补记 |
 
 below floor 与面板底色对比 1.36:1，与最暗一级对比 1.34:1，主要靠色相区分。390px 下分不清就换一个色相更远的颜色（计划待确认第 1 条）。
 
@@ -144,7 +155,7 @@ below floor 与面板底色对比 1.36:1，与最暗一级对比 1.34:1，主要
 - 被截断但非空的 BRK 快照检测不出来（SPEC §3.7"已知限制"）。
 - 首轮回填实测约 4.5 分钟，离 5 分钟的上限只有约 10% 的余量。
 - 三栏说明（`cbh.shows`、`cbh.implies`、`cbh.how`）和原站图注的中文是我们起草的初稿，待用户审。
-- 迁移 002 之后，SR-8 之前的镜像打不开 `onchain.sqlite`：回滚要恢复发布前的备份，或保持前进（[RELEASING.md](../../deployment/RELEASING.md)）。
+- 迁移 002 之后，SR-8 之前的镜像打不开 `onchain.sqlite`：回滚要恢复发布前的备份、保持前进，或经人工确认后无损回退迁移 002（[RELEASING.md](../../deployment/RELEASING.md)）。
 - 分位数放在浏览器里算，是对 SPEC §2 的理解（用户未反对）。
 - onchain-pulse Chart 5 是否复用图 8，留给 Supplementary 计划。
 - 真实指针能否抓到滑杆手柄、拖框的手感，jsdom 里验证不了，留给第 6 节。
@@ -152,4 +163,6 @@ below floor 与面板底色对比 1.36:1，与最暗一级对比 1.34:1，主要
 任务 7 补充：
 
 - 回填补齐之后（约 13 小时）要补记：各轮请求数与用时、365D 与 All 的补齐轮次、满量的表与响应体积，以及 365D / All 各 Range 与原站的同刻对照（两边排除 forming 列）。
+- 计划 Task 7 的交付物还欠着，与补齐后 365D / All 的对照一起做：对照输入存档成 `services/analytics/tests/onchain/fixtures/sr8-acceptance-<日期>/`，并在 `test_onchain_costbasis_history.py` 里加 `test_sr8_acceptance_readings`（计划待确认第 4 条）。第 1 节和第 4 节的"未存档"指的就是它。
+- 不依赖回填、应在补记 commit 之前做的三项：1440 px 和约 1,024 px 的弹窗检查（第 5 节）、经代理取 `?span=all` 的 gzip 与用时、实例上的重启续传（第 2 节）。
 - 390 px 下三种暗色能否分清、双滑杆手感，需要在真实手机上目视。

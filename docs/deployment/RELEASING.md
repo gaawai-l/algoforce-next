@@ -66,6 +66,17 @@ analytics 在原版（v1）规则之上提供可选规则 O1–O6，由 `WHEELHO
 
 perps worker 启动时不从库里重新派生：启动后立即开始的第一轮取数按新规则重新派生全部永续视图，这一轮完成之前，规则不一致的视图带 `rules_pending: true`。首次以 P5 版本启动时，这一轮还要把回填从 91 天扩到 121 天，多拉约 30 天的 Binance 日包，比平常一轮慢；之后切换规则不需要补数据。不运行相应 worker 的进程（例如 `WHEELHOUSE_PERPS=0` 时的 perps）不会重新派生，相应视图也不标 `rules_pending`。
 
+## onchain 图 8 部署后检查
+
+图 8（Flows → Cost basis 下的 Cost Basis Distribution, All Coins）的历史由 onchain worker 每小时向公共 BRK 回填，规则见 [SPEC §3.7](../features/btc-onchain-perp/SPEC.md)。`deploy/test/verify.py` 不检查下面这些项目，需要手动核对并写进发布记录。
+
+- **启动后立即出现**：已有的 `onchain.sqlite` 里有 D 而没有图 8 时，worker 启动时只从库里复制、派生一次（不访问 BRK，日志 `onchain_urpd_history copied=… fetched=0 absent=0`），图 8 随即出现：只有 D 和库里已定稿的几天（D−1、D−7、D−30、D−90，O1 开着时更多），其余画斜线；上一轮成功时，状态行写 "the rest is still being fetched"。不用等下一个 HH:12。
+- **第一轮回填**：下一个 HH:12 那一轮成功后开始回填，日志出现 `onchain_urpd_history copied=… fetched=120 absent=… duration_ms=…`。`duration_ms` 是回填自己的用时，首轮实测约 270 秒；同一轮的 `onchain_sync_ok duration_ms` 包含回填，所以也会到这个量级。
+- **接口**：用合法钱包会话（与 `verify.py --session-file` 相同）请求 `/api/wheelhouse/v1/onchain/cost-basis-history`：`data_state` 不是 `unavailable`，`backfill_error` 和 `last_error` 都为 null。
+- **偶尔暂停属正常**：BRK 慢时一轮到 5 分钟就停，日志记 `onchain_urpd_history_paused reason=deadline`，`backfill_error` 仍为 null，余下的下一轮接着取，只是补得慢一些。
+- **补齐时间**：365D 约 3 小时（第 3 轮）补齐，All 约 13 小时（第 13 轮）；BRK 慢时轮数更多。
+- **磁盘**：`onchain.sqlite` 约增加 9.5 MB（历史表约 6 MB，派生载荷约 3.3 MB）。
+
 ## 失败与回滚
 
 保留失败日志与实际运行版本，先判断旧版本是否仍可用。需要回滚时选择已验收的历史部署镜像或提交，通过 Coolify 支持的回滚/指定提交重新部署，并重复外网验收。若平台不支持指定提交，则在发布分支创建经过检查的正常回退提交再部署，保留分支历史，不 force push。
@@ -74,7 +85,23 @@ perps worker 启动时不从库里重新派生：启动后立即开始的第一�
 
 **迁移 003（P6）同样如此。** 它新增 `cz_series` 表，并删除旧形状的方向核对结果。应用之后，P6 之前的镜像（迁移最高到 002）读到更新的库，会以同样的 "Perps database is newer than this application" 拒绝启动，整个 analytics 服务都起不来。所以回滚到 P6 之前的版本，要连同数据卷一起处理：先停写，再按发布第 3 步取得的备份恢复 `perps.sqlite`（该备份必须在迁移 003 之前取得，并已验证能恢复）。只回滚镜像不会让服务恢复。
 
-**onchain 迁移 002（SR-8）同样如此。** 它新增 `urpd_history` 表，不改已有的表。应用之后，SR-8 之前的镜像（onchain 迁移最高到 001）打开 `onchain.sqlite` 时，会以 "On-chain database is newer than this application" 拒绝启动；onchain router 在 lifespan 里建库，所以整个 analytics 服务都起不来。发布前按第 3 步备份 `onchain.sqlite`，这份备份必须在迁移 002 之前取得，并已验证能恢复。回滚只能二选一：先停写，用这份备份恢复 `onchain.sqlite`，再回滚镜像；或者保持前进，修复后再发布。只回滚镜像不会让服务恢复。
+**onchain 迁移 002（SR-8）同样如此。** 它新增 `urpd_history` 表，不改已有的表。应用之后，SR-8 之前的镜像（onchain 迁移最高到 001）打开 `onchain.sqlite` 时，会以 "On-chain database is newer than this application" 拒绝启动；onchain router 在 lifespan 里建库，所以整个 analytics 服务都起不来。发布前按第 3 步备份 `onchain.sqlite`，这份备份必须在迁移 002 之前取得，并已验证能恢复。回滚有三条路，只回滚镜像不会让服务恢复：
+
+1. 先停写，用这份备份恢复 `onchain.sqlite`，再回滚镜像；
+2. 保持前进，修复后再发布；
+3. **（需人工确认后执行）无损回退迁移 002，不需要迁移前的备份。** 先停写（停掉 analytics），把 `onchain.sqlite` 另存一份副本，再用 Python 的 `sqlite3`（镜像里没有 sqlite3 命令行）对它执行：
+
+   ```sql
+   DROP TABLE urpd_history;
+   DELETE FROM onchain_schema WHERE version = 2;
+   ```
+
+   之后旧镜像就能打开这个库，再回滚镜像。这样做安全，原因是（已对照 main `1023827` 的代码核对）：
+   - 迁移 002 只新增 `urpd_history` 一张表，不改已有的表，旧代码也不引用它；去掉它和版本 2 的记录，库就回到旧代码认识的样子，迁移 001 的校验和不变；
+   - 旧代码的 `OnchainStore.state()` 只读自己的 `STATE_KEYS`，`sync_state` 里多出的 `history_error` 会被忽略；
+   - 旧代码的 `VIEWS` 里没有 `costbasis_history`，派生表又只按名字读，多出的那一行派生也会被忽略。
+
+   2026-10-20 在副本上演练过：新代码跑完一轮后，旧代码以 "On-chain database is newer than this application" 拒绝打开；执行上面两句后，旧代码能打开这个库并从库里派生，9 个 onchain GET 接口都返回 200。以后再前进时，迁移 002 会重建一张空的历史表，回填从头再来（约 1,456 个请求，约 13 小时）。
 
 在新镜像上运行 derive CLI（`python -m wheelhouse_service.derive --data-dir <目录>`）同样会对该目录里的 `onchain.sqlite` 应用迁移 002：用它演练的只能是备份的副本，演练过的库不能再当回滚用的备份。
 

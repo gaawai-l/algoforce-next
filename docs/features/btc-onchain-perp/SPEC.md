@@ -468,10 +468,12 @@ flowchart LR
 
 **回填的门控与节奏**（R4、R5）
 - **门控**：`backfill = urpd is not None and not errors`，即本轮 hour1、age、size、URPD 四个阶段都没有错误，并且取到了 D。复制和派生留在原位置；向 BRK 的请求在成功路径写完 `last_success_at`、`next_due` 之后才发，所以回填不推迟本轮状态，进程在回填中途被杀也不会一重启就再跑一整轮。任何阶段失败的重试轮（`RETRY_AFTER` 之后）只复制、只派生，不发回填请求。
-- **节奏**：从新到旧顺序发送，一次只有 1 个在途。每轮最多 120 个（`HISTORY_BUDGET`），两次之间等 0.5 秒（`HISTORY_PAUSE_SECONDS`，用 `stopping.wait`，服务停止时立即退出，只等在途的那一个请求），每轮最长 5 分钟（`HISTORY_DEADLINE_SECONDS = 300`，`time.monotonic()` 计时）。365D 在第 3 轮补齐，All 在第 13 轮补齐，约 12–13 小时。
+- **节奏**：从新到旧顺序发送，一次只有 1 个在途。每轮最多 120 个（`HISTORY_BUDGET`），两次之间等 0.5 秒（`HISTORY_PAUSE_SECONDS`，用 `stopping.wait`，服务停止时立即退出，只等在途的那一个请求），每轮最长 5 分钟（`HISTORY_DEADLINE_SECONDS = 300`，`time.monotonic()` 计时）：5 分钟之后不再发新请求，但最后一个在途请求还可能再等到 httpx 的超时（connect、read 各 20 秒）。365D 在第 3 轮补齐，All 在第 13 轮补齐，约 12–13 小时。
+  - 预算按数据目录计：每个有自己 `onchain.sqlite` 的实例（test、本机主检出、每个带独立数据目录的并行工作树）各自回填约 1,456 个请求。开发时同时开着 8787 和 8797，公共 BRK 收到的就是两份。
+  - 日志：请求那一步结束时单独记一行 `onchain_urpd_history copied=… fetched=… absent=… duration_ms=…`，`duration_ms` 是回填自己的用时（从第一个请求之前算起）。本轮的 `onchain_sync_ok duration_ms` 包含回填的时间，回填轮会从秒级跳到约 270 秒，不能拿它当一轮刷新的耗时来告警。
   - 实测（Task 2，只用 fixture，停顿 0）：1,456 个请求分 13 轮（12 轮各 120 个，第 13 轮 16 个），之后每轮 0 个。
   - 实测（controller 的验证实例，2026-10-20）：首轮复制 4 天、请求 120 个，用时 268,514 ms（约 4.5 分钟），在 300 秒上限之内，之后 `urpd_history` 有 124 行。单个请求约 2.2 秒（含 0.5 秒停顿），比计划估计的 1.15 秒慢；BRK 再慢一些，到 5 分钟就会不足 120 个，补齐所需的轮数也相应多于 13。
-- **出错**：遇到第一个 `BrkError` 或坏快照（没有 ≥ $1,000 的桶，或日期与请求的不符，记 `brk_bad_snapshot`）就结束本轮回填。坏快照不作为数据入库，而是记成 absent 行，所以一份坏快照不会永远挡住更早的日子。404 记为 absent 行，满 24 小时（`ABSENT_RETRY`）后再问。错误码写进 `sync_state.history_error`；一次没有错误的回填把它清为 null，不回填的轮次不动它。
+- **出错**：遇到第一个 `BrkError` 或坏快照（没有 ≥ $1,000 的桶，或日期与请求的不符，记 `brk_bad_snapshot`）就结束本轮回填。坏快照不作为数据入库，而是记成 absent 行，所以一份坏快照不会永远挡住更早的日子。404 记为 absent 行，满 24 小时（`ABSENT_RETRY`）后再问。错误码写进 `sync_state.history_error`；一次没有错误的回填把它清为 null，不回填的轮次不动它，因服务停止而中断的回填也不动它（重启后照旧显示上次的错误，直到下一次回填跑完）。
 - **停止与续传**：进度就是历史表本身。每取到一天立即单独提交；重启后，下一轮重新计算窗口里还缺哪些天，从最新的缺口接着往前取，已存的天不会重取。SQLite 每次写入都是原子的，即使被 SIGKILL 也安全。
 - **隔离**：回填（复制和请求）与派生各有自己的 `try`。回填出意外异常只记 `onchain_urpd_history_failed code=history_failed`，**不清**图 8；只有派生出错，才记 `onchain_derive_failed code=history_failed` 并清掉 `costbasis_history`。日志只记错误码和计数，不记数值。
 - **BRK 升版时不重取历史行**（R6）：URPD 没有 version 字段，§7 不做 as-known 回放，`urpd` 表里已定稿的快照同样不重取。确有需要时手动删除这些行，worker 会按上面的规则补回。
@@ -480,19 +482,20 @@ flowchart LR
 **派生与接口**（R7、R18、R20）
 - 载荷：`data_state`、`reasons`、`refreshing`、`span`、`latest_day`、`computed_at`、`floors`、`days`、`close`、`supply`、`status`、`backfill_error`、`last_error`、`brk_version`、`rules`、`rules_pending`。`days`、`close`、`supply`、`status` 四列逐日对齐，`supply` 的每行与 `floors` 对齐；`floors` 不随 Span 切片。
 - 每天有 `status`：`closed`、`forming`、`pending`（还没取到）、`absent`（BRK 没有快照）。`pending` 和 `absent` 的 `close`、`supply` 都是 `null`，绝不是 0。`forming` 的判断与 `/cost-basis` 相同：快照在那一天结束前取到（`fetched_at < day_start(day + 1 day)`）。
-- `data_state` 随 `latest_day`（D），与 day1 数据相同（`day1_state`）：D 是今天，或是昨天且还没到 02:00 UTC，为 `fresh`，否则为 `stale`；还没有取到 D（没有载荷）时为 `unavailable`，`reasons` 为 `["urpd_missing"]`，各列为空数组。`reasons` 只保留 `urpd_missing`、`brk_unavailable`。
+- `data_state` 随 `latest_day`（D），与 day1 数据相同（`day1_state`）：D 是今天，或是昨天且还没到 02:00 UTC，为 `fresh`，否则为 `stale`；没有载荷时为 `unavailable`，`reasons` 为库里记的相关原因，没有时为 `["urpd_missing"]`，各列为空数组。没有载荷，是因为库里还没有可用的 D（没取到过，或 D 的快照为空），或者派生出错。worker 启动时，如果库里有 D 却没有图 8（例如 SR-8 之前留下的库），会立即从库里补一次（`derive_history_if_missing`：只复制、只派生，不访问 BRK），不用等下一个 HH:12 那一轮。`reasons` 只保留 `urpd_missing`、`brk_unavailable`。
 - **`backfill_error` 与 `last_error`**：
   - `backfill_error` 是最近一次回填中止时的错误码（`brk_unavailable`、`brk_bad_request`、`brk_bad_snapshot`），取自载荷。
   - `last_error` 取自 `sync_state.last_error`，与 `/status` 的 `last_error` 同源，成功轮清为 null。任何阶段出错的轮次门控关闭、不回填，也不写 `history_error`，所以只看 `backfill_error` 判断不了"本轮失败、回填被挡住"，要加上它。它可能是 `sync_failed`，不是 BRK 的码。
-  - 界面判断（窗口内有 `pending` 的日子时）：`last_error` 非 null → `cbh.held`；否则 `backfill_error` 非 null → `cbh.paused`；否则 `cbh.backfilling`。没有 `pending` 日就不提回填。
-  - `cbh.held`（"history fetch paused: the last refresh failed ({{code}}); it resumes after the next successful refresh"）不写 "BRK returned"，也不写时间：可重试的错误 5 分钟后重试，不可重试的要等到下一个 HH:12。`cbh.paused`（"history fetch paused: BRK returned {{code}}; retrying next hour"）只用于 `last_error` 为 null 的情况，这时本轮是成功轮，下一次回填就在下一个 HH:12。
+  - 界面判断（窗口内有 `pending` 的日子时）：`last_error` 非 null → `cbh.held`；否则 `reasons` 含 `urpd_missing` → `cbh.waiting`；否则 `backfill_error` 非 null → `cbh.paused`；否则 `cbh.backfilling`。没有 `pending` 日就不提回填。
+  - `cbh.held`（"history fetch paused: the last refresh failed ({{code}}); it resumes after the next successful refresh"）不写 "BRK returned"，也不写时间：可重试的错误 5 分钟后重试，不可重试的要等到下一个 HH:12。`cbh.paused`（"history fetch paused: BRK returned {{code}}; retrying next hour"）只用于 `last_error` 为 null、`reasons` 不含 `urpd_missing` 的情况，这时本轮是成功轮，下一次回填就在下一个 HH:12。
+  - `cbh.waiting`（"history fetch waits for the newest snapshot; it resumes once BRK has it"）：BRK 今天和昨天的 URPD 都还没有时，`_urpd` 返回 None，不算错误，这一轮走成功路径，`last_error` 为 null；但没有 D，门控关闭，不回填，`history_error` 也不变。这时不能说"仍在抓取"，也不能说"下一小时重试"。
   - 视图内没有任何一天存有快照（`coverage.have === 0`）时显示 `cbh.noneStored`（"None of the days in view has a stored snapshot: missing, not zero"）；有存储日但没有格子 > 0.005 时，才是通用的 `seller.noData`。
 - **gzip**（R20）：`create_app` 加 `GZipMiddleware(minimum_size=1024, compresslevel=6)`，本服务没有流式路由；`trace` 中间件在它外层，所以 `X-Request-ID` 和 `Cache-Control` 照常。读接口服务端读出、解析、切片加序列化约 25 ms，时间几乎都花在传输上。
 - **前端超时与刷新**（R18）：`query()` 新增可选参数 `timeoutMs`（默认 5 秒），All 用 30 秒，其余 Span 用 15 秒，超时包括读响应体。刷新间隔 All 为 60 分钟（worker 每小时只写一次），其余 15 分钟。换 Span 时先保留旧图并显示 `loading N days…`；新 Span 取数失败时继续显示上一张图，控件行加 `could not load N days`；只有第一次加载就失败、或当前显示的 Span 自己刷新失败时才显示 unavailable。
 - 派生进入 `derive_from_store` 和 `sync.VIEWS`：规则变化后由 CLI 或 worker 启动时从库里重新派生，计算时间不变，不访问 BRK。
 
 **显示**（R9–R11、R21）
-- 每个日历日固定占一列。`pending` 和 `absent` 的日子画斜线，不进 Contrast 分位、Range 和占用计算，spot 线在此断开；Range 的中心取可见窗口里最后一个有数据的日子的 close。
+- 每个日历日固定占一列。`pending` 和 `absent` 的日子画斜线，不进 Contrast 分位、Range 和占用计算，spot 线在此断开；前后两天都没有 close 的单独一天（例如首轮复制进来的 D−7、D−30、D−90）没有线段可画，画成半径 1.5 的点。原站缺日不占列（偏离 1），没有这种单独的一天。Range 的中心取可见窗口里最后一个有数据的日子的 close。
 - 状态行：`Snapshot 2026-10-19 UTC · 125 of 365 days stored · <回填提示> · <BRK 无快照的天数> · <forming 说明>`。BRK 没有快照的日子另起一句 `N days have no snapshot at BRK`；回填提示见上。
 - `forming` 列（今天的快照）画虚线框，状态行写 `The last column is today's snapshot, still forming`，读数里标 `forming`。
 - 低于 Contrast 下限的格子照原站算（u = 0），显示多一级暗色 `#233142`（用户 2026-10-19 决定），与透明的空格区分；图例多一格 below floor。
@@ -503,7 +506,7 @@ flowchart LR
 1. 缺日：原站取数失败时只保留取到的日子，列被压缩（A:3933–3946）；本地每个日历日固定一列，缺的画斜线，不当 0。
 2. 原站最后一列是实时快照却没有标记；本地标出 forming。
 3. 低于下限的格子：原站画成底色，看起来与"没有币"一样（NOTES:265–267）；本地多一级暗色 `#233142`，计算不变。
-4. 读数行代替浮动 tooltip（原站 A:4263–4288）：悬停某格，或聚焦图后用 ←/→ 换日、↑/↓ 换价格区间、Home/End 跳到首尾、Esc 退出，显示 tooltip 的全部内容（日期、`Bucket $82.0k–$82.5k`、`Supply 219,106 BTC`、`spot $82k`），放在图下一行（`aria-live="polite"`，常驻），键盘也能读。
+4. 读数：tooltip 的内容与原站相同（日期、`Bucket $82.0k–$82.5k`、`Supply 219,106 BTC`、`spot $82k`；A:4263–4288），同样浮在图内（R16），不是图下一行。原站的 tooltip 跟着指针，放在指针右下方；本地放在图内上方、竖向十字线旁，十字线在图宽 60% 以左时放在它右边，否则放在左边，因为键盘读取时没有指针位置。本地加的是键盘读取（聚焦图后 ←/→ 换日、↑/↓ 换价格区间、Home/End 跳到首尾、Esc 退出）和常驻的 `aria-live="polite"` 区域：tooltip 就渲染在这个区域里，所以第一条读数也会被读屏器读出。
 5. 空带缩放算无数据：Range 或拖出的价格带落在一段完全没有币的行上时，按空集合算 Contrast 会得到 [0, 1] 的区间（原站的 `at()` 在没有格子时取 0、top 取 1），图例出现 `0` 和 `1`；本地视为无数据，不画图和图例。同理，没有任何格子有币时，原站取整个网格（A:3966），本地没有行可画。
 6. 当前 Span 刷新失败显示 unavailable 时，Span 控件仍保留，再点一次同一个 Span 重试；否则在 All 上失败后要等一小时才会自动重试，也换不了 Span。
 7. canvas 按 SVG 帧的百分比定位，宽度怎么变都对得上。
@@ -515,17 +518,17 @@ flowchart LR
 
 **最坏情况下的请求数**（只发生在首次回填和 24 小时一次的 absent 重问期间，补齐之后为 0）
 
-每个回填轮最多 120 个请求，一次只有 1 个在途，两个之间至少 0.5 秒。
+每个回填轮最多 120 个请求，一次只有 1 个在途，两个之间至少 0.5 秒。下表都按一个数据目录计：每个有自己 `onchain.sqlite` 的实例（test、本机主检出、每个并行工作树）各算一份。
 
 | 情形 | 请求数 |
 |---|---|
 | 正常回填 | 每轮 ≤ 120 个，共 1,456 个，13 轮补齐；补齐后每天 0 个 |
-| 约 60 分钟内 | 最多两个回填轮：HH:12 的一轮失败，不回填；HH:17 的重试轮成功，回填 ≤ 120 个；下一个 HH:12 又 ≤ 120 个，相隔 55 分钟。所以最多 240 个；规则变更后的重启可能再多一轮 |
+| 约 60 分钟内 | 最多两个回填轮，所以最多 240 个；规则变更后的重启可能再多一轮。两轮可能首尾相接：失败轮之后每 5 分钟重试一次，重试轮在 HH:07–HH:11 之间成功时回填 ≤ 120 个，它的 `next_due` 就是紧接着的 HH:12，下一轮在回填结束后立即开始，又回填 ≤ 120 个。所以最紧时约 10 分钟内发出 240 个，仍然一次只有 1 个在途、两个之间至少 0.5 秒 |
 | BRK 对按日请求持续 5xx 或 429、而 URPD 阶段正常 | 每轮 1 个（第一个错误即停），每小时 1 个 |
 | BRK 对所有历史日都返回 404 | 约 13 轮内把 1,456 天都记成 absent，之后每 24 小时再问一遍，约 1,456 个/天（平均约 61 个/小时，每轮 ≤ 120 个）；实测满 24 小时后各轮为 `[113, 120 × 11, 15]`，共 1,448 个 |
 | 坏快照 | 每个日子每天最多 1 个（记 absent，24 小时后再问），一份坏快照不挡更早的日子 |
 | 任何阶段失败的重试轮、没有取到 D 的轮次 | 0 个 |
-| 每轮最长 | 5 分钟（120 个请求之间至少停顿 59.5 秒） |
+| 每轮最长 | 5 分钟后不再发新请求（120 个请求之间至少停顿 59.5 秒）；最后一个在途请求还可能再等到 httpx 的超时（connect、read 各 20 秒） |
 
 与原站对比：原站每次打开页面以并发 32 请求 365 份快照，点 All 再请求 1,096 份；本地整个回填一共 1,456 个请求，一次只有 1 个在途。
 
@@ -586,9 +589,9 @@ flowchart LR
   - 每张图一张大图，加图例、两侧控件、悬停或键盘读数块、Clusters 表（图 3 另有 Bell curve components 表），以及下方三栏说明；
   - 页头一行写 URPD 快照的日子 D 和来源：形成中时加取数时刻（`URPD snapshot 19 Oct 2026 · 05:12 UTC`），已收盘时写 `URPD snapshot 19 Oct 2026 close`；日期一律取 D，不取取数那天（终审 M2，00:12 那一轮 D 可能退回前一天）；快照仍在形成时写明 `includes the forming snapshot of <日期>`；
   - 缺窗口、缺网格、缺年龄快照时只留标题、控件行和一句说明，不画图，也不显示 0。
-- **Cost basis · 图 8**（Cost Basis Distribution, All Coins，规则见 §3.7）：接在图 4 下面，一张大图，加控件行、状态行、色阶图例、读数行和三栏说明。
+- **Cost basis · 图 8**（Cost Basis Distribution, All Coins，规则见 §3.7）：接在图 4 下面，一张大图，加控件行、状态行、色阶图例、读数浮窗和三栏说明。
   - 控件：Span 30D / 90D / **365D** / All（最近 1,461 天），Range **All** / ±50% / ±25% / ±10%，Contrast 双滑杆 0–100（默认 **75 / 95**）；拖框缩放，双击或 Reset zoom 还原。
-  - 热力格画在 canvas 上，坐标轴、spot 线、缺失日的斜线和 forming 的虚线框画在 SVG 里；图可聚焦，←/→ 换日，↑/↓ 换价格区间，Home/End 跳到首尾，Esc 退出，读数放在图下一行，不用浮窗。
+  - 热力格画在 canvas 上，坐标轴、spot 线、缺失日的斜线和 forming 的虚线框画在 SVG 里；图可聚焦，←/→ 换日，↑/↓ 换价格区间，Home/End 跳到首尾，Esc 退出；读数是浮在图内上方、十字线旁的 tooltip，内容与原站相同，渲染在常驻的 `aria-live` 区域里。
   - 缺失日画斜线，状态行写已存 x / N 天；回填暂停时写明原因；整个可见窗口都没有数据时只说一句话，不画图，也不显示 0。
   - 三栏说明窄屏全部展开。
 - **Size cohorts**（图 5、图 6，规则见 §3.6）：
@@ -704,14 +707,15 @@ flowchart LR
 - §2 注明图 8 的 Contrast 分位、Range 和缩放在前端算、服务端只按 Span 切片；服务对响应启用 gzip；后端文件表加 `costbasis_history.py`。§3.0 存储表加 `urpd_history`（迁移 002，onchain 库的第一个新迁移）。
 - §3.7 新增"成本价分布"：`urpd_history` 与 1,461 天窗口、各天的来源、回填的门控与节奏、停止与续传、BRK 升版不重取、派生与接口、显示规则、与原站的有意偏离、最坏情况下的请求数。§5 Flows → Cost basis 加图 8 一条。
 - 执行中的裁定：
-  - 请求数按轮计，不按滑动小时计：每个回填轮 ≤ 120 个，约 60 分钟内最多两个回填轮（一个失败的槽位加一个成功的重试轮），所以最多 240 个，规则变更后的重启可能再多一轮；只发生在首次回填和 24 小时一次的 absent 重问期间。
+  - 请求数按轮计，不按滑动小时计：每个回填轮 ≤ 120 个，约 60 分钟内最多两个回填轮（一个失败的槽位加一个成功的重试轮），所以最多 240 个，规则变更后的重启可能再多一轮；只发生在首次回填和 24 小时一次的 absent 重问期间。终审补充：两轮可能首尾相接，最紧时约 10 分钟内 240 个；每轮在 5 分钟后还可能等最后一个在途请求；预算按数据目录计（见 §3.7 最坏情况表）。
   - 空的 supply 行是 absent，不是一列 0；坏快照记成 absent 行，不作为数据入库。
   - 读接口的载荷加 `last_error`，用来区分"回填中"和"本轮失败、回填被挡住"；界面据此加 `cbh.held` 和 `cbh.noneStored`（原计划只有 `cbh.paused`）。
   - 两天刻度取 1970-01-01 起的偶数日（原站内嵌 d3 v7.9.0 的 `unixDay`），不是计划写的 `(UTC 日 − 1) % 2`。
   - `query()` 的超时包括读响应体；图 8 的 All 用 30 秒；当前 Span 刷新失败时仍保留 Span 控件。
   - 图 8 进入 `derive_from_store` 和 `sync.VIEWS`，规则变化后随其他视图重新派生。
   - 存储实测约 6 MB（SQLite 页），不是计划估计的 2.6–3.3 MB。
-- 与原站的有意偏离见 §3.7：缺日画斜线、forming 标出、低于下限多一级暗色 `#233142`、读数行代替浮窗、空带缩放算无数据、Span 控件在刷新失败后保留、canvas 按百分比定位、坐标轴按 CSS 像素、列带定位、配色、三栏说明由我们起草。
+  - 终审修复（2026-10-20）：worker 启动时库里有 D 而没有图 8，立即从库里补派生，不访问 BRK（M1）；有缓存、刷新失败过的 Span 在重新取数时写 `loading N days…`（M2）；没取到 D 时状态行写 `cbh.waiting`（M3）；前后都缺的单独一天画成点，回填单独记 `duration_ms`，服务停止时不清 `history_error`（M8）。
+- 与原站的有意偏离见 §3.7：缺日画斜线、forming 标出、低于下限多一级暗色 `#233142`、读数浮窗放在十字线旁并加键盘读取和常驻 `aria-live`、空带缩放算无数据、Span 控件在刷新失败后保留、canvas 按百分比定位、坐标轴按 CSS 像素、列带定位、配色、三栏说明由我们起草。
 - 遗留：被截断但非空的 BRK 快照检测不出来；三栏说明的中英文措辞交用户审；首轮回填实测约 4.5 分钟，离 5 分钟上限只有约 10% 的余量。
 
 **v3 实施修订**（state-report 图 5、图 6，2026-10-20，见 [PLAN-SR5-6.md](PLAN-SR5-6.md)）
