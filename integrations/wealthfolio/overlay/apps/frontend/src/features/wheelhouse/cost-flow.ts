@@ -327,11 +327,15 @@ export function kLabel(text: TextFn, s: SideSetting, curves: SideCurves | null):
   return text("costflow.k.autoK", { k: f.k });
 }
 
+// A:1947, A:1949-1953: a width and a peak cutoff as the chip and the sliders show them.
+export const fmtBw = (bw: number) => bw.toFixed(3);
+export const fmtCutoff = (minProm: number) => minProm.toFixed(2);
+
 // A:1944-1948: the ⚙ chip; Manual shows its width and peak cutoff.
 export function chip(s: SideSetting): string {
   if (s.smoothing === "none") return "raw";
   if (s.smoothing === "auto") return "auto";
-  return `${s.bw.toFixed(3)} / ${s.minProm.toFixed(2)}`;
+  return `${fmtBw(s.bw)} / ${fmtCutoff(s.minProm)}`;
 }
 
 // A:1880-1904: one bucket's tooltip: its price range, the real flow, the LTH change (aging in or

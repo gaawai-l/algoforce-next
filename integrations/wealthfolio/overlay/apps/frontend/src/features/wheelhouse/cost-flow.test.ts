@@ -21,6 +21,8 @@ import {
   flowTip,
   flowTotals,
   fmtBtc,
+  fmtBw,
+  fmtCutoff,
   fmtPrice,
   fmtSigned,
   gridFor,
@@ -472,6 +474,14 @@ describe("cost-flow chart 3 readings", () => {
     expect(chip({ ...DEFAULT_SIDE, smoothing: "none" })).toBe("raw");
     // The slider ends (U1): width 0.10, cutoff 0.40, in the same A:1947 format.
     expect(chip({ ...DEFAULT_SIDE, smoothing: "kde", bw: 0.1, minProm: 0.4 })).toBe("0.100 / 0.40");
+  });
+
+  // The chip and the sliders' read-outs show a width and a cutoff in one format each.
+  it("formats the width and the peak cutoff once for the chip and the sliders", () => {
+    expect([fmtBw(0.02), fmtBw(0.005), fmtBw(0.1)]).toEqual(["0.020", "0.005", "0.100"]);
+    expect([fmtCutoff(0.05), fmtCutoff(0.01), fmtCutoff(0.4)]).toEqual(["0.05", "0.01", "0.40"]);
+    const manual = { ...DEFAULT_SIDE, smoothing: "kde" as const, bw: 0.037, minProm: 0.155 };
+    expect(chip(manual)).toBe(`${fmtBw(0.037)} / ${fmtCutoff(0.155)}`);
   });
 
   // derived from page values: 30d All Zoom All, sell side minProm 0.40 -> one peak, $77,750,

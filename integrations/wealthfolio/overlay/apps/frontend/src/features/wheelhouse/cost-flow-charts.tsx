@@ -36,6 +36,8 @@ import {
   clusters,
   flowTip,
   flowTotals,
+  fmtBw,
+  fmtCutoff,
   fmtPrice,
   fmtSigned,
   gridFor,
@@ -609,7 +611,7 @@ export function SideControls({
       max: "0.10",
       step: "0.001",
       value: bw,
-      shown: bw.toFixed(3),
+      shown: fmtBw(bw),
     },
     {
       key: "minProm",
@@ -618,7 +620,7 @@ export function SideControls({
       max: "0.40",
       step: "0.005",
       value: minProm,
-      shown: minProm.toFixed(2),
+      shown: fmtCutoff(minProm),
     },
   ] as const;
   return (
