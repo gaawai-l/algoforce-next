@@ -172,6 +172,7 @@ def test_state_roundtrip_and_latest_urpd(tmp_path: Path):
         "next_due": None,
         "missing_series": None,
         "reasons": None,
+        "history_error": None,
     }
     store.set_state(brk_version="0.12.2", refreshing="1", missing_series='["x"]')
     store.set_state(refreshing=None, last_error="brk_unavailable")

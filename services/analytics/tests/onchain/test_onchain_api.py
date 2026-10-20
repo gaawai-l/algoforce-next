@@ -28,6 +28,7 @@ from wheelhouse_service.onchain import sync as sync_module
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
 from wheelhouse_service.onchain.costbasis import StoredCostBasis
+from wheelhouse_service.onchain.costbasis_history import HISTORY_BUDGET
 from wheelhouse_service.onchain.costflow import StoredCostFlow
 from wheelhouse_service.onchain.models import closed_day, day1_state, hour1_state
 from wheelhouse_service.onchain.pressure import Pressure, seller_pressure
@@ -484,6 +485,26 @@ def test_worker_runs_only_while_the_app_runs(tmp_path: Path):
         assert "wheelhouse-onchain" in {thread.name for thread in threading.enumerate()}
 
     assert "wheelhouse-onchain" not in {thread.name for thread in threading.enumerate()}
+
+
+def test_router_worker_backfills_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    recorded: dict[str, Any] = {}
+
+    class Recorder:
+        def __init__(self, *args: object, **options: Any) -> None:
+            recorded.update(options)
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(api, "OnchainSync", Recorder)
+    with TestClient(router_app(tmp_path / "onchain.sqlite", start_worker=True)):
+        pass
+
+    assert recorded["history_budget"] == HISTORY_BUDGET == 120
 
 
 def test_capability_and_get_only_schema(tmp_path: Path):

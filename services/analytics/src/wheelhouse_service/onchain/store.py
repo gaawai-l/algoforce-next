@@ -22,6 +22,7 @@ STATE_KEYS = (
     "next_due",
     "missing_series",
     "reasons",
+    "history_error",
 )
 
 

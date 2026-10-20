@@ -16,6 +16,7 @@ from .agecohorts import INPUTS as AGE_INPUTS
 from .agecohorts import AgeBands, AgeCohorts
 from .brk import AGE_FLOOR_SERIES, DAY1_SERIES, HOUR1_SERIES, SIZE_SERIES, BrkClient
 from .costbasis import StoredCostBasis
+from .costbasis_history import HISTORY_BUDGET
 from .costflow import StoredCostFlow
 from .cycle import Cycle
 from .levels import ModelLine, line_series
@@ -134,7 +135,11 @@ def create_router(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         nonlocal store
         store = OnchainStore(path)
-        worker = OnchainSync(store, client or BrkClient(), rules=rules) if start_worker else None
+        worker = (
+            OnchainSync(store, client or BrkClient(), rules=rules, history_budget=HISTORY_BUDGET)
+            if start_worker
+            else None
+        )
         if worker:
             worker.start()
         yield

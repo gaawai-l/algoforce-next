@@ -14,6 +14,7 @@ View = Literal[
     "agecohorts",
     "perps",
     "sizes",
+    "costbasis_history",
 ]
 
 ALL_RULES: Rules = frozenset(get_args(Rule))

@@ -5,6 +5,7 @@ import threading
 from collections.abc import Callable, Set
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import httpx
@@ -20,6 +21,7 @@ from onchain_fixture import (
     seed_golden,
 )
 
+from wheelhouse_service.market import timestamp
 from wheelhouse_service.onchain.agecohorts import AgeCohorts
 from wheelhouse_service.onchain.brk import (
     AGE_ONLY_SERIES,
@@ -36,6 +38,11 @@ from wheelhouse_service.onchain.brk import (
     Urpd,
 )
 from wheelhouse_service.onchain.costbasis import BUCKETS, MIN_PRICE, PAST_DAYS, StoredCostBasis
+from wheelhouse_service.onchain.costbasis_history import (
+    HISTORY_PAUSE_SECONDS,
+    CostBasisHistory,
+    HistoryDay,
+)
 from wheelhouse_service.onchain.costflow import StoredCostFlow, cost_flow
 from wheelhouse_service.onchain.cycle import Cycle
 from wheelhouse_service.onchain.levels import median_cost
@@ -44,8 +51,15 @@ from wheelhouse_service.onchain.pressure import Pressure, lookback
 from wheelhouse_service.onchain.sellside import SellSide
 from wheelhouse_service.onchain.sizes import SizeCohorts
 from wheelhouse_service.onchain.store import OnchainStore
-from wheelhouse_service.onchain.sync import DAY1_FETCH, URPD_SET, OnchainSync, closed_days
-from wheelhouse_service.rules import Rules
+from wheelhouse_service.onchain.sync import (
+    DAY1_FETCH,
+    RETRY_AFTER,
+    URPD_SET,
+    OnchainSync,
+    closed_days,
+    next_slot,
+)
+from wheelhouse_service.rules import ALL_RULES, Rules
 
 NOW = datetime(2026, 10, 16, 10, 40, tzinfo=UTC)
 LINES = {"true_mean", "short_term", "average", "long_term", "median"}
@@ -67,9 +81,10 @@ def sync_for(
     transport: httpx.MockTransport,
     now: datetime,
     rules: Rules = frozenset(),
+    **options: Any,
 ) -> OnchainSync:
     client = BrkClient(httpx.Client(transport=transport), clock=lambda: now)
-    return OnchainSync(store, client, rules=rules)
+    return OnchainSync(store, client, rules=rules, **options)
 
 
 def run(
@@ -3142,3 +3157,473 @@ def test_a_failed_refetch_of_an_age_snapshot_keeps_the_grids(
     flow = costflow_of(store)
     assert [grid.step for grid in flow.grids] == [500, 200]
     assert (flow.age, flow.reasons) == (None, ["age_urpd_mismatch"])
+
+
+# The cost-basis history (Chart 8). Every round runs on the golden sample, which has a snapshot for
+# any date, and every budget comes with history_pause=0.
+Calls = list[tuple[str, dict[str, str]]]
+
+
+def history_requests(calls: Calls, d: date) -> list[str]:
+    """The days the history asked for, in order: the `all lin500` snapshots of days other than D
+    = `d` and its past days, which `_urpd` asks for."""
+    urpd_days = {(d - timedelta(days=n)).isoformat() for n in (0, 1, 7, 30, 90)}
+    return [
+        day
+        for cohort, day, agg in urpd_calls(calls)
+        if (cohort, agg) == ("all", "lin500") and day not in urpd_days
+    ]
+
+
+def is_history(request: httpx.Request) -> bool:
+    return bool(history_requests([(request.url.path, dict(request.url.params))], D))
+
+
+def history_of(store: OnchainStore) -> dict[date, HistoryDay]:
+    return store.urpd_history(D - timedelta(days=1460), D)
+
+
+def payload(store: OnchainStore) -> CostBasisHistory:
+    derived = store.derived("costbasis_history")
+    assert derived is not None
+    return CostBasisHistory.model_validate_json(derived[0])
+
+
+def history_round(
+    store: OnchainStore, transport: httpx.MockTransport, now: datetime, budget: int = 0
+) -> bool:
+    return sync_for(store, transport, now, history_budget=budget, history_pause=0).run_once(now=now)
+
+
+def recorded(transport: httpx.MockTransport) -> tuple[httpx.MockTransport, Calls]:
+    """`transport`, each request recorded as (path, query parameters) before it is passed on."""
+    calls: Calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, dict(request.url.params)))
+        return transport.handler(request)
+
+    return httpx.MockTransport(handler), calls
+
+
+def every_day(first: date, last: date) -> set[date]:
+    return {first + timedelta(days=n) for n in range((last - first).days + 1)}
+
+
+def test_history_copies_final_snapshots_without_requests(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, calls = brk_transport(urpd_dir=GOLDEN)
+    sync = sync_for(store, transport, NOW)
+    assert (sync.history_budget, sync.history_pause) == (0, HISTORY_PAUSE_SECONDS)
+
+    assert sync.run_once(now=NOW) is True
+
+    # Budget 0, the default: D-1, D-7, D-30 and D-90 come from urpd, nothing else is asked for.
+    assert urpd_calls(calls) == same_day(D) + past_of(D)
+    assert set(history_of(store)) == {
+        date(2026, 10, 15),
+        date(2026, 10, 9),
+        date(2026, 9, 16),
+        date(2026, 7, 18),
+    }
+    result = payload(store)
+    assert result.status[-1] == "forming" and result.status[-2] == "closed"
+    assert (result.status.count("closed"), result.status.count("pending")) == (4, 1456)
+    assert result.backfill_error is None
+
+
+def test_history_backfills_newest_first_within_the_budget(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, calls = brk_transport(urpd_dir=GOLDEN)
+
+    assert history_round(store, transport, NOW, budget=5) is True
+
+    assert history_requests(calls, D) == [
+        "2026-10-14",
+        "2026-10-13",
+        "2026-10-12",
+        "2026-10-11",
+        "2026-10-10",
+    ]
+    assert len(history_of(store)) == 9
+    # Derived again after the backfill.
+    assert payload(store).status.count("closed") == 9
+
+
+def test_history_requests_come_after_the_round_state_is_written(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport(urpd_dir=GOLDEN)
+    seen: dict[str, str | None] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if is_history(request) and not seen:
+            seen.update(store.state())
+        return inner.handler(request)
+
+    assert history_round(store, httpx.MockTransport(handler), NOW, budget=1) is True
+
+    assert seen["last_success_at"] == timestamp(NOW)
+    assert seen["next_due"] == timestamp(next_slot(NOW))
+
+
+def test_history_resumes_after_a_restart(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    first, first_calls = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, first, NOW, budget=5) is True
+
+    # A new worker on the same store, an hour on.
+    second, second_calls = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, second, NOW + timedelta(hours=1), budget=5) is True
+
+    assert history_requests(second_calls, D) == [
+        "2026-10-08",
+        "2026-10-07",
+        "2026-10-06",
+        "2026-10-05",
+        "2026-10-04",
+    ]
+    assert not set(history_requests(first_calls, D)) & set(history_requests(second_calls, D))
+
+
+def test_history_leaves_days_that_are_not_final_to_urpd(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # The closed day is 10-14, and D-1 is not final.
+    early = datetime(2026, 10, 16, 1, 30, tzinfo=UTC)
+    transport, calls = brk_transport(urpd_dir=GOLDEN)
+
+    assert history_round(store, transport, early, budget=3) is True
+
+    assert history_requests(calls, D) == ["2026-10-14", "2026-10-13", "2026-10-12"]
+    assert date(2026, 10, 15) not in history_of(store)
+    # 10-15 is read live from urpd.
+    assert payload(store).status[-2:] == ["closed", "forming"]
+
+
+def test_history_records_a_404_and_asks_again_a_day_later(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    gap = date(2026, 10, 13)
+    transport, calls = brk_transport(
+        urpd_dir=GOLDEN, urpd_dates=every_day(date(2021, 1, 1), D) - {gap}
+    )
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert history_round(store, transport, NOW, budget=5) is True
+
+    assert gap.isoformat() in history_requests(calls, D)
+    # Counts only: the copy before the round state is written, then the backfill.
+    assert "onchain_urpd_history copied=4 fetched=0 absent=0" in caplog.text
+    assert "onchain_urpd_history copied=0 fetched=4 absent=1" in caplog.text
+    assert history_of(store)[gap].close is None
+    assert payload(store).status[-4] == "absent"
+
+    later = sync_for(store, transport, NOW + timedelta(hours=23), history_budget=1, history_pause=0)
+    asked = len(calls)
+    later._urpd_history(NOW + timedelta(hours=23), fetch=True)
+    # Not due yet.
+    assert history_requests(calls[asked:], D) == ["2026-10-08"]
+    asked = len(calls)
+    later._urpd_history(NOW + timedelta(hours=24), fetch=True)
+    # Due: the newest gap again.
+    assert history_requests(calls[asked:], D) == ["2026-10-13"]
+
+
+def test_history_stops_at_the_first_brk_failure(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport(urpd_dir=GOLDEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503) if is_history(request) else inner.handler(request)
+
+    transport, calls = recorded(httpx.MockTransport(handler))
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert history_round(store, transport, NOW, budget=5) is True
+
+    assert history_requests(calls, D) == ["2026-10-14"]
+    state = store.state()
+    assert state["last_error"] is None and strings(state["reasons"]) == []
+    assert state["history_error"] == "brk_unavailable"
+    assert payload(store).backfill_error == "brk_unavailable"
+    assert "onchain_urpd_history_failed code=brk_unavailable" in caplog.text
+    # A call that asks BRK for nothing leaves it.
+    sync_for(store, transport, NOW, history_budget=5)._urpd_history(NOW, fetch=False)
+    assert store.state()["history_error"] == "brk_unavailable"
+
+    # A clean round clears it.
+    plain, _ = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, plain, NOW + timedelta(hours=1), budget=5) is True
+    assert store.state()["history_error"] is None and payload(store).backfill_error is None
+
+
+@pytest.mark.parametrize("names", [set(HOUR1_SERIES), set(AGE_ONLY_SERIES), set(SIZE_SERIES)])
+def test_history_is_not_fetched_on_a_retry_round(tmp_path: Path, names: set[str]):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    plain, _ = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, plain, NOW, budget=5) is True
+
+    # The hour1, age or size stage fails, and is retried in five minutes.
+    second = NOW + timedelta(hours=1)
+    transport, second_calls = recorded(failing_for(names, urpd_dir=GOLDEN))
+    assert history_round(store, transport, second, budget=5) is True
+
+    assert history_requests(second_calls, D) == []
+    assert store.state()["next_due"] == timestamp(second + RETRY_AFTER)
+    # The copy and the derive still ran.
+    derived = store.derived("costbasis_history")
+    assert derived is not None and derived[1] == second
+
+
+def test_history_is_not_fetched_when_the_urpd_stage_failed(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    plain, _ = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, plain, NOW, budget=5) is True
+    assert len(history_of(store)) == 9
+
+    # Only D fails: `_urpd` fails, and the stored D is reused. Without the gate this round would
+    # ask for 10-08 ... 10-04.
+    inner, second_calls = brk_transport(urpd_dir=GOLDEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == f"/api/urpd/all/{D.isoformat()}":
+            return httpx.Response(503)
+        return inner.handler(request)
+
+    second = NOW + timedelta(hours=1)
+    assert history_round(store, httpx.MockTransport(handler), second, budget=5) is True
+
+    assert store.state()["last_error"] == "brk_unavailable"
+    assert history_requests(second_calls, D) == []
+    assert len(history_of(store)) == 9
+    assert store.derived("costbasis_history") is not None
+
+
+def test_history_is_not_fetched_without_d(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    plain, _ = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, plain, NOW, budget=5) is True
+
+    # Neither 10-18 nor 10-17 has a snapshot: `_urpd` returns None without an error.
+    later = datetime(2026, 10, 18, 10, 40, tzinfo=UTC)
+    transport, second_calls = brk_transport(
+        urpd_dir=GOLDEN, urpd_dates=every_day(date(2021, 1, 1), D)
+    )
+    assert history_round(store, transport, later, budget=5) is True
+
+    assert store.state()["last_error"] is None
+    assert urpd_calls(second_calls) == [
+        ("all", "2026-10-18", "lin500"),
+        ("all", "2026-10-17", "lin500"),
+    ]
+    assert [d for d, row in history_of(store).items() if row.close is None] == []
+
+
+@pytest.mark.parametrize("bad", [{"buckets": []}, {"date": "2026-10-13"}])
+def test_history_stops_at_a_bad_snapshot_without_clearing_chart_8(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, bad: dict[str, Any]
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, calls = brk_transport(urpd_dir=GOLDEN)
+    snapshot = golden_urpd("all", "lin500", date(2026, 10, 14)).model_dump(mode="json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/urpd/all/2026-10-14":
+            # Recorded, then answered with the bad snapshot.
+            inner.handler(request)
+            return httpx.Response(200, json={**snapshot, **bad})
+        return inner.handler(request)
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert history_round(store, httpx.MockTransport(handler), NOW, budget=5) is True
+
+    assert history_requests(calls, D) == ["2026-10-14"]
+    # Marked absent, never stored as data.
+    assert history_of(store)[date(2026, 10, 14)].close is None
+    assert store.derived("costbasis_history") is not None
+    assert store.state()["history_error"] == "brk_bad_snapshot"
+    assert payload(store).backfill_error == "brk_bad_snapshot"
+    assert "onchain_urpd_history_failed code=brk_bad_snapshot" in caplog.text
+
+    # The bad day does not block the older ones.
+    plain, second_calls = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, plain, NOW + timedelta(hours=1), budget=1) is True
+    assert history_requests(second_calls, D) == ["2026-10-13"]
+    assert store.derived("costbasis_history") is not None
+
+
+def test_history_backfill_has_a_five_minute_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, calls = brk_transport(urpd_dir=GOLDEN)
+    # Read once as the requests start and once before each request: 0, 100, 200, 300, ...
+    ticks = iter(range(0, 100_000, 100))
+    monkeypatch.setattr("wheelhouse_service.onchain.sync.time.monotonic", lambda: next(ticks))
+
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert history_round(store, transport, NOW, budget=10) is True
+
+    assert len(history_requests(calls, D)) == 2
+    assert "onchain_urpd_history_paused reason=deadline" in caplog.text
+    assert store.state()["history_error"] is None
+
+
+def test_history_window_drops_rows_older_than_1461_days(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    old = golden_urpd("all", "lin500", date(2026, 10, 15))
+    for n in (1461, 1460):
+        store.save_urpd_history(old.model_copy(update={"date": D - timedelta(days=n)}), NOW)
+    transport, _ = brk_transport(urpd_dir=GOLDEN)
+
+    assert history_round(store, transport, NOW) is True
+
+    assert D - timedelta(days=1460) in history_of(store)
+    assert store.urpd_history(D - timedelta(days=1461), D - timedelta(days=1461)) == {}
+
+
+def test_history_stops_promptly_when_the_worker_stops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, calls = brk_transport(urpd_dir=GOLDEN)
+    syncs: list[OnchainSync] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if is_history(request):
+            syncs[0].stopping.set()
+        return inner.handler(request)
+
+    sync = sync_for(store, httpx.MockTransport(handler), NOW, history_budget=10, history_pause=60)
+    syncs.append(sync)
+    waits: list[float | None] = []
+    wait = sync.stopping.wait
+
+    def recorded_wait(timeout: float | None = None) -> bool:
+        waits.append(timeout)
+        return wait(timeout)
+
+    monkeypatch.setattr(sync.stopping, "wait", recorded_wait)
+    started = perf_counter()
+    assert sync.run_once(now=NOW) is True
+    elapsed = perf_counter() - started
+
+    assert len(history_requests(calls, D)) == 1 and elapsed < 5
+    # No pause before the first request; the pause before the second ends as the worker stops.
+    assert waits == [0, 60]
+
+
+def test_history_does_not_change_what_the_cost_basis_views_read(tmp_path: Path):
+    plain = OnchainStore(tmp_path / "plain.sqlite")
+    backfilled = OnchainStore(tmp_path / "backfilled.sqlite")
+    for store, budget in ((plain, 0), (backfilled, 5)):
+        for at in (NOW, NOW + timedelta(hours=1)):
+            transport, _ = brk_transport(urpd_dir=GOLDEN)
+            assert history_round(store, transport, at, budget=budget) is True
+
+    assert len(history_of(plain)) == 4 and len(history_of(backfilled)) == 14
+    for kind in ("costbasis", "levels"):
+        before, after = plain.derived(kind), backfilled.derived(kind)
+        assert before is not None and after is not None
+        assert before[0] == after[0]
+    assert urpd_rows(plain) == urpd_rows(backfilled)
+
+
+def test_history_derive_failure_is_isolated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, transport, NOW) is True
+    assert store.derived("costbasis_history") is not None
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("wheelhouse_service.onchain.sync.cost_basis_history", boom)
+    again, _ = brk_transport(urpd_dir=GOLDEN)
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert history_round(store, again, NOW + timedelta(hours=1), budget=5) is True
+
+    assert store.state()["last_error"] is None
+    assert store.derived("costbasis") is not None and store.derived("costbasis_history") is None
+    assert "onchain_derive_failed code=history_failed" in caplog.text and "boom" not in caplog.text
+
+
+def test_history_copy_failure_keeps_chart_8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    # D-1 is not final yet, so the next round has it to copy.
+    early = datetime(2026, 10, 16, 1, 30, tzinfo=UTC)
+    transport, _ = brk_transport(urpd_dir=GOLDEN)
+    assert history_round(store, transport, early) is True
+    assert store.derived("costbasis_history") is not None
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(OnchainStore, "save_urpd_history", boom)
+    second = NOW + timedelta(hours=1)
+    again, _ = brk_transport(urpd_dir=GOLDEN)
+    with caplog.at_level(logging.INFO, logger="wheelhouse.onchain"):
+        assert history_round(store, again, second, budget=5) is True
+
+    derived = store.derived("costbasis_history")
+    assert derived is not None and derived[1] == second
+    assert store.state()["last_error"] is None
+    # Both the copy before the round state is written and the backfill after it failed.
+    assert caplog.text.count("onchain_urpd_history_failed code=history_failed") == 2
+    assert "boom" not in caplog.text
+
+
+def test_history_skips_an_empty_snapshot(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport(urpd_dir=GOLDEN)
+    # Every rule on: none is implemented for Chart 8.
+    sync = sync_for(store, transport, NOW, ALL_RULES)
+    empty = golden_urpd("all", "lin500", date(2026, 10, 15)).model_copy(update={"buckets": []})
+    store.save_urpd(golden_urpd("all", "lin500", D), NOW)
+    store.save_urpd(empty, NOW)
+
+    # Final, but never copied, and copying it is no error.
+    sync._urpd_history(NOW, fetch=False)
+    assert history_of(store) == {}
+    sync._derive_history(NOW)
+
+    # A snapshot without buckets is missing, never a column of zeros.
+    result = payload(store)
+    assert (result.status[-2], result.close[-2], result.supply[-2]) == ("pending", None, None)
+    assert result.status[-1] == "forming" and result.rules == []
+
+    # Nor is an empty D: there is then no Chart 8.
+    store.save_urpd(golden_urpd("all", "lin500", D).model_copy(update={"buckets": []}), NOW)
+    sync._derive_history(NOW)
+    assert store.derived("costbasis_history") is None
+
+
+def test_history_records_the_brk_error_code(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    inner, _ = brk_transport(urpd_dir=GOLDEN)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400) if is_history(request) else inner.handler(request)
+
+    assert history_round(store, httpx.MockTransport(handler), NOW, budget=5) is True
+
+    assert store.state()["history_error"] == "brk_bad_request"
+    assert payload(store).backfill_error == "brk_bad_request"
+
+
+def test_history_copy_replaces_an_absent_row(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport(urpd_dir=GOLDEN)
+    sync = sync_for(store, transport, NOW)
+    # BRK had no 10-09 when the backfill asked; now `_urpd` holds it, final, as D-7.
+    week = date(2026, 10, 9)
+    store.save_urpd_history_absent(week, NOW - timedelta(hours=1))
+    store.save_urpd(golden_urpd("all", "lin500", D), NOW)
+    store.save_urpd(golden_urpd("all", "lin500", week), NOW)
+
+    sync._urpd_history(NOW, fetch=False)
+
+    row = history_of(store)[week]
+    assert row.close == golden_urpd("all", "lin500", week).close and row.fetched_at == NOW

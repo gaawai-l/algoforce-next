@@ -38,6 +38,15 @@ from .costbasis import (
     cost_basis,
     line_order,
 )
+from .costbasis_history import (
+    ABSENT_RETRY,
+    HISTORY_DAYS,
+    HISTORY_DEADLINE_SECONDS,
+    HISTORY_PAUSE_SECONDS,
+    HistoryDay,
+    cost_basis_history,
+    history_row,
+)
 from .costflow import GRIDS, WINDOWS, StoredCostFlow, cost_flow
 from .cycle import classify
 from .levels import ModelLine, last_complete, model_lines
@@ -93,10 +102,22 @@ def closed_days(at: datetime) -> list[date]:
 
 
 class OnchainSync:
-    def __init__(self, store: OnchainStore, client: BrkClient, *, rules: Rules) -> None:
+    def __init__(
+        self,
+        store: OnchainStore,
+        client: BrkClient,
+        *,
+        rules: Rules,
+        history_budget: int = 0,
+        history_pause: float = HISTORY_PAUSE_SECONDS,
+    ) -> None:
         self.store = store
         self.client = client
         self.rules = rules
+        # The cost-basis history's requests per round; 0 asks BRK for none, but what `_urpd`
+        # already holds is still copied and Chart 8 still derived.
+        self.history_budget = history_budget
+        self.history_pause = history_pause
         self.stopping = Event()
         self.thread: Thread | None = None
 
@@ -268,6 +289,14 @@ class OnchainSync:
         # fetched, and are as of the first, like the pressure.
         self._derive_age_cohorts(hour1_missing, None if age_error else hour1_done)
         self._derive_sizes(hour1_missing, size_done)
+        # Chart 8 comes last. Here it only copies and derives: BRK is asked for the history only
+        # once the round's state is written below.
+        try:
+            self._urpd_history(at, fetch=False)
+        except Exception:
+            # Never log the exception: it may carry values. A fixed code is enough here.
+            logger.warning("onchain_urpd_history_failed code=history_failed")
+        self._derive_history(clock())
         absent = [name for name in DAY1_FETCH if name in missing | range_missing]
         absent_hour1 = [
             name
@@ -290,6 +319,8 @@ class OnchainSync:
         errors = [
             error for error in (hour1_error, age_error, size_error, urpd_error) if error is not None
         ]
+        # The history is backfilled only when every stage fetched and D is this round's.
+        backfill = urpd is not None and not errors
         if errors:
             # Retrying soon is worth it when any one of the failed stages can be retried.
             return next((error for error in errors if error.retryable), errors[0])
@@ -298,6 +329,14 @@ class OnchainSync:
             last_error=None,
             next_due=timestamp(next_slot(done)),
         )
+        if backfill:
+            try:
+                self._urpd_history(at, fetch=True)
+            except Exception:
+                logger.warning("onchain_urpd_history_failed code=history_failed")
+            # Derived again even when nothing was written, so a cleared history_error reaches the
+            # payload.
+            self._derive_history(clock())
         return None
 
     def _replace(self, names: Sequence[str], index: Index, at: datetime, missing: set[str]) -> None:
@@ -485,6 +524,122 @@ class OnchainSync:
         stored = self.store.latest_urpd(URPD_COHORT, URPD_AGG)
         oldest = at.astimezone(UTC).date() - timedelta(days=1)
         return stored if stored is not None and stored.date >= oldest else None
+
+    def _urpd_history(self, at: datetime, *, fetch: bool) -> None:
+        """Keep the cost-basis history of the HISTORY_DAYS days up to D, the newest stored.
+
+        Rows older than that are pruned and the final snapshots `_urpd` holds copied. With `fetch`,
+        up to `history_budget` missing days are then asked for, newest first, from the closed day
+        down: one at a time, `history_pause` apart, within HISTORY_DEADLINE_SECONDS, stopping at the
+        first BRK error or bad snapshot. A day BRK has no snapshot of is asked for again once
+        ABSENT_RETRY has passed. Other exceptions are raised.
+        """
+        newest = self.store.latest_urpd(URPD_COHORT, URPD_AGG)
+        if newest is None:
+            return
+        latest = newest.date
+        first = latest - timedelta(days=HISTORY_DAYS - 1)
+        self.store.prune_urpd_history(first)
+        rows = self.store.urpd_history(first, latest)
+        copied = 0
+        # Final snapshots `_urpd` already holds cost no request (D-1 after 02:00, D-7, D-30, D-90).
+        for day in self.store.urpd_days(URPD_COHORT, URPD_AGG):
+            if first <= day < latest and (day not in rows or rows[day].supply is None):
+                fetched_at = self.store.urpd_fetched_at(URPD_COHORT, day, URPD_AGG)
+                snapshot = self.store.urpd(URPD_COHORT, day, URPD_AGG)
+                if (
+                    fetched_at is not None
+                    and snapshot is not None
+                    and fetched_at >= final_from(day)
+                    and history_row(snapshot)
+                ):
+                    self.store.save_urpd_history(snapshot, fetched_at)
+                    copied += 1
+        if not fetch or self.history_budget <= 0:
+            # Counts only, never a value.
+            logger.info("onchain_urpd_history copied=%d fetched=0 absent=0", copied)
+            return
+        rows = self.store.urpd_history(first, latest)
+        last = min(latest - timedelta(days=1), closed_day(at))
+        todo = [
+            day
+            for day in (last - timedelta(days=n) for n in range((last - first).days + 1))
+            if (row := rows.get(day)) is None
+            or (row.supply is None and row.fetched_at + ABSENT_RETRY <= at)
+        ]
+        started = time.monotonic()
+        error: str | None = None
+        fetched = absent = 0
+        for n, day in enumerate(todo[: self.history_budget]):
+            if self.stopping.wait(self.history_pause if n else 0):
+                break
+            if time.monotonic() - started >= HISTORY_DEADLINE_SECONDS:
+                logger.info("onchain_urpd_history_paused reason=deadline")
+                break
+            try:
+                snapshot = self.client.urpd(URPD_COHORT, day, URPD_AGG)
+            except BrkError as exc:
+                error = exc.code
+                break
+            if snapshot is None:
+                self.store.save_urpd_history_absent(day, at)
+                absent += 1
+            elif snapshot.date != day or not history_row(snapshot):
+                # Never stored as data. Marked absent, it is asked again in a day and never blocks
+                # the older days behind it.
+                self.store.save_urpd_history_absent(day, at)
+                absent += 1
+                error = "brk_bad_snapshot"
+                break
+            else:
+                self.store.save_urpd_history(snapshot, at)
+                fetched += 1
+        logger.info("onchain_urpd_history copied=%d fetched=%d absent=%d", copied, fetched, absent)
+        if error is not None:
+            logger.warning("onchain_urpd_history_failed code=%s", error)
+        self.store.set_state(history_error=error)
+
+    def _derive_history(self, at: datetime) -> None:
+        """Derive Chart 8 and stamp it `at`: the history rows, and for the days of the window they
+        hold no data of, D and a D-1 that is not final among them, the snapshots `_urpd` holds."""
+        try:
+            newest = self.store.latest_urpd(URPD_COHORT, URPD_AGG)
+            if newest is None:
+                self.store.clear_derived("costbasis_history")
+                return
+            latest = newest.date
+            first = latest - timedelta(days=HISTORY_DAYS - 1)
+            rows = self.store.urpd_history(first, latest)
+            for day in self.store.urpd_days(URPD_COHORT, URPD_AGG):
+                if first <= day <= latest and (day not in rows or rows[day].supply is None):
+                    snapshot = self.store.urpd(URPD_COHORT, day, URPD_AGG)
+                    fetched_at = self.store.urpd_fetched_at(URPD_COHORT, day, URPD_AGG)
+                    # A snapshot without a bucket on the grid is missing, never a column of zeros.
+                    if (
+                        snapshot is None
+                        or fetched_at is None
+                        or not (supply := history_row(snapshot))
+                    ):
+                        continue
+                    rows[day] = HistoryDay(
+                        day=day, close=snapshot.close, supply=supply, fetched_at=fetched_at
+                    )
+            result = cost_basis_history(rows, latest)
+            if result is None:
+                self.store.clear_derived("costbasis_history")
+                return
+            result = result.model_copy(
+                update={
+                    "rules": rules_for_view("costbasis_history", self.rules),
+                    "backfill_error": self.store.state()["history_error"],
+                }
+            )
+            self.store.save_derived("costbasis_history", result.model_dump_json(), at)
+        except Exception:
+            # The other views and the run's state must not depend on Chart 8. Never log the
+            # exception: it may carry values. A fixed code is enough here.
+            logger.warning("onchain_derive_failed code=history_failed")
+            self.store.clear_derived("costbasis_history")
 
     def _derive(
         self,
