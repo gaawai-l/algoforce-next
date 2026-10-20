@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Iterable, Set
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,10 @@ GOLDEN_DAYS = sorted(
         for n in (0, *PAST_DAYS)
     }
 )
+# Six all-coins lin500 snapshots for the cost-basis history, see the README there.
+HISTORY = Path(__file__).parent / "fixtures" / "brk-urpd-history"
+# When the golden sample was fetched: what `seed_history_sample` stores as `fetched_at`.
+HISTORY_SAMPLE_AT = datetime(2026, 10, 16, 18, 29, 37, tzinfo=UTC)
 # BRK positions count from 2009-01-01T00:00Z for both day1 and hour1.
 EPOCH = date(2009, 1, 1)
 # Observed on the live API: a bulk request over 320,000 weight is rejected, ~16 weight per point.
@@ -66,6 +70,20 @@ def seed_golden(store: OnchainStore, days: Iterable[date], fetched_at: datetime)
     for day in days:
         for cohort, agg in URPD_SET:
             store.save_urpd(golden_urpd(cohort, agg, day), fetched_at)
+
+
+def history_urpd(day: date) -> Urpd:
+    """One snapshot of the cost-basis history fixtures."""
+    return Urpd.model_validate_json((HISTORY / f"urpd_all_lin500_{day}.json").read_text())
+
+
+def seed_history_sample(store: OnchainStore) -> None:
+    """The golden sample's all-coins lin500 snapshots, as fetched at `HISTORY_SAMPLE_AT`: D in the
+    `urpd` table, 10-15, 10-14, 10-09 and 10-08 in the history, and 10-10 there as absent."""
+    store.save_urpd(golden_urpd("all", "lin500", GOLDEN_D), HISTORY_SAMPLE_AT)
+    for day in (date(2026, 10, 15), date(2026, 10, 14), date(2026, 10, 9), date(2026, 10, 8)):
+        store.save_urpd_history(golden_urpd("all", "lin500", day), HISTORY_SAMPLE_AT)
+    store.save_urpd_history_absent(date(2026, 10, 10), HISTORY_SAMPLE_AT)
 
 
 class Calls(list[tuple[str, dict[str, str]]]):

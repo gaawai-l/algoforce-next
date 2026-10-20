@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..market import digest, timestamp
 from .brk import EPOCH, URPD_SET, Index, SeriesData, Urpd
+from .costbasis_history import HistoryDay, history_row
 from .models import final_from
 
 STEP: dict[Index, timedelta] = {"day1": timedelta(days=1), "hour1": timedelta(hours=1)}
@@ -213,6 +214,62 @@ class OnchainStore:
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(f"DELETE FROM urpd WHERE day NOT IN ({marks})", days)
+
+    def save_urpd_history(self, urpd: Urpd, fetched_at: datetime) -> None:
+        """Keep the all-coins lin500 `urpd` as its day's row of the cost-basis history."""
+        row = history_row(urpd)
+        if not row:
+            raise ValueError("URPD snapshot has no bucket on the cost-basis history grid")
+        supplies = json.dumps(row, separators=(",", ":"), allow_nan=False)
+        self._write_history(urpd.date, urpd.close, supplies, fetched_at)
+
+    def save_urpd_history_absent(self, day: date, fetched_at: datetime) -> None:
+        """Record that BRK had no snapshot of `day` when asked at `fetched_at`."""
+        self._write_history(day, None, None, fetched_at)
+
+    def _write_history(
+        self, day: date, close: float | None, supplies: str | None, fetched_at: datetime
+    ) -> None:
+        stamp = timestamp(fetched_at)
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "INSERT INTO urpd_history(day, close, supplies_json, fetched_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(day) DO UPDATE SET close=excluded.close, "
+                "supplies_json=excluded.supplies_json, fetched_at=excluded.fetched_at",
+                (day.isoformat(), close, supplies, stamp),
+            )
+
+    def urpd_history(self, first: date, last: date) -> dict[date, HistoryDay]:
+        """The history rows from `first` through `last`, by day."""
+        with self.connection() as db:
+            rows = db.execute(
+                "SELECT * FROM urpd_history WHERE day BETWEEN ? AND ? ORDER BY day",
+                (first.isoformat(), last.isoformat()),
+            ).fetchall()
+        return {
+            date.fromisoformat(row["day"]): HistoryDay(
+                day=date.fromisoformat(row["day"]),
+                close=row["close"],
+                supply=None if row["supplies_json"] is None else json.loads(row["supplies_json"]),
+                fetched_at=datetime.fromisoformat(row["fetched_at"]).astimezone(UTC),
+            )
+            for row in rows
+        }
+
+    def prune_urpd_history(self, oldest: date) -> None:
+        """Delete the history rows of every day before `oldest`."""
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM urpd_history WHERE day < ?", (oldest.isoformat(),))
+
+    def urpd_days(self, cohort: str, agg: str) -> list[date]:
+        """The days with a `cohort` `agg` snapshot in the urpd table, oldest first."""
+        with self.connection() as db:
+            rows = db.execute(
+                "SELECT day FROM urpd WHERE cohort=? AND agg=? ORDER BY day", (cohort, agg)
+            ).fetchall()
+        return [date.fromisoformat(row["day"]) for row in rows]
 
     def save_derived(self, kind: str, payload: str, computed_at: datetime) -> None:
         with self.connection() as db:

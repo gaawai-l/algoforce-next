@@ -3,9 +3,10 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
-from onchain_fixture import load_series, load_urpd
+from onchain_fixture import history_urpd, load_series, load_urpd
 
 from wheelhouse_service.onchain.brk import SeriesData
+from wheelhouse_service.onchain.costbasis_history import HistoryDay, history_row
 from wheelhouse_service.onchain.store import OnchainStore
 from wheelhouse_service.onchain.sync import URPD_SET
 
@@ -35,9 +36,12 @@ def test_migration_is_idempotent_and_private(tmp_path: Path):
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     with store.connection() as db:
-        assert [tuple(row) for row in db.execute("SELECT version FROM onchain_schema")] == [(1,)]
+        assert [tuple(row) for row in db.execute("SELECT version FROM onchain_schema")] == [
+            (1,),
+            (2,),
+        ]
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {"series", "series_meta", "urpd", "derived", "sync_state"} <= tables
+    assert {"series", "series_meta", "urpd", "derived", "sync_state", "urpd_history"} <= tables
 
 
 def test_replace_is_atomic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -308,3 +312,112 @@ def test_derived_roundtrip_and_clear(tmp_path: Path):
     store.clear_derived("regime")
     assert store.derived("regime") is None
     assert store.derived("other") == ("x", FETCHED)
+
+
+def test_urpd_history_round_trip(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    snapshot = history_urpd(date(2025, 10, 20))
+    store.save_urpd_history(snapshot, FETCHED)
+    store.save_urpd_history_absent(date(2025, 10, 21), FETCHED)
+    got = store.urpd_history(date(2025, 10, 20), date(2025, 10, 21))
+    assert got[date(2025, 10, 20)] == HistoryDay(
+        day=date(2025, 10, 20), close=110893.6, supply=history_row(snapshot), fetched_at=FETCHED
+    )
+    assert got[date(2025, 10, 21)] == HistoryDay(
+        day=date(2025, 10, 21), close=None, supply=None, fetched_at=FETCHED
+    )
+    with store.connection() as db:  # compact JSON: the storage estimate in the plan rests on it
+        text = db.execute(
+            "SELECT supplies_json FROM urpd_history WHERE day='2025-10-20'"
+        ).fetchone()[0]
+    assert len(text) == 2249
+
+
+def test_urpd_history_overwrites_the_whole_row(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    snapshot = history_urpd(date(2025, 10, 20))
+    day = snapshot.date
+    later = FETCHED + timedelta(days=1)
+
+    store.save_urpd_history_absent(day, FETCHED)
+    store.save_urpd_history(snapshot, later)
+    assert store.urpd_history(day, day) == {
+        day: HistoryDay(day=day, close=110893.6, supply=history_row(snapshot), fetched_at=later)
+    }
+
+    store.save_urpd_history_absent(day, FETCHED)
+    assert store.urpd_history(day, day) == {
+        day: HistoryDay(day=day, close=None, supply=None, fetched_at=FETCHED)
+    }
+
+
+def test_prune_urpd_history_keeps_from_the_oldest_day(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    snapshot = load_urpd("all")
+    for day in (date(2026, 10, 14), date(2026, 10, 15), date(2026, 10, 16)):
+        store.save_urpd_history(snapshot.model_copy(update={"date": day}), FETCHED)
+
+    store.prune_urpd_history(date(2026, 10, 15))
+
+    kept = store.urpd_history(date(2026, 10, 1), date(2026, 10, 31))
+    assert set(kept) == {date(2026, 10, 15), date(2026, 10, 16)}
+
+
+def test_prune_urpd_leaves_the_history_alone(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    snapshot = load_urpd("all")
+    day = snapshot.date
+    store.save_urpd(snapshot, FETCHED)
+    store.save_urpd_history(snapshot, FETCHED)
+
+    store.prune_urpd(set())
+
+    with store.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM urpd").fetchone()[0] == 0
+    assert set(store.urpd_history(day, day)) == {day}
+
+
+def test_urpd_days_lists_one_kind(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    assert store.urpd_days("all", "lin500") == []
+    for day in (date(2026, 10, 16), date(2026, 10, 15)):
+        store.save_urpd(load_urpd("all").model_copy(update={"date": day}), FETCHED)
+    store.save_urpd(load_urpd("sth").model_copy(update={"date": date(2026, 10, 14)}), FETCHED)
+    other_agg = {"date": date(2026, 10, 13), "aggregation": "lin200"}
+    store.save_urpd(load_urpd("all").model_copy(update=other_agg), FETCHED)
+
+    assert store.urpd_days("all", "lin500") == [date(2026, 10, 15), date(2026, 10, 16)]
+
+
+def test_save_urpd_history_refuses_an_empty_row(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite3")
+    snapshot = load_urpd("all")
+    low = snapshot.model_copy(
+        update={"buckets": [b for b in snapshot.buckets if b.price_floor < 1000]}
+    )
+    assert low.buckets
+
+    with pytest.raises(ValueError):
+        store.save_urpd_history(low, FETCHED)
+
+    with store.connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM urpd_history").fetchone()[0] == 0
+
+
+def test_migration_upgrades_a_store_that_has_only_001(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite3"
+    store = OnchainStore(path)
+    with store.connection() as db:  # make it look like a store from before SR-8
+        db.execute("DROP TABLE urpd_history")
+        db.execute("DELETE FROM onchain_schema WHERE version=2")
+    store.save_urpd(load_urpd("all"), FETCHED)
+    store.save_derived("costbasis", '{"a":1}', FETCHED)
+    reopened = OnchainStore(path)
+    with reopened.connection() as db:
+        versions = [
+            tuple(r) for r in db.execute("SELECT version FROM onchain_schema ORDER BY version")
+        ]
+    assert versions == [(1,), (2,)]
+    assert reopened.urpd_history(date(2026, 10, 16), date(2026, 10, 16)) == {}
+    assert reopened.latest_urpd("all", "lin500").date == date(2026, 10, 16)
+    assert reopened.derived("costbasis") == ('{"a":1}', FETCHED)
