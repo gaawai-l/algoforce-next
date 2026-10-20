@@ -27,7 +27,7 @@
 
 ### `make check`
 
-2026-10-20 在 `321d967`（任务 1–5 完成后）的工作树上运行，退出码 0。
+2026-10-20 在 `321d967`（任务 1–5 完成后）的工作树上运行，退出码 0。终审修复轮之后在 `425abfe` 复跑一次，退出码 0：pytest 1140 passed，vitest 33 个文件 747 passed，ruff、mypy、tsc 通过；`deploy/test/test_composition.py` 1 passed。下表是 `321d967` 那次的数字。
 
 | 项目 | 结果 |
 |---|---|
