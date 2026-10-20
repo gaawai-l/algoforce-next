@@ -421,3 +421,13 @@ def test_migration_upgrades_a_store_that_has_only_001(tmp_path: Path):
     assert reopened.urpd_history(date(2026, 10, 16), date(2026, 10, 16)) == {}
     assert reopened.latest_urpd("all", "lin500").date == date(2026, 10, 16)
     assert reopened.derived("costbasis") == ('{"a":1}', FETCHED)
+
+
+def test_an_older_image_refuses_a_newer_store(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite3"
+    store = OnchainStore(path)
+    with store.connection() as db:  # a migration this code does not have
+        db.execute("INSERT INTO onchain_schema VALUES(999, 'x')")
+
+    with pytest.raises(ValueError, match="newer than this application"):
+        OnchainStore(path)

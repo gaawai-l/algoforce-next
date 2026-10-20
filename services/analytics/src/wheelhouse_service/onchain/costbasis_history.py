@@ -92,7 +92,8 @@ def cost_basis_history(rows: Mapping[date, HistoryDay], latest: date) -> CostBas
     status: list[DayStatus] = []
     for day in days:
         row = rows.get(day)
-        if row is None or row.supply is None:
+        # An empty supply is no data, as for an absent day: never a column of zeros.
+        if row is None or not row.supply:
             close.append(None)
             supply.append(None)
             status.append("pending" if row is None else "absent")

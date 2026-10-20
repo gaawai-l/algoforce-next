@@ -159,3 +159,10 @@ def test_a_row_is_forming_until_its_day_ends_and_keeps_its_close():
 def test_history_day_needs_supply_with_a_close():
     with pytest.raises(ValidationError):
         HistoryDay(day=D, close=1.0, supply=None, fetched_at=FETCHED)
+
+
+def test_an_empty_older_row_is_missing_not_zeros():
+    result = cost_basis_history({D: kept(D, [1.0, 2.0]), D - DAY: kept(D - DAY, [])}, D)
+    assert result is not None
+    assert result.supply[-2] is None and result.close[-2] is None
+    assert result.status[-2] == "absent"
