@@ -155,7 +155,7 @@ export function niceDomain(start: number, stop: number, count = 10): [number, nu
 }
 
 // Formats as the original prints them.
-const grouped = (value: number) =>
+export const grouped = (value: number) =>
   Number(value.toFixed(0)).toLocaleString("en-US");
 export const fmtPct = (value: number) => `${(value * 100).toFixed(1)}%`;
 export const fmtUsd = (value: number) =>

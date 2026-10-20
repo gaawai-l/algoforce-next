@@ -1,0 +1,503 @@
+{
+ "source": "The original page's live readings recorded in stage B: SR-5.md:22-30 and 39-61 (read 2026-10-19 06:16Z) and SR-6.md:21-31 (read 06:21Z), both at the 06:00Z forming hour. A two-entry pnl `ticks` holds only the axis ends the page records; the Net view's labels are the Gross view's recorded net labels, as the page prints the net in both (A:2301-2307); the Mid, Small and Retail P&L feet are the recorded shares in the Large row's recorded wording.",
+ "supply": [
+  {
+   "win": "7d",
+   "scale": "btc",
+   "labels": [
+    "\u22127,385",
+    "+15,861",
+    "\u22123,167",
+    "\u22122,012"
+   ],
+   "legend": [
+    "+15,861 BTC",
+    "\u221212,564 BTC",
+    "+3,297 BTC"
+   ],
+   "tickLabels": [
+    "\u221215,000",
+    "\u221210,000",
+    "\u22125,000",
+    "0",
+    "+5,000",
+    "+10,000",
+    "+15,000"
+   ]
+  },
+  {
+   "win": "7d",
+   "scale": "pct",
+   "labels": [
+    "\u22120.248%",
+    "+0.167%",
+    "\u22120.051%",
+    "\u22120.144%"
+   ],
+   "legend": null,
+   "tickLabels": null
+  },
+  {
+   "win": "1d",
+   "scale": "btc",
+   "labels": [
+    "+983",
+    "+404",
+    "\u2212468",
+    "\u2212429"
+   ],
+   "legend": null,
+   "tickLabels": null
+  },
+  {
+   "win": "1d",
+   "scale": "pct",
+   "labels": [
+    "+0.033%",
+    "+0.004%",
+    "\u22120.007%",
+    "\u22120.031%"
+   ],
+   "legend": null,
+   "tickLabels": null
+  },
+  {
+   "win": "30d",
+   "scale": "btc",
+   "labels": [
+    "\u221267,512",
+    "+86,884",
+    "\u22123,415",
+    "\u22122,101"
+   ],
+   "legend": null,
+   "tickLabels": null
+  },
+  {
+   "win": "30d",
+   "scale": "pct",
+   "labels": [
+    "\u22122.271%",
+    "+0.917%",
+    "\u22120.055%",
+    "\u22120.151%"
+   ],
+   "legend": null,
+   "tickLabels": null
+  },
+  {
+   "win": "90d",
+   "scale": "btc",
+   "labels": [
+    "+10,868",
+    "+81,684",
+    "\u221227,363",
+    "\u221224,148"
+   ],
+   "legend": null,
+   "tickLabels": null
+  },
+  {
+   "win": "90d",
+   "scale": "pct",
+   "labels": [
+    "+0.366%",
+    "+0.862%",
+    "\u22120.437%",
+    "\u22121.732%"
+   ],
+   "legend": null,
+   "tickLabels": null
+  }
+ ],
+ "supplyRead": {
+  "win": "7d",
+  "row": "large",
+  "head": "Large entities \u00b7 major exchanges, treasuries",
+  "lines": [
+   [
+    "Net change",
+    "\u22127,385 BTC"
+   ],
+   [
+    "Share of band",
+    "\u22120.248%"
+   ],
+   [
+    "Band supply",
+    "2,972,806 BTC"
+   ]
+  ],
+  "foot": "7d window \u00b7 threshold crossings can dominate"
+ },
+ "supplyTicks": [
+  {
+   "group": "bands",
+   "scale": "btc",
+   "win": "1d",
+   "max": 3000,
+   "step": 1000
+  },
+  {
+   "group": "bands",
+   "scale": "btc",
+   "win": "7d",
+   "max": 15000,
+   "step": 5000
+  },
+  {
+   "group": "bands",
+   "scale": "btc",
+   "win": "30d",
+   "max": 40000,
+   "step": 20000
+  },
+  {
+   "group": "bands",
+   "scale": "btc",
+   "win": "90d",
+   "max": 100000,
+   "step": 50000
+  },
+  {
+   "group": "bands",
+   "scale": "pct",
+   "win": "1d",
+   "max": 0.2,
+   "step": 0.05
+  },
+  {
+   "group": "bands",
+   "scale": "pct",
+   "win": "7d",
+   "max": 1,
+   "step": 0.2
+  },
+  {
+   "group": "bands",
+   "scale": "pct",
+   "win": "30d",
+   "max": 8,
+   "step": 2
+  },
+  {
+   "group": "bands",
+   "scale": "pct",
+   "win": "90d",
+   "max": 3,
+   "step": 1
+  },
+  {
+   "group": "groups",
+   "scale": "btc",
+   "win": "1d",
+   "max": 1000,
+   "step": 200
+  },
+  {
+   "group": "groups",
+   "scale": "btc",
+   "win": "7d",
+   "max": 15000,
+   "step": 5000
+  },
+  {
+   "group": "groups",
+   "scale": "btc",
+   "win": "30d",
+   "max": 80000,
+   "step": 20000
+  },
+  {
+   "group": "groups",
+   "scale": "btc",
+   "win": "90d",
+   "max": 80000,
+   "step": 20000
+  },
+  {
+   "group": "groups",
+   "scale": "pct",
+   "win": "1d",
+   "max": 0.03,
+   "step": 0.01
+  },
+  {
+   "group": "groups",
+   "scale": "pct",
+   "win": "7d",
+   "max": 0.2,
+   "step": 0.1
+  },
+  {
+   "group": "groups",
+   "scale": "pct",
+   "win": "30d",
+   "max": 2,
+   "step": 1
+  },
+  {
+   "group": "groups",
+   "scale": "pct",
+   "win": "90d",
+   "max": 1.5,
+   "step": 0.5
+  }
+ ],
+ "pnl": [
+  {
+   "win": "7d",
+   "group": "groups",
+   "view": "gross",
+   "scale": "usd",
+   "labels": [
+    "\u2212$211.6M",
+    "+$176.8M",
+    "+$519.7M",
+    "+$261.2M"
+   ],
+   "legend": [
+    "+$2.51B",
+    "\u2212$1.77B",
+    "+$746M"
+   ],
+   "ticks": null,
+   "tickLabels": [
+    "\u2212$1.00B",
+    "\u2212$500.0M",
+    "0",
+    "+$500.0M",
+    "+$1.00B"
+   ],
+   "bars": 8,
+   "pos": null
+  },
+  {
+   "win": "7d",
+   "group": "bands",
+   "view": "gross",
+   "scale": "usd",
+   "labels": [
+    "+$0",
+    "\u2212$211.6M",
+    "+$132.8M",
+    "+$44.0M",
+    "+$318.2M",
+    "+$201.5M",
+    "+$221.2M",
+    "+$37.5M",
+    "+$2.3M",
+    "+$261k",
+    "+$7k",
+    "+$430"
+   ],
+   "legend": null,
+   "ticks": [
+    -600000000.0,
+    -400000000.0,
+    -200000000.0,
+    0,
+    200000000.0,
+    400000000.0,
+    600000000.0
+   ],
+   "tickLabels": null,
+   "bars": null,
+   "pos": null
+  },
+  {
+   "win": "7d",
+   "group": "groups",
+   "view": "net",
+   "scale": "usd",
+   "labels": [
+    "\u2212$211.6M",
+    "+$176.8M",
+    "+$519.7M",
+    "+$261.2M"
+   ],
+   "legend": null,
+   "ticks": [
+    -400000000.0,
+    400000000.0
+   ],
+   "tickLabels": null,
+   "bars": 4,
+   "pos": [
+    false,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "win": "7d",
+   "group": "groups",
+   "view": "gross",
+   "scale": "pct",
+   "labels": [
+    "\u22120.123%",
+    "+0.028%",
+    "+0.234%",
+    "+0.387%"
+   ],
+   "legend": [
+    "+$2.51B",
+    "\u2212$1.77B",
+    "+$746M"
+   ],
+   "ticks": [
+    -0.4,
+    -0.2,
+    0,
+    0.2,
+    0.4
+   ],
+   "tickLabels": null,
+   "bars": null,
+   "pos": null
+  },
+  {
+   "win": "1d",
+   "group": "groups",
+   "view": "gross",
+   "scale": "usd",
+   "labels": [
+    "+$22.3M",
+    "+$63.1M",
+    "+$37.7M",
+    "+$39.6M"
+   ],
+   "legend": [
+    "+$243M",
+    "\u2212$80M",
+    "+$163M"
+   ],
+   "ticks": null,
+   "tickLabels": null,
+   "bars": null,
+   "pos": null
+  },
+  {
+   "win": "30d",
+   "group": "groups",
+   "view": "gross",
+   "scale": "usd",
+   "labels": [
+    "+$1.77B",
+    "+$6.46B",
+    "+$3.16B",
+    "+$1.02B"
+   ],
+   "legend": [
+    "+$19.36B",
+    "\u2212$6.95B",
+    "+$12.41B"
+   ],
+   "ticks": null,
+   "tickLabels": null,
+   "bars": null,
+   "pos": null
+  },
+  {
+   "win": "90d",
+   "group": "groups",
+   "view": "gross",
+   "scale": "usd",
+   "labels": [
+    "+$3.46B",
+    "+$8.40B",
+    "+$5.98B",
+    "+$1.50B"
+   ],
+   "legend": [
+    "+$48.65B",
+    "\u2212$29.32B",
+    "+$19.34B"
+   ],
+   "ticks": null,
+   "tickLabels": null,
+   "bars": null,
+   "pos": null
+  }
+ ],
+ "pnlRead": [
+  {
+   "win": "7d",
+   "group": "groups",
+   "row": "large",
+   "head": "Large entities \u00b7 major exchanges, treasuries",
+   "lines": [
+    [
+     "Profit booked",
+     "+$255.9M"
+    ],
+    [
+     "Loss booked",
+     "\u2212$467.6M"
+    ],
+    [
+     "Net",
+     "\u2212$211.6M"
+    ],
+    [
+     "vs realized cap",
+     "\u22120.123%"
+    ]
+   ],
+   "foot": "35% of booked value was profit \u00b7 7d window"
+  },
+  {
+   "win": "7d",
+   "group": "groups",
+   "row": "mid",
+   "head": null,
+   "lines": [
+    [
+     "vs realized cap",
+     "+0.028%"
+    ]
+   ],
+   "foot": "54% of booked value was profit \u00b7 7d window"
+  },
+  {
+   "win": "7d",
+   "group": "groups",
+   "row": "small",
+   "head": null,
+   "lines": [
+    [
+     "vs realized cap",
+     "+0.234%"
+    ]
+   ],
+   "foot": "73% of booked value was profit \u00b7 7d window"
+  },
+  {
+   "win": "7d",
+   "group": "groups",
+   "row": "retail",
+   "head": null,
+   "lines": [
+    [
+     "vs realized cap",
+     "+0.387%"
+    ]
+   ],
+   "foot": "84% of booked value was profit \u00b7 7d window"
+  },
+  {
+   "win": "7d",
+   "group": "bands",
+   "row": "addrs_over_100k_btc",
+   "head": null,
+   "lines": [
+    [
+     "Loss booked",
+     "+$0"
+    ]
+   ],
+   "foot": "no coins from this band moved \u00b7 7d window"
+  }
+ ]
+}

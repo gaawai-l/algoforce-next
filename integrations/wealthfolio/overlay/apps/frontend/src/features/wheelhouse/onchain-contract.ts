@@ -13,6 +13,27 @@ export type FlowGrid = components["schemas"]["FlowGrid"];
 export type FlowWindow = components["schemas"]["FlowWindow"];
 export type CohortColumns = components["schemas"]["CohortColumns"];
 export type AgeFlow = components["schemas"]["AgeFlow"];
+export type SizeCohortsView = components["schemas"]["SizeCohortsView"];
+export type SizeBand = components["schemas"]["SizeBand"];
+
+// The twelve wallet-size bands, smallest first, as the original lists them (L:48-54).
+export const SIZE_BAND_KEYS = [
+  "addrs_under_1k_sats",
+  "addrs_1k_sats_to_10k_sats",
+  "addrs_10k_sats_to_100k_sats",
+  "addrs_100k_sats_to_1m_sats",
+  "addrs_1m_sats_to_10m_sats",
+  "addrs_10m_sats_to_1btc",
+  "addrs_1btc_to_10btc",
+  "addrs_10btc_to_100btc",
+  "addrs_100btc_to_1k_btc",
+  "addrs_1k_btc_to_10k_btc",
+  "addrs_10k_btc_to_100k_btc",
+  "addrs_over_100k_btc",
+] as const;
+export type BandKey = (typeof SIZE_BAND_KEYS)[number];
+export const SIZE_WINDOWS = ["1d", "7d", "30d", "90d"] as const;
+export type WindowKey = (typeof SIZE_WINDOWS)[number];
 
 const time = z.string().datetime({ offset: true });
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -364,6 +385,50 @@ export const costFlowSchema: z.ZodType<CostFlowView, z.ZodTypeDef, unknown> = z
       );
     },
     { message: "cost-flow ages do not match the $500 grid" },
+  );
+
+const sizeBand = z.object({
+  band: z.string(),
+  supply: z.number().nullable(),
+  // Whole dollars, as the original's Math.round leaves them.
+  realized_cap: z.number().int().nullable(),
+  windows: z.array(
+    z.object({
+      window: z.enum(SIZE_WINDOWS),
+      supply_change: z.number().nullable(),
+      profit: z.number().int().nullable(),
+      loss: z.number().int().nullable(),
+    }),
+  ),
+});
+
+// The page folds the bands into groups by position and reads each window by its place, so a band
+// or a window out of order, or one missing, would be drawn as another: the payload is refused
+// rather than drawn. An unavailable payload has no bands.
+export const sizeCohortsSchema: z.ZodType<SizeCohortsView, z.ZodTypeDef, unknown> = z
+  .object({
+    data_state: pressureDataState,
+    reasons: z.array(z.string()),
+    refreshing: z.boolean(),
+    forming_at: time.nullable(),
+    last_at: time.nullable(),
+    bands: z.array(sizeBand),
+    no_block: z.array(z.enum(SIZE_WINDOWS)),
+    brk_version: z.string().nullable(),
+    rules,
+    rules_pending: z.boolean(),
+  })
+  .refine(
+    (view) =>
+      view.bands.length === 0 ||
+      (view.bands.length === SIZE_BAND_KEYS.length &&
+        view.bands.every(
+          (band, i) =>
+            band.band === SIZE_BAND_KEYS[i] &&
+            band.windows.length === SIZE_WINDOWS.length &&
+            band.windows.every((cell, j) => cell.window === SIZE_WINDOWS[j]),
+        )),
+    { message: "size-cohort bands or windows out of order" },
   );
 
 // Hand-written payloads shared by contract and view tests. The cycle components and the

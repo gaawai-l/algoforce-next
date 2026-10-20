@@ -8,8 +8,10 @@ import {
   getPerpStatus,
   getSellerPressure,
   getServiceStatus,
+  getSizeCohorts,
 } from "./client";
 import costFlowSample from "./cost-flow-sample.json";
+import sizeSample from "./size-cohorts-sample.json";
 import {
   costBasisSample,
   cycleSample,
@@ -248,6 +250,28 @@ describe("on-chain client", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify(incomplete))),
     );
     await expect(getCostBasis()).rejects.toThrow("incompatible");
+  });
+
+  it("reads the size cohorts from the read-only endpoint", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(sizeSample)));
+    vi.stubGlobal("fetch", fetchMock);
+    const view = await getSizeCohorts(new AbortController().signal);
+    expect(view.bands.map((band) => band.band)[11]).toBe("addrs_over_100k_btc");
+    expect(view.last_at).toBe("2026-10-19T06:00:00Z");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/wheelhouse/v1/onchain/size-cohorts",
+    ]);
+  });
+
+  it("rejects a size-cohort payload outside the contract", async () => {
+    const reversed = { ...sizeSample, bands: [...sizeSample.bands].reverse() };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify(reversed))),
+    );
+    await expect(getSizeCohorts()).rejects.toThrow("incompatible");
   });
 
   it("reads a perp states view for the exchange and window asked", async () => {

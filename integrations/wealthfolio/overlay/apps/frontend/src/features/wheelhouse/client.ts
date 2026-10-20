@@ -8,6 +8,7 @@ import {
   levelsViewSchema,
   sellerPressureSchema,
   sellSideSchema,
+  sizeCohortsSchema,
 } from "./onchain-contract";
 import {
   perpStatesViewSchema,
@@ -225,6 +226,8 @@ export const getAgeCohorts = (signal?: AbortSignal) =>
   query("/onchain/age-cohorts", ageCohortsSchema, { signal });
 export const getCostFlow = (signal?: AbortSignal) =>
   query("/onchain/cost-flow", costFlowSchema, { signal });
+export const getSizeCohorts = (signal?: AbortSignal) =>
+  query("/onchain/size-cohorts", sizeCohortsSchema, { signal });
 export const getPerpStates = (
   exchange: PerpStatesView["exchange"],
   window: PerpStatesView["window"],

@@ -11,7 +11,11 @@ import {
   levelsViewSchema,
   pressureSample,
   sellerPressureSchema,
+  SIZE_BAND_KEYS,
+  SIZE_WINDOWS,
+  sizeCohortsSchema,
 } from "./onchain-contract";
+import sizeSample from "./size-cohorts-sample.json";
 
 describe("on-chain cycle contract", () => {
   it("accepts the service payload", () => {
@@ -701,6 +705,84 @@ describe("on-chain cost-flow contract", () => {
       const band = [wrong, ...age.band.slice(1)];
       expect(costFlowSchema.safeParse({ ...s2, age: { ...age, band } }).success).toBe(false);
     }
+  });
+});
+
+describe("on-chain size-cohort contract", () => {
+  const bands = sizeSample.bands;
+  const [first, ...rest] = bands;
+  const withFirst = (band: object) => ({ ...sizeSample, bands: [band, ...rest] });
+
+  it("accepts the sample payload", () => {
+    const view = sizeCohortsSchema.parse(sizeSample);
+    expect(view.bands.map((band) => band.band)).toEqual([...SIZE_BAND_KEYS]);
+    for (const band of view.bands) {
+      expect(band.windows.map((cell) => cell.window)).toEqual([...SIZE_WINDOWS]);
+    }
+    expect(view.no_block).toEqual([]);
+  });
+
+  it("accepts an unavailable payload without bands", () => {
+    const unavailable = {
+      ...sizeSample,
+      data_state: "unavailable",
+      reasons: ["no size cohorts yet"],
+      forming_at: null,
+      last_at: null,
+      bands: [],
+      no_block: [],
+    };
+    expect(sizeCohortsSchema.parse(unavailable).bands).toEqual([]);
+  });
+
+  // The page folds the bands by position (A:1993-2005), so a band or a window out of place, or
+  // one short, would be drawn as another: the payload is refused rather than drawn.
+  it("refuses bands or windows out of order, or one short", () => {
+    const reversed = { ...sizeSample, bands: [...bands].reverse() };
+    expect(sizeCohortsSchema.safeParse(reversed).success).toBe(false);
+    const swapped = [first.windows[1], first.windows[0], ...first.windows.slice(2)];
+    expect(sizeCohortsSchema.safeParse(withFirst({ ...first, windows: swapped })).success).toBe(
+      false,
+    );
+    const eleven = { ...sizeSample, bands: bands.slice(0, 11) };
+    expect(sizeCohortsSchema.safeParse(eleven).success).toBe(false);
+    const three = { ...first, windows: first.windows.slice(0, 3) };
+    expect(sizeCohortsSchema.safeParse(withFirst(three)).success).toBe(false);
+  });
+
+  it("refuses fractional dollars and an unknown window", () => {
+    for (const field of ["profit", "loss"]) {
+      const cell = { ...first.windows[0], [field]: 1.5 };
+      const fractional = { ...first, windows: [cell, ...first.windows.slice(1)] };
+      expect(sizeCohortsSchema.safeParse(withFirst(fractional)).success).toBe(false);
+    }
+    const cap = { ...first, realized_cap: 1.5 };
+    expect(sizeCohortsSchema.safeParse(withFirst(cap)).success).toBe(false);
+    expect(sizeCohortsSchema.safeParse({ ...sizeSample, no_block: ["2d"] }).success).toBe(false);
+  });
+
+  it("keeps a missing value null instead of coercing it to zero", () => {
+    const missing = {
+      ...first,
+      supply: null,
+      realized_cap: null,
+      windows: first.windows.map((cell) => ({
+        ...cell,
+        supply_change: null,
+        profit: null,
+        loss: null,
+      })),
+    };
+    const view = sizeCohortsSchema.parse({ ...withFirst(missing), no_block: ["7d"] });
+    expect(view.bands[0].supply).toBeNull();
+    expect(view.bands[0].realized_cap).toBeNull();
+    expect(view.bands[0].windows[1]).toEqual({
+      window: "7d",
+      supply_change: null,
+      profit: null,
+      loss: null,
+    });
+    expect(view.no_block).toEqual(["7d"]);
   });
 });
 
