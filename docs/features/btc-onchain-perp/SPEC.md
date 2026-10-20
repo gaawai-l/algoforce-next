@@ -395,6 +395,8 @@ flowchart LR
 - 12 个地址规模档（`SIZE_BANDS`，原站 L:48-54，从小到大）× 4 条 hour1 序列（`_supply`、`_realized_profit_cumulative`、`_realized_loss_cumulative`、`_realized_cap`），共 48 条（`SIZE_SERIES`）。读库深度 `DEPTH` = 2250 行，同原站 `start=-2250`（L:125-131）。
 - **独立阶段**：48 条不并进 `HOUR1_SERIES`，在币龄阶段（图 2）之后、URPD 之前单独 `_increment`，自带缺失集合和 `size_error`。它失败只影响 sizes：卖压、Sell side、图 2、Cost basis、URPD 照常更新，sizes 保留上一轮结果并随时间变 delayed / stale。sizes 不读其他阶段的序列，所以按自己阶段的完成时间盖戳。
 - **请求**：48 个名字用逗号拼起来是 2,003 个字符，大于 `MAX_SERIES_CHARS`（当前为 2,000），所以增量请求由 `_chunks` 按顺序贪心拆开，每轮 2 次（47 + 1 个名字，较长的一次约 1,970 字符）；首次回填按点数分片，每片 6 条、`start=-3000`，共 8 次。测试断言只写 `<= MAX_SERIES_CHARS`，不写死上限的数值。
+  - 最坏情况一：size 阶段持续 5xx。两片都失败，什么都不落库，整轮每 5 分钟重试一次（见"遗留问题"），每轮约 36 个请求，约 430 个/小时；正常约 37 个/小时，约为 12 倍。
+  - 最坏情况二：库里存过的某条 size 序列，BRK 不再认识。47 个名字那片返回 404，`_collect` 退回逐名请求（47 + 1 次），那一轮共 84 个请求（正常 37 个）；之后每小时都这样，直到 BRK 恢复或改代码。
 - **门控**：48 条中任一条本轮缺失（BRK 不认识），两张图都不派生，接口 `unavailable`，reasons 写明缺哪条，与 Sell side 一致。`size_cohorts()` 本身需要 48 条齐全（缺一条就是 `KeyError`），所以这道门由 sync 守住，不让异常传出去。`/status` 的 hour1 数据集不纳入 size 序列。
 - **存储增量**：首次回填 48 × 3,000 = 144,000 行，之后每天 48 × 24 = 1,152 行（hour1 不裁剪）。实测库体积记在 VERIFICATION 第 3 节。
 
@@ -409,7 +411,7 @@ flowchart LR
   - 读数行按项处理：哪一项缺就哪一项写 "—"，另一项照常；图 5 的 `Band supply` 是 SE 时的持币量，与窗口无关，有值就照常显示。
   - 没有任何行（`bands` 为空）时，图例也是 "—"，不出现 "+0 BTC" 这样的伪零。
 - **无块锚点**：锚点小时 `SE − n` 在 48 条里都有行且全为 null 时，worker 在载荷的 `no_block` 里记下这个窗口（按 1d / 7d / 30d / 90d 的顺序），该窗口的每一格为 null，界面在图下显示专门说明 `sizes.noBlock`，不显示通用的「此图暂无数据」。只有部分序列为 null 的是序列缺口，不算无块，也不进 `no_block`。
-  - 频率：每小时约 1–2% 的概率有某个窗口整列为空；默认 7d 约每 230 小时一次，每次 1 小时，下一次每小时刷新后补上。
+  - 频率：每小时约 1–2% 的概率有某个窗口整列为空；默认 7d 约每 230 小时一次，每次通常 1 小时；最新的小时还没出块时，再多 1 小时（SE 停在上一小时，锚点不动）。
   - 向前沿用上一小时（供应和累计量在无块小时确实不变，结果精确）属 O3 语义，v1 不做；用户若嫌空白，另立计划。
 - **零值**：真实的 0 照原站显示 `+0`、`+$0`，0 值柱照画 0.8px 细线；`Loss booked +$0`（`usd(-0)`）也照原样。负零（`-0`）显示为 `+0`，不会出现 "−0"（`signed(-0)` 给 "+"）；真实的微小负值（如 −0.01 BTC 除以大额持币量）仍显示 "−0.000%"，与原站一致。
 
@@ -423,6 +425,7 @@ flowchart LR
 7. 图内由 JS 生成的文字（档名、组名与副标题、图例、两侧小字、读数）全部翻译；原站这些不走 `t()`。原站已有的中文直接沿用。
 8. Net 图例色块与图 6 的净额竖线用浅色墨 `#e5edf6`（原站 net-tick 用 `--ink`，Net 图例用 `--pine-deep`，本来就不同色）；图 5 没有竖线，用同一墨色只为两张图的 Net 同色。正负柱用本地 moss `#7fc98a` 与 rust `#e0805c`。
 9. 三栏说明是我们起草的：原站两张图只有一行 caption（A:480、A:526），没有三栏。原 caption 的内容并进三栏，不另显示 caption；中英文措辞交用户审定。
+10. 宽版的负值标签不一定放在条端左侧。原站把它放在 `x(v) − 7`、`end` 对齐（A:2092-2100），行名在同一行、右端在 x = −10。最长的负值条末端在绘图区 0.12 / 2.24 处，所以图宽小于约 1,200px 时，"−15,237" 这样 7 个字符的标签会压到行名；8 个字符的（如 "−$211.6M"）在约 1,330px 以下就会压上。原站的几何相同，也会压（SW 固定 940、plotW 618、12px 标签）。本地规则（终审 M1）：按每字符 6.6px（11px JetBrains Mono，常量 `LABEL_CHAR_PX`）估算标签宽；左端会越过 −6 时，改放在条内的末端，即 `x(v) + 7`、`start` 对齐、浅色墨。判断在纯函数 `labelSpot`（`size-cohorts.ts`）里。窄屏的行名在条上方，不用这条规则；正值标签右侧至少还有约 150px，不会越界。
 
 **遗留问题**
 - HH:00–HH:12 之间那一小时其实已结束，页头仍写 "includes the forming hour"。这个瑕疵与卖压、Sell side 共有（[CHART-VERIFICATION.md](CHART-VERIFICATION.md) 跨图第 9 条），三处要一起修，不在 sizes 单独修，以免三处说法不一致。
@@ -497,7 +500,8 @@ flowchart LR
   - 读数行在图下，一行文字：悬停某一行，或聚焦图后用 ↑ / ↓ 逐行、Home / End 跳到首尾，显示该行的全部读数；Esc 或失焦清除；未选中时显示操作提示。图 5 的读数是 Net change / Share of band / Band supply，图 6 的是 Profit booked / Loss booked / Net / vs realized cap，各带一句结论。
   - 每张图下方有三栏说明（What it shows / What extreme values imply / How to read），窄屏全部展开。窗口起点无块时，图下显示 `sizes.noBlock` 的说明。
   - 页头一行与 Seller pressure 相同：`Data <时间> UTC`、`includes the forming hour`，delayed / stale 时有横幅，并把 forming 提示改成 `last hour was partial when computed`；`unavailable` 时只显示警告和 reasons，不画图。
-  - 窄屏：容器宽 < 560px 时改排版，行标签放到每根条上方，左右边距 56 / 64，图高按行数取 300–440px；绘图区 < 480px 时 x 轴刻度从 7 个改为 3 个；两侧小字改成图下的 HTML 一行，可换行。5 个子视图按钮换行，不横向溢出。
+  - 两侧小字（如 `BTC ← Net distribution`）宽窄都在图下一行 HTML 里，不画进 SVG；窄屏可换行。
+  - 窄屏：容器宽 < 560px 时改排版，行标签放到每根条上方，左右边距 56 / 64，图高按行数取 300–440px；绘图区 < 480px 时 x 轴刻度从 7 个改为 3 个。5 个子视图按钮换行，不横向溢出；换行后仍是一个控件：行间有分隔线，行尾没有双线。
 - **Perp states**：
   - P4 之前：显示 "Not connected" 横幅，写明缺哪个数据源。不放示例数据。
   - P4 之后：照原站排列 Parameters（Exchange / State window / Show）、Table 1（State / What it is / Prob. / Max move）和图 1–4，每张图都配三栏说明。
@@ -597,7 +601,7 @@ flowchart LR
 - §1 "不做" 去掉图 5、图 6，纳入。
 - §3.6 新增"规模分组"：48 条 hour1 序列在独立的 size 阶段取，深度 2250，增量请求按 `MAX_SERIES_CHARS` 拆成 2 次；SE、4 个窗口和两种取整的原站出处；缺失值、零值、门控与无块锚点（`no_block`）的裁定；O1–O6 未实现。
 - §5 "Flows（BTC）" 的子视图定为 Seller pressure、Sell side、Cost basis、Size cohorts（`flow=sizes`）、Perp states 五项；新增 Size cohorts 一条：图 5、图 6 纵排，各自的控件与默认值，图例，读数行，三栏说明，窄屏规则。
-- 与原站的有意偏离：null 显示 "—"（原站当 0）；百分比分母无效显示 "—"（原站给 0）；`vs realized cap` 在 `realized_cap` ≤ 0 时显示 "—"（原站 `n/a`）；无块锚点的窗口在图下说明原因；读数行代替浮窗；窄屏改排版；图内文字全部翻译；Net 色块用墨色；三栏说明由我们起草。
+- 与原站的有意偏离：null 显示 "—"（原站当 0）；百分比分母无效显示 "—"（原站给 0）；`vs realized cap` 在 `realized_cap` ≤ 0 时显示 "—"（原站 `n/a`）；无块锚点的窗口在图下说明原因；读数行代替浮窗；窄屏改排版；图内文字全部翻译；Net 色块用墨色；三栏说明由我们起草；宽版负值标签会压到行名时移到条内末端。
 - 执行中的裁定：Entities 缺成员则整组缺失，图例遇缺失行显示 "—"；读数按项写 "—"；`size_cohorts()` 要 48 条齐全，缺失由 sync 门控；窄屏的紧凑版按"行名加条"的行块选行。
 - 遗留：页头 forming 提示在 HH:00–HH:12 之间不准（与卖压、Sell side 共有）；size 阶段持续 5xx 时整轮每 5 分钟重试。
 

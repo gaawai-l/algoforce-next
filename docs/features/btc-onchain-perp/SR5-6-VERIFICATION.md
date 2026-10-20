@@ -63,7 +63,7 @@ fixture：`services/analytics/tests/onchain/fixtures/brk-2026-10-16/hour1_addrs_
 | 经 sync 的整条链路 | 同上 168 格 | `test_size_cohorts_are_derived_in_their_own_stage`：回放 fixture 跑一轮同步，读出的 `bands` 与期望表逐格比 | 168/168 相等 |
 | 重新生成 | 期望表 | 评审用 README 脚本重新生成 | 与已提交的文件逐字节相同；另有 5 格独立重算，精确相等 |
 | 真实空块锚点 | SE 截到 155802（2026-10-10 18:00 UTC）；7d 的锚点 155634（2026-10-03 18:00 UTC）是真实的空块小时，48 条序列在那里全是 `null` | `test_a_real_no_block_anchor_blanks_only_that_window` | `no_block == ["7d"]`；7d 窗口每档的三项都是 `None`，其余三个窗口（锚点 155778 / 155082 / 153642）全部有值 |
-| 抓取时的一致性核对 | `price_close` 窗口 | 同一分钟内重取，与原文件的 `version`（89）和全部值都一致 | 一致（范围见"遗留"里的 T2-M2） |
+| 抓取时的一致性核对 | `price_close` 窗口 | 同一分钟内重取，与原文件的 `version`（89）和全部值都一致 | 一致。这只说明 `price_close` 没被修订；48 条 size 序列另由终审在 10-19 的重叠区核对：`addrs_over_100k_btc_supply` 在 2,093 个重叠位置全部相同（version 124746337），写在 fixture README 里 |
 
 ### 前端（页面记录 + 评审复算）
 
@@ -71,7 +71,7 @@ fixture：`services/analytics/tests/onchain/fixtures/brk-2026-10-16/hour1_addrs_
 |---|---|---|---|
 | `size-cohorts-expected.json`（原站 2026-10-19 06:16 / 06:21 UTC 的线上读数，SR-5.md:22-30、39-61，SR-6.md:21-31） | 图 5 的标签与图例 8 组（4 个窗口 × BTC / %）、默认读数 1 组、轴 16 组（Bands / Entities × BTC / % × 4 个窗口）；图 6 的标签、图例与轴 7 组、读数 5 组 | `size-cohorts.test.ts` 逐项断言（标签、图例、刻度、柱数、正负、读数） | 全部相等 |
 | 评审复算（Task 4） | 同上全部条目 | 独立的 Python oracle（移植了 d3 的 `ticks`），从阶段 B 的页面全局重算 | 0 处差异 |
-| 文案 | 每种语言共 70 个键（`sizes.*` 69 个加 `flows.sizes`；Task 4 加 34 个，Task 5 加 36 个），en 与 zh 一一对应 | `i18n.test.ts` 核对键一致，并逐字核对 4 对（`flows.sizes`、两个标题、`sizes.noBlock`）；Task 5 评审另把 50 个键与 brief 的两张表逐字比对 | 0 处差异 |
+| 文案 | 每种语言共 70 个键（`sizes.*` 69 个加 `flows.sizes`；Task 4 加 34 个，Task 5 加 36 个），en 与 zh 一一对应 | `i18n.test.ts` 核对键一致，并逐字核对 10 对（`flows.sizes`、两个标题、`sizes.noBlock`，以及终审修复轮改过的 `sizes.bands`、`sizes.pctBand`、`sizes.supply.share`、`sizes.supply.held`、`sizes.pnl.none`、`sizes.pnl.implies`），断言 zh 的 `sizes.*` 不再出现"本组""该组"；Task 5 评审另把 50 个键与 brief 的两张表逐字比对 | 0 处差异 |
 | 用例数 | `size-cohorts.test.ts` 55 个、`size-cohorts-charts.test.tsx` 19 个起，另有 `onchain-contract.test.ts`、`client.test.ts`、`flows-panel.test.tsx`、`market-defaults.test.tsx` 追加 | 见第 1 节 | 通过 |
 
 **不是逐格页面记录的 expected 项**（`source` 字段已写明）：
@@ -121,13 +121,24 @@ fixture：`services/analytics/tests/onchain/fixtures/brk-2026-10-16/hour1_addrs_
 | 图 5 默认（7d / Entities / BTC） | 4 行、标签、图例、7 个刻度（±15,000，步长 5,000） | SVG 宽 330、高 300，无越界文字 |
 | 图 6 默认 | 4 行、净额标签、刻度 ±$1.00B / $500.0M、图例 | SVG 宽 330、高 300，无越界文字 |
 | 控件切换 | Bands、Gross、30d 切换后数值与原站一致（见第 5 节） | 切到 Bands 和 Gross 后两张图都是 330×354，无越界文字 |
-| 键盘读数 | 聚焦图 6 后按 ArrowDown，读数为 "10k–100k BTC · Profit booked +$273.4M · Loss booked −$412.4M · Net −$139.0M · vs realized cap −0.114% · 40% of booked value was profit · 7d window"。Home、End、Esc 由单测覆盖，浏览器里没有逐个按。焦点环没有目视检查 | — |
-| 5 个子视图按钮 | 一行 | 换成两行（容器宽 352 px），没有截断。两行时的边框问题（SR3-4 遗留的 T7-M7）未目视检查 |
+| 键盘读数 | 聚焦图 6 后按 ArrowDown，读数为 "10k–100k BTC · Profit booked +$273.4M · Loss booked −$412.4M · Net −$139.0M · vs realized cap −0.114% · 40% of booked value was profit · 7d window"。Home、End、Esc 由单测覆盖，浏览器里没有逐个按。焦点环这次没有目视检查：`market.css` 的 `.wh-market :focus-visible` 覆盖这个 SVG，留到下面的 1440 弹窗检查里看 | — |
+| 5 个子视图按钮 | 一行 | 换成两行（容器宽 352 px），没有截断。这次检查时，两行的边框问题（SR3-4 遗留的 T7-M7）还在：第一行末端是双线，两行之间没有分隔线。终审修复轮已改（M5，见表后） |
 | 12 档 Gross 的标签 | 都在 SVG 内 | 都在 SVG 内 |
 | 三栏说明 | 横排 | 纵向全部展开，每栏宽 330 |
 | `scrollWidth` | 等于窗口宽 | 390 |
 | zh | 切换条显示：卖压、卖方结构、成本分布、规模分组、永续状态。图内文字、档名（如"高于 100k BTC"、"10M 聪–1 BTC"）、图例和三栏说明都已翻译，数值不变 | — |
 | 控制台 | 重新加载并切换控件后无报错 | — |
+
+终审修复轮（M1、M5）：
+- M1：宽版里最长的负值条，标签会压到行名，现在改放在条内末端（SPEC"规模分组"偏离第 10 条），由单测在 720 / 1,160 / 1,280 / 390 px 钉住。
+- M5：Flows 切换条的分隔线改为每个按钮左侧和上方 1px 的 box-shadow，容器边缘的那一段被裁掉；换行后按钮撑满每一行。修复轮用 headless Chrome 只渲染 `market.css` 和切换条做了核对：
+  - 390 px：两行，行间有一条通栏分隔线，第一行末端没有双线；
+  - 宽屏一行：外观不变，只是整条窄了 4 px（454.8 → 450.8），因为原先每条右边框占 1 px；
+  - 视口宽于 600 px 但容器窄到换行时，按钮同样撑满每一行。
+
+  这只核对了样式，不是在真实页面里看的。
+
+1440/1024 弹窗检查（M1、M5）：待 controller 填写
 
 ## 5. 与原站同刻对照
 
@@ -162,10 +173,15 @@ fixture：`services/analytics/tests/onchain/fixtures/brk-2026-10-16/hour1_addrs_
 7. 图内由 JS 生成的文字全部翻译。
 8. Net 图例色块用墨色 `#e5edf6`，与图 6 的净额竖线一致。
 9. 三栏说明是我们起草的（原站两张图只有一行 caption）。
+10. 宽版里负值标签会压到行名时，改放在条内末端（原站也会压，终审 M1）。
 
 ### 交用户审的文案
 
-- zh `sizes.bands` 现为"分组"，应改为"区间"：它切换的是 12 个钱包规模区间，不是分组（与旁边的"实体"拆分混淆）。
+- 终审修复轮（`635bd7d`）已改，请一并审：
+  - zh `sizes.bands`："分组"改为"区间"，它切换的是 12 个规模区间；
+  - zh 里指"这一行"的"本组 / 该组"都改为"本档 / 该档"，因为 Bands 下一行是一个区间，不是一组：`sizes.pctBand`、`sizes.supply.share` 改为"占本档比例"，`sizes.supply.held` 改为"本档持币量"，`sizes.pnl.none` 改为"该档没有币移动"；`sizes.supply.shows`、`sizes.pnl.shows`、`sizes.pnl.implies` 里的同一说法也一起改了；
+  - `sizes.noBlock` 不再说"下一次刷新补上"：en 改为 "It usually fills in within an hour or two, once the window's start moves past that hour."，zh 改为"通常一两个小时内、窗口起点移过这一小时后就会补上。"；
+  - `sizes.pnl.implies` 末句的分母是该档全部持币的已实现市值：en 改为 "a share of what the band paid for everything it holds"，zh 改为"占该档全部持币买入成本的比例"。
 - 全部三栏说明（`sizes.supply.shows` / `implies` / `how`、`sizes.pnl.shows` / `implies` / `how`）的中英文措辞都是我们起草的，交用户审定（OP-4）；按钮、图例、读数、两侧小字、`sizes.noBlock` 等其余文案随同一次审阅。
 
 ### 遗留问题
@@ -175,14 +191,8 @@ fixture：`services/analytics/tests/onchain/fixtures/brk-2026-10-16/hour1_addrs_
 - size 阶段持续 5xx 时，整轮每 5 分钟重试（hour1、URPD 失败时的已有行为）；
 - 无块锚点的窗口显示 "—"（OP-1）；若嫌空白，另立 O3 版本（向前沿用上一小时），本计划不做。
 
-评审留下、带到终审的项：
-- T2-M2：fixture README 里"BRK had not revised that window"应收窄到 `price_close`，并补一个 10-19 重叠区的核对（2,093 / 2,093 一致，version 124746337）；
-- T2-M3：可选，`test_onchain_sync.py:1551` 用 `str(-HOUR1_BACKFILL)`；
-- T2-M4：README 里的脚本需要 Python ≥ 3.11；
-- T3-M1：样本重新生成的说明（断言信息或 README）；
-- T3-M2：测试里"读接口不现算"的盲区。补 `monkeypatch OnchainStore.read_series = boom`，并断言 `hasattr(sizes, "size_cohorts")`；Cost basis 的同类测试有同一个盲区，两处一起修；
-- T3-M4：测试里改用 `SIZE_COMPUTED` / `SIZE_READ` 常量；
-- T3-M5：可选，补一个"某档 `supply` 或 `realized_cap` 为 null"的接口测试；
-- Task 5：三栏说明用的 `ReadColumns` 复用自 `cost-flow-charts.tsx`，而卖压、Sell side、图 2 各内联了一份；应把它移到共享模块，替换这三份内联副本。这是跨计划的重构，留到终审评审；
-- SR3-4 的 T7-M7：Flows 切换条两行时的边框，第 5 个子视图加入后在第 4 节实测；
-- 提速办法（不在本计划内）：会话级的首轮同步模板库。
+终审修复轮之后仍留着的：
+- 文案交用户审（OP-4），见上一小节；
+- 卖压、Sell side、图 2 各内联了一份三栏说明。`ReadColumns` 已移到共享的 `flow-notes.tsx`，以后单独把这三份换成它（终审 §5）；
+- 提速办法（不在本计划内）：会话级的首轮同步模板库（终审 §6）；
+- pytest 的 1 个 warning 是仓库原有的 Starlette/httpx 弃用提示，与本分支无关。

@@ -154,9 +154,14 @@ data). Replayed by `../../onchain_fixture.py`; do not edit the JSON by hand.
   The 48 files hold 1,825,665 bytes together.
 - In the same minute (request at 01:07:39Z, `stamp` 01:07:40Z) `price_close` was fetched again
   over the same window and matched `hour1_price_close.json` value for value, in `start`/`end` and
-  in `version` (89), so BRK had not revised that window since the 10-16 capture. Unlike the other
-  hour1 files, these 48 were not captured on 2026-10-16 itself: they are that window as BRK served
-  it on 10-20.
+  in `version` (89), so BRK had not revised `price_close` over that window since the 10-16 capture.
+  That says nothing of the 48 size series. For them, the final review compared stage A's
+  `verification-2026-10-19/verify/sr5/nullcheck.json` (under
+  `.local/research-samples/alpha-dashboards-2026-10-16/`, not in the repository; fetched with
+  `stamp` 2026-10-19T05:11:11Z over positions 153845-156006): its `addrs_over_100k_btc_supply`
+  (version 124746337) equals `hour1_addrs_over_100k_btc_supply.json` at all 2,093 overlapping
+  positions (153845-155937), its 5 `null`s included. Unlike the other hour1 files, these 48 were
+  not captured on 2026-10-16 itself: they are that window as BRK served it on 10-20.
 - `version` is shared by `_supply` and `_realized_cap`, and by the two realized cumulatives, of
   one band; one `stamp` per band (`type` is `Bitcoin` for `_supply`, `Dollars` for the others):
 
@@ -198,13 +203,14 @@ data). Replayed by `../../onchain_fixture.py`; do not edit the JSON by hand.
   anchors 155778, 155082 and 153642 all had a block.
 - Written from the repository root with
   `python3 -I sizes_expected.py services/analytics/tests/onchain/fixtures/brk-2026-10-16 services/analytics/tests/onchain/fixtures/brk-2026-10-16/sizes-expected.json`,
-  `sizes_expected.py` being exactly this; it printed only the two `SE …: N null cells` lines.
+  `sizes_expected.py` being exactly this but for the Python note on its Usage line, added later; it
+  printed only the two `SE …: N null cells` lines.
   Read only; never edit by hand.
 
 ```python
 """Offline recompute of the size-cohort table from the 48 hour1 fixture files.
 
-Usage: python3 -I sizes_expected.py FIXTURE_DIR OUT_JSON
+Usage: python3 -I sizes_expected.py FIXTURE_DIR OUT_JSON (Python >= 3.11, for datetime.UTC)
 Reads FIXTURE_DIR/hour1_<band><suffix>.json only; imports nothing from the service.
 """
 
