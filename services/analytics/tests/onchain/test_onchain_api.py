@@ -2050,6 +2050,26 @@ def test_cost_basis_history_passes_the_backfill_error_through(tmp_path: Path):
     assert (body["backfill_error"], body["last_error"]) == ("brk_bad_snapshot", None)
 
 
+def test_cost_basis_history_passes_the_sync_state_through(tmp_path: Path):
+    # With the sample and without any payload alike, the round's state is read as it is stored.
+    sample = tmp_path / "onchain.sqlite"
+    seed_history(sample)
+    empty = tmp_path / "empty.sqlite"
+    for path in (sample, empty):
+        OnchainStore(path).set_state(
+            refreshing="true", brk_version="0.12.2", last_error="brk_unavailable"
+        )
+    for path, state in ((sample, "fresh"), (empty, "unavailable")):
+        with TestClient(router_app(path, SAMPLE_NOW)) as http:
+            body = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+        assert body["data_state"] == state, path.name
+        assert (body["refreshing"], body["brk_version"], body["last_error"]) == (
+            True,
+            "0.12.2",
+            "brk_unavailable",
+        ), path.name
+
+
 def test_cost_basis_history_shows_a_failed_round_holding_the_backfill(tmp_path: Path):
     # Every hour1 stage fails. The round records its error, but the shared reasons stay clean and
     # no history is asked for, so no backfill error is recorded either: without `last_error` the
@@ -2116,7 +2136,15 @@ def test_cost_basis_history_reads_no_network_and_computes_nothing(
         for name in ("cost_basis_history", "history_row"):
             assert hasattr(module, name), f"{module.__name__}.{name}"
             monkeypatch.setattr(module, name, boom)
-    for name in ("read_series", "urpd_history", "urpd", "latest_urpd"):
+    stored_inputs = (
+        "read_series",
+        "urpd_history",
+        "urpd",
+        "latest_urpd",
+        "urpd_days",
+        "urpd_fetched_at",
+    )
+    for name in stored_inputs:
         assert hasattr(OnchainStore, name), f"OnchainStore.{name}"
         monkeypatch.setattr(OnchainStore, name, boom)
     client, seen = blocked_client()
