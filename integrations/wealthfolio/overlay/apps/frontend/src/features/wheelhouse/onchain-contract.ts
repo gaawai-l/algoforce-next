@@ -15,6 +15,7 @@ export type CohortColumns = components["schemas"]["CohortColumns"];
 export type AgeFlow = components["schemas"]["AgeFlow"];
 export type SizeCohortsView = components["schemas"]["SizeCohortsView"];
 export type SizeBand = components["schemas"]["SizeBand"];
+export type CostBasisHistoryView = components["schemas"]["CostBasisHistoryView"];
 
 // The twelve wallet-size bands, smallest first, as the original lists them (L:48-54).
 export const SIZE_BAND_KEYS = [
@@ -429,6 +430,53 @@ export const sizeCohortsSchema: z.ZodType<SizeCohortsView, z.ZodTypeDef, unknown
             band.windows.every((cell, j) => cell.window === SIZE_WINDOWS[j]),
         )),
     { message: "size-cohort bands or windows out of order" },
+  );
+
+const dayStatus = z.enum(["closed", "forming", "pending", "absent"]);
+const missingDay = new Set<string>(["pending", "absent"]);
+
+// Columns of one length, rows as wide as the grid, and a missing day missing in every column: a
+// payload that breaks any of this would misplace cells, so it is refused rather than drawn.
+export const costBasisHistorySchema: z.ZodType<
+  CostBasisHistoryView,
+  z.ZodTypeDef,
+  unknown
+> = z
+  .object({
+    data_state: dataState,
+    reasons: z.array(z.string()),
+    refreshing: z.boolean(),
+    span: z.enum(["30", "90", "365", "all"]),
+    latest_day: day.nullable(),
+    computed_at: time.nullable(),
+    floors: z.array(z.number().int()),
+    days: z.array(day),
+    close: z.array(z.number().nullable()),
+    // One row per day, lined up with floors; null when there is no snapshot, never zeros.
+    supply: z.array(z.array(z.number()).nullable()),
+    status: z.array(dayStatus),
+    backfill_error: z.string().nullable(),
+    // The last round's error: while it is set, no missing day is being fetched.
+    last_error: z.string().nullable(),
+    brk_version: z.string().nullable(),
+    rules,
+    rules_pending: z.boolean(),
+  })
+  .refine(
+    (view) =>
+      [view.close, view.supply, view.status].every(
+        (column) => column.length === view.days.length,
+      ) &&
+      view.days.every((_, i) => {
+        const row = view.supply[i];
+        const missing = missingDay.has(view.status[i]);
+        return (
+          missing === (row === null) &&
+          missing === (view.close[i] === null) &&
+          (row === null || row.length === view.floors.length)
+        );
+      }),
+    { message: "cost-basis history columns differ" },
   );
 
 // Hand-written payloads shared by contract and view tests. The cycle components and the

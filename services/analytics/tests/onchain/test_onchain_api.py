@@ -1,6 +1,7 @@
 import json
 import math
 import threading
+from collections import Counter
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -18,12 +19,25 @@ from costflow_sample import (
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from onchain_fixture import GOLDEN_DAYS, brk_transport, seed_golden
+from onchain_fixture import (
+    GOLDEN_DAYS,
+    HISTORY_SAMPLE_AT,
+    brk_transport,
+    seed_golden,
+    seed_history_sample,
+)
 from sizes_fixture import golden_rows
 
 from wheelhouse_service import rules as rules_module
 from wheelhouse_service.http import create_app
-from wheelhouse_service.onchain import api, costbasis, costflow, models, sizes
+from wheelhouse_service.onchain import (
+    api,
+    costbasis,
+    costbasis_history,
+    costflow,
+    models,
+    sizes,
+)
 from wheelhouse_service.onchain import sync as sync_module
 from wheelhouse_service.onchain.api import create_router
 from wheelhouse_service.onchain.brk import HOUR1_SERIES, BrkClient
@@ -528,6 +542,7 @@ def test_capability_and_get_only_schema(tmp_path: Path):
         f"{PREFIX}/cost-basis",
         f"{PREFIX}/cost-flow",
         f"{PREFIX}/size-cohorts",
+        f"{PREFIX}/cost-basis-history",
     }
     assert all(methods == {"get"} for methods in onchain.values())
 
@@ -1888,3 +1903,264 @@ def test_size_cohorts_after_sync_never_touch_network(
     assert len(view["bands"]) == 12
     assert view["brk_version"] == "0.12.2"
     assert seen == []
+
+
+# The cost-basis history of Chart 8: the golden sample's all-coins lin500 snapshots (see
+# `seed_history_sample`), derived at HISTORY_SAMPLE_AT and read ten minutes later.
+SAMPLE_NOW = datetime(2026, 10, 16, 18, 40, tzinfo=UTC)
+SAMPLE = (
+    Path(__file__).parents[4]
+    / "integrations/wealthfolio/overlay/apps/frontend/src/features/wheelhouse"
+)
+
+
+def seed_history(path: Path, *, history_error: str | None = None) -> None:
+    """Store the history sample at `path` and derive Chart 8 from it at HISTORY_SAMPLE_AT, with
+    `history_error` as the last backfill's error."""
+    store = OnchainStore(path)
+    seed_history_sample(store)
+    store.set_state(history_error=history_error)
+    OnchainSync(store, blocked_client()[0], rules=frozenset())._derive_history(HISTORY_SAMPLE_AT)
+
+
+def history_app(tmp_path: Path, now: datetime, **options: Any) -> FastAPI:
+    path = tmp_path / "onchain.sqlite"
+    seed_history(path)
+    return router_app(path, now, **options)
+
+
+def test_cost_basis_history_slices_the_span(tmp_path: Path):
+    with TestClient(history_app(tmp_path, SAMPLE_NOW)) as http:
+        body = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+        assert body["span"] == "30" and body["data_state"] == "fresh"
+        assert body["latest_day"] == "2026-10-16"
+        assert len(body["days"]) == 30
+        assert body["days"][0] == "2026-09-17" and body["days"][-1] == "2026-10-16"
+        assert len(body["floors"]) == 250
+        assert body["floors"][0] == 1000 and body["floors"][-1] == 125500
+        assert Counter(body["status"]) == {"pending": 24, "absent": 1, "closed": 4, "forming": 1}
+        # Missing is null, never 0.
+        assert body["supply"][0] is None and body["close"][0] is None
+        assert body["supply"][-1][(82000 - 1000) // 500] == 252722.29
+        assert body["close"][-2] == 82203.57
+        assert body["backfill_error"] is None
+        assert body["rules"] == [] and body["rules_pending"] is False
+        assert body["computed_at"].startswith("2026-10-16T18:29:37")
+        assert len(http.get(f"{PREFIX}/cost-basis-history").json()["days"]) == 365
+        everything = http.get(f"{PREFIX}/cost-basis-history?span=all").json()
+        assert len(everything["days"]) == 1461 and everything["days"][0] == "2022-10-17"
+        ninety = http.get(f"{PREFIX}/cost-basis-history?span=90").json()
+
+    # Every column of a span is the tail of the same columns, lined up with its days.
+    assert len(ninety["days"]) == 90 and ninety["days"][0] == "2026-07-19"
+    for span in (body, ninety, everything):
+        assert {len(span[column]) for column in ("close", "supply", "status")} == {
+            len(span["days"])
+        }
+    for span in (body, ninety):
+        for column in ("days", "close", "supply", "status"):
+            assert span[column] == everything[column][-len(span["days"]) :], column
+        assert span["floors"] == everything["floors"]
+
+
+def test_cost_basis_history_matches_the_frontend_sample(tmp_path: Path):
+    # The committed sample is exactly what the service answers (PLAN-SR5-6:396 does the same).
+    with TestClient(history_app(tmp_path, SAMPLE_NOW)) as http:
+        body = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    committed = (SAMPLE / "cost-basis-history-sample.json").read_text()
+    regenerate = (
+        "cost-basis-history-sample.json is out of date. If the change is meant, regenerate it "
+        "from the same inputs (history_app(tmp_path, SAMPLE_NOW), then GET ?span=30) by writing "
+        'json.dumps(body, separators=(",", ":"), ensure_ascii=False) + "\\n" to it, and '
+        "cost-basis-history-expected.json from it with cbh_reference.reference."
+    )
+    assert body == json.loads(committed), regenerate
+    # No libm result is in it, so it is the same bytes on every platform: any drift of the route
+    # or of the rows shows here, down to a whole number that turned into a float.
+    assert committed == json.dumps(body, separators=(",", ":"), ensure_ascii=False) + "\n"
+
+
+def test_cost_basis_history_rejects_an_unknown_span(tmp_path: Path):
+    with TestClient(history_app(tmp_path, SAMPLE_NOW)) as http:
+        for span in ("7", "ALL", "365d", ""):
+            assert http.get(f"{PREFIX}/cost-basis-history?span={span}").status_code == 422, span
+
+
+def test_cost_basis_history_is_unavailable_without_a_payload(tmp_path: Path):
+    with TestClient(router_app(tmp_path / "onchain.sqlite", SAMPLE_NOW)) as http:
+        response = http.get(f"{PREFIX}/cost-basis-history")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data_state"] == "unavailable" and body["reasons"] == ["urpd_missing"]
+    assert body["span"] == "365"
+    for column in ("floors", "days", "close", "supply", "status"):
+        assert body[column] == [], column
+    assert (body["latest_day"], body["computed_at"]) == (None, None)
+    assert (body["backfill_error"], body["last_error"]) == (None, None)
+    assert (body["rules"], body["rules_pending"], body["refreshing"]) == ([], False, False)
+    assert body["brk_version"] is None
+
+
+@pytest.mark.parametrize(
+    ("now", "expected"),
+    [
+        (datetime(2026, 10, 17, 1, 59, tzinfo=UTC), "fresh"),
+        (datetime(2026, 10, 17, 2, 0, tzinfo=UTC), "stale"),
+    ],
+)
+def test_cost_basis_history_goes_stale_after_the_grace(
+    tmp_path: Path, now: datetime, expected: str
+):
+    with TestClient(history_app(tmp_path, now)) as http:
+        body = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    assert body["data_state"] == expected == day1_state(date(2026, 10, 16), now)
+    # How fresh it is never changes what it holds.
+    assert body["latest_day"] == "2026-10-16" and body["days"][-1] == "2026-10-16"
+
+
+def test_cost_basis_history_reasons_are_module_filtered(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    seed_history(path)
+    shared = ["urpd_missing", "brk_unavailable"]
+    OnchainStore(path).set_state(
+        reasons=json.dumps(
+            ["series_missing:price_close", "urpd_not_final", shared[0], shared[1]]
+            + ["series_missing:hour1:price_close"]
+        )
+    )
+    with TestClient(router_app(path, SAMPLE_NOW)) as http:
+        body = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    # Only the shared reasons that concern D, in their stored order; the payload stays as it was.
+    assert body["reasons"] == shared
+    assert body["latest_day"] == "2026-10-16" and len(body["days"]) == 30
+
+    # Without a payload the same filter applies, and `urpd_missing` is not repeated.
+    empty = tmp_path / "empty.sqlite"
+    OnchainStore(empty).set_state(reasons=json.dumps(["urpd_not_final", "brk_unavailable"]))
+    with TestClient(router_app(empty, SAMPLE_NOW)) as http:
+        assert http.get(f"{PREFIX}/cost-basis-history").json()["reasons"] == ["brk_unavailable"]
+
+
+def test_cost_basis_history_passes_the_backfill_error_through(tmp_path: Path):
+    path = tmp_path / "onchain.sqlite"
+    seed_history(path, history_error="brk_bad_snapshot")
+    with TestClient(router_app(path, SAMPLE_NOW)) as http:
+        body = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    assert (body["backfill_error"], body["last_error"]) == ("brk_bad_snapshot", None)
+
+
+def test_cost_basis_history_shows_a_failed_round_holding_the_backfill(tmp_path: Path):
+    # Every hour1 stage fails. The round records its error, but the shared reasons stay clean and
+    # no history is asked for, so no backfill error is recorded either: without `last_error` the
+    # view would claim the missing days are still being fetched.
+    path = synced(tmp_path, at=NOW, urpd_dir=GOLDEN, fail_index={"hour1"})
+    with TestClient(router_app(path, NOW)) as http:
+        failed = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    assert failed["data_state"] == "fresh" and failed["latest_day"] == "2026-10-16"
+    assert "pending" in failed["status"]
+    assert failed["reasons"] == [] and failed["backfill_error"] is None
+    assert failed["last_error"] == "brk_unavailable"
+
+    # A clean round clears it.
+    later = NOW + timedelta(hours=1)
+    synced(tmp_path, at=later, urpd_dir=GOLDEN)
+    with TestClient(router_app(path, later)) as http:
+        clean = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    assert (clean["last_error"], clean["backfill_error"], clean["reasons"]) == (None, None, [])
+
+
+def test_cost_basis_history_rules_pending_until_the_worker_derives_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "onchain.sqlite"
+    seed_history(path)
+    monkeypatch.setattr(OnchainSync, "start", lambda self: None)
+    # Chart 8 implements no rule, so under any of them, O1 among them, which the cost basis does
+    # implement, nothing is pending.
+    with TestClient(router_app(path, SAMPLE_NOW, start_worker=True, rules=O1)) as http:
+        view = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    assert (view["rules"], view["rules_pending"]) == ([], False)
+
+    # Were O1 to apply to Chart 8, the payload derived under no rule would be pending while a
+    # worker runs; the worker's thread itself is not started.
+    monkeypatch.setitem(rules_module.IMPLEMENTED, "costbasis_history", frozenset({"O1"}))
+    with TestClient(router_app(path, SAMPLE_NOW, start_worker=True, rules=O1)) as http:
+        view = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    assert (view["rules"], view["rules_pending"]) == ([], True)
+    # Without a worker nothing derives it again, so nothing is pending.
+    with TestClient(router_app(path, SAMPLE_NOW, rules=O1)) as http:
+        view = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    assert (view["rules"], view["rules_pending"]) == ([], False)
+
+    # Once derived under O1 it is no longer pending, and it names the rules it was derived under.
+    OnchainSync(OnchainStore(path), blocked_client()[0], rules=O1)._derive_history(
+        HISTORY_SAMPLE_AT
+    )
+    with TestClient(router_app(path, SAMPLE_NOW, start_worker=True, rules=O1)) as http:
+        view = http.get(f"{PREFIX}/cost-basis-history?span=30").json()
+    assert (view["rules"], view["rules_pending"]) == (["O1"], False)
+
+
+def test_cost_basis_history_reads_no_network_and_computes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    seed_history(tmp_path / "onchain.sqlite")
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the read route computed something")
+
+    # Each name must still be there, or the patch would silently patch nothing; and no stored input
+    # is read, which any recomputation, under whatever name, would need.
+    for module in (costbasis_history, sync_module):
+        for name in ("cost_basis_history", "history_row"):
+            assert hasattr(module, name), f"{module.__name__}.{name}"
+            monkeypatch.setattr(module, name, boom)
+    for name in ("read_series", "urpd_history", "urpd", "latest_urpd"):
+        assert hasattr(OnchainStore, name), f"OnchainStore.{name}"
+        monkeypatch.setattr(OnchainStore, name, boom)
+    client, seen = blocked_client()
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
+    with TestClient(app) as http:
+        response = http.get(f"{PREFIX}/cost-basis-history?span=all")
+
+    assert response.status_code == 200 and len(response.json()["days"]) == 1461
+    assert seen == []
+
+
+def test_cost_basis_history_is_gzipped(tmp_path: Path):
+    # The whole app, so the middleware is in the path.
+    seed_history(tmp_path / "onchain.sqlite")
+    client, _ = blocked_client()
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
+    with TestClient(app) as http:
+        response = http.get(
+            f"{PREFIX}/cost-basis-history?span=all", headers={"Accept-Encoding": "gzip"}
+        )
+        # A client that does not ask for it gets the plain body.
+        plain = http.get(
+            f"{PREFIX}/cost-basis-history?span=all", headers={"Accept-Encoding": "identity"}
+        )
+
+    assert response.status_code == 200 and response.headers["content-encoding"] == "gzip"
+    assert len(response.json()["days"]) == 1461
+    assert "content-encoding" not in plain.headers and plain.json() == response.json()
+    # The request headers the app sets on every response survive the compression.
+    assert response.headers["cache-control"] == "no-store" and response.headers["x-request-id"]
+
+
+def test_a_small_response_is_not_gzipped(tmp_path: Path):
+    client, _ = blocked_client()
+    app = create_app(
+        tmp_path / "m.sqlite", start_worker=False, brk_client=client, rules=frozenset()
+    )
+    with TestClient(app) as http:
+        response = http.get(f"{PREFIX}/cost-basis-history", headers={"Accept-Encoding": "gzip"})
+
+    # The unavailable view is far under the 1,024-byte minimum.
+    assert response.status_code == 200 and len(response.content) < 1024
+    assert "content-encoding" not in response.headers

@@ -16,16 +16,18 @@ from .agecohorts import INPUTS as AGE_INPUTS
 from .agecohorts import AgeBands, AgeCohorts
 from .brk import AGE_FLOOR_SERIES, DAY1_SERIES, HOUR1_SERIES, SIZE_SERIES, BrkClient
 from .costbasis import StoredCostBasis
-from .costbasis_history import HISTORY_BUDGET
+from .costbasis_history import HISTORY_BUDGET, HISTORY_DAYS, CostBasisHistory
 from .costflow import StoredCostFlow
 from .cycle import Cycle
 from .levels import ModelLine, line_series
 from .models import (
     AgeCohortsView,
+    CostBasisHistoryView,
     CostBasisView,
     CostFlowView,
     CycleView,
     DatasetStatus,
+    HistorySpan,
     HourState,
     LevelsView,
     OnchainStatus,
@@ -56,6 +58,10 @@ COST_FLOW_REASONS = (
     *(f"series_missing:{name}" for name in AGE_FLOOR_SERIES),
     "brk_unavailable",
 )
+# Chart 8 reads only the URPD snapshots of the history and D.
+HISTORY_REASONS = ("urpd_missing", "brk_unavailable")
+# The days each span of Chart 8 shows; "all" is the whole window the worker keeps.
+SPAN_DAYS: dict[HistorySpan, int] = {"30": 30, "90": 90, "365": 365, "all": HISTORY_DAYS}
 
 
 def levels_reasons(rules: Rules) -> tuple[str, ...]:
@@ -201,6 +207,12 @@ def create_router(
         if derived is None:
             return None
         return SizeCohorts.model_validate_json(derived[0]), derived[1]
+
+    def stored_history() -> tuple[CostBasisHistory, datetime] | None:
+        derived = db().derived("costbasis_history")
+        if derived is None:
+            return None
+        return CostBasisHistory.model_validate_json(derived[0]), derived[1]
 
     @router.get("/status", response_model=OnchainStatus)
     def status() -> OnchainStatus:
@@ -607,6 +619,55 @@ def create_router(
             brk_version=state["brk_version"],
             rules=result.rules,
             rules_pending=pending("sizes", result.rules),
+        )
+
+    # Not `cost_basis_history`: that is the worker's derivation, which this route never runs.
+    @router.get("/cost-basis-history", response_model=CostBasisHistoryView)
+    def cost_basis_history_view(span: HistorySpan = "365") -> CostBasisHistoryView:
+        now = clock()
+        state = db().state()
+        reasons = only(stored_reasons(state), HISTORY_REASONS)
+        refreshing = state["refreshing"] == "true"
+        stored = stored_history()
+        if stored is None:
+            return CostBasisHistoryView(
+                data_state="unavailable",
+                reasons=reasons or ["urpd_missing"],
+                refreshing=refreshing,
+                span=span,
+                latest_day=None,
+                computed_at=None,
+                floors=[],
+                days=[],
+                close=[],
+                supply=[],
+                status=[],
+                backfill_error=None,
+                last_error=state["last_error"],
+                brk_version=state["brk_version"],
+                rules=[],
+                rules_pending=False,
+            )
+        result, computed_at = stored
+        # Only a cut: the stored columns always hold every day of the window, missing ones null.
+        shown = -SPAN_DAYS[span]
+        return CostBasisHistoryView(
+            data_state=day1_state(result.latest_day, now),
+            reasons=reasons,
+            refreshing=refreshing,
+            span=span,
+            latest_day=result.latest_day,
+            computed_at=computed_at,
+            floors=result.floors,
+            days=result.days[shown:],
+            close=result.close[shown:],
+            supply=result.supply[shown:],
+            status=result.status[shown:],
+            backfill_error=result.backfill_error,
+            last_error=state["last_error"],
+            brk_version=state["brk_version"],
+            rules=result.rules,
+            rules_pending=pending("costbasis_history", result.rules),
         )
 
     return router

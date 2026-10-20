@@ -9,6 +9,7 @@ from ..market import Model
 from ..rules import Rule
 from .agecohorts import AgeBands
 from .costbasis import BucketCostBasis
+from .costbasis_history import DayStatus
 from .costflow import AgeFlow, FlowGrid
 from .cycle import Component, CycleState, Episode
 from .levels import ModelLine
@@ -19,6 +20,8 @@ from .sizes import SizeBand, WindowKey
 DataState = Literal["fresh", "stale", "unavailable"]
 # Hourly data adds `delayed`: late, but not yet old enough to call stale.
 HourState = Literal["fresh", "delayed", "stale", "unavailable"]
+# The days of Chart 8 a request asks for: the last 30, 90 or 365, or all HISTORY_DAYS.
+HistorySpan = Literal["30", "90", "365", "all"]
 
 # BRK publishes the new day's row some time after UTC midnight; until then yesterday's is current.
 GRACE_END = time(2, 0)
@@ -244,6 +247,37 @@ class SizeCohortsView(Model):
     bands: list[SizeBand]
     # The windows whose anchor hour had no block, as stored; empty when there is no data.
     no_block: list[WindowKey]
+    brk_version: str | None
+    rules: list[Rule]
+    rules_pending: bool
+
+
+class CostBasisHistoryView(Model):
+    """Chart 8 as the worker derived it, cut to the last days of `span`; the browser computes the
+    rest."""
+
+    # Follows latest_day, D, the day of the newest snapshot.
+    data_state: DataState
+    reasons: list[str]
+    refreshing: bool
+    span: HistorySpan
+    latest_day: date | None
+    computed_at: AwareDatetime | None
+    # The price floor of each row of the grid, in USD; empty when there is no data.
+    floors: list[int]
+    # The calendar days of the span, the oldest first and latest_day last; each column below is
+    # lined up with it.
+    days: list[date]
+    # Null for a pending or absent day, never 0.
+    close: list[float | None]
+    # One row per day, lined up with floors; null when there is no snapshot, never zeros.
+    supply: list[list[float] | None]
+    status: list[DayStatus]
+    # The error the last backfill stopped at; null once one ran without.
+    backfill_error: str | None
+    # The last round's error, null after a clean one. A round with any error asks for no history,
+    # so while this is set the missing days are not being fetched, even with no backfill_error.
+    last_error: str | None
     brk_version: str | None
     rules: list[Rule]
     rules_pending: bool

@@ -1267,6 +1267,55 @@
         }
       }
     },
+    "/api/wheelhouse/v1/onchain/cost-basis-history": {
+      "get": {
+        "tags": [
+          "onchain"
+        ],
+        "summary": "Cost Basis History View",
+        "operationId": "cost_basis_history_view_api_wheelhouse_v1_onchain_cost_basis_history_get",
+        "parameters": [
+          {
+            "name": "span",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "30",
+                "90",
+                "365",
+                "all"
+              ],
+              "type": "string",
+              "default": "365",
+              "title": "Span"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostBasisHistoryView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/perps/states": {
       "get": {
         "tags": [
@@ -2444,6 +2493,197 @@
           "supports"
         ],
         "title": "Component"
+      },
+      "CostBasisHistoryView": {
+        "properties": {
+          "data_state": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Data State"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "refreshing": {
+            "type": "boolean",
+            "title": "Refreshing"
+          },
+          "span": {
+            "type": "string",
+            "enum": [
+              "30",
+              "90",
+              "365",
+              "all"
+            ],
+            "title": "Span"
+          },
+          "latest_day": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Day"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "floors": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Floors"
+          },
+          "days": {
+            "items": {
+              "type": "string",
+              "format": "date"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "close": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Close"
+          },
+          "supply": {
+            "items": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Supply"
+          },
+          "status": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "closed",
+                "forming",
+                "pending",
+                "absent"
+              ]
+            },
+            "type": "array",
+            "title": "Status"
+          },
+          "backfill_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backfill Error"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "brk_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brk Version"
+          },
+          "rules": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "O1",
+                "O2",
+                "O3",
+                "O4",
+                "O5",
+                "O6"
+              ]
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "rules_pending": {
+            "type": "boolean",
+            "title": "Rules Pending"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data_state",
+          "reasons",
+          "refreshing",
+          "span",
+          "latest_day",
+          "computed_at",
+          "floors",
+          "days",
+          "close",
+          "supply",
+          "status",
+          "backfill_error",
+          "last_error",
+          "brk_version",
+          "rules",
+          "rules_pending"
+        ],
+        "title": "CostBasisHistoryView",
+        "description": "Chart 8 as the worker derived it, cut to the last days of `span`; the browser computes the\nrest."
       },
       "CostBasisView": {
         "properties": {

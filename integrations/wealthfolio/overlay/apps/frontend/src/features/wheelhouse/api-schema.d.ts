@@ -565,6 +565,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/onchain/cost-basis-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cost Basis History View */
+        get: operations["cost_basis_history_view_api_wheelhouse_v1_onchain_cost_basis_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/perps/states": {
         parameters: {
             query?: never;
@@ -943,6 +960,51 @@ export interface components {
             deadband: number;
             /** Supports */
             supports: boolean;
+        };
+        /**
+         * CostBasisHistoryView
+         * @description Chart 8 as the worker derived it, cut to the last days of `span`; the browser computes the
+         *     rest.
+         */
+        CostBasisHistoryView: {
+            /**
+             * Data State
+             * @enum {string}
+             */
+            data_state: "fresh" | "stale" | "unavailable";
+            /** Reasons */
+            reasons: string[];
+            /** Refreshing */
+            refreshing: boolean;
+            /**
+             * Span
+             * @enum {string}
+             */
+            span: "30" | "90" | "365" | "all";
+            /** Latest Day */
+            latest_day: string | null;
+            /** Computed At */
+            computed_at: string | null;
+            /** Floors */
+            floors: number[];
+            /** Days */
+            days: string[];
+            /** Close */
+            close: (number | null)[];
+            /** Supply */
+            supply: (number[] | null)[];
+            /** Status */
+            status: ("closed" | "forming" | "pending" | "absent")[];
+            /** Backfill Error */
+            backfill_error: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Brk Version */
+            brk_version: string | null;
+            /** Rules */
+            rules: ("O1" | "O2" | "O3" | "O4" | "O5" | "O6")[];
+            /** Rules Pending */
+            rules_pending: boolean;
         };
         /** CostBasisView */
         CostBasisView: {
@@ -3993,6 +4055,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SizeCohortsView"];
+                };
+            };
+        };
+    };
+    cost_basis_history_view_api_wheelhouse_v1_onchain_cost_basis_history_get: {
+        parameters: {
+            query?: {
+                span?: "30" | "90" | "365" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostBasisHistoryView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

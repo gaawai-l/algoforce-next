@@ -1,16 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getCostBasis,
+  getCostBasisHistory,
   getCostFlow,
   getOnchainCycle,
   getOnchainLevels,
   getPerpStates,
   getPerpStatus,
   getSellerPressure,
+  getSellSide,
   getServiceStatus,
   getSizeCohorts,
 } from "./client";
+import historySample from "./cost-basis-history-sample.json";
 import costFlowSample from "./cost-flow-sample.json";
+import sellSideSample from "./sell-side-sample.json";
 import sizeSample from "./size-cohorts-sample.json";
 import {
   costBasisSample,
@@ -250,6 +254,67 @@ describe("on-chain client", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify(incomplete))),
     );
     await expect(getCostBasis()).rejects.toThrow("incompatible");
+  });
+
+  it("reads the cost-basis history by span, with longer timeouts for the long spans", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi
+      .fn()
+      .mockImplementation((url: string) =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify(
+              url.endsWith("/sell-side") ? sellSideSample : historySample,
+            ),
+          ),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const view = await getCostBasisHistory("all", new AbortController().signal);
+      expect(view.days).toHaveLength(30);
+      await getCostBasisHistory("365");
+      await getSellSide();
+      expect(timeout.mock.calls).toEqual([[30_000], [15_000], [5000]]);
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        "/api/wheelhouse/v1/onchain/cost-basis-history?span=all",
+        "/api/wheelhouse/v1/onchain/cost-basis-history?span=365",
+        "/api/wheelhouse/v1/onchain/sell-side",
+      ]);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("hands the caller's abort signal to the cost-basis history request", async () => {
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) =>
+          init.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          ),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const pending = getCostBasisHistory("90", controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toThrow("did not respond");
+    expect(fetchMock.mock.calls[0][1].signal?.aborted).toBe(true);
+  });
+
+  it("rejects a cost-basis history payload outside the contract", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ ...historySample, close: historySample.close.slice(1) }),
+          ),
+        ),
+    );
+    await expect(getCostBasisHistory("30")).rejects.toThrow("incompatible");
   });
 
   it("reads the size cohorts from the read-only endpoint", async () => {

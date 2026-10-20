@@ -1,6 +1,9 @@
+import json
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import pytest
+from cbh_reference import fmt_btc, js_round, reference
 from onchain_fixture import history_urpd
 from pydantic import ValidationError
 
@@ -31,6 +34,10 @@ STAGE_A = {
 }
 # fmt: on
 FETCHED = datetime(2026, 10, 16, 18, 29, 37, tzinfo=UTC)
+SAMPLE = (
+    Path(__file__).parents[4]
+    / "integrations/wealthfolio/overlay/apps/frontend/src/features/wheelhouse"
+)
 D = date(2026, 10, 16)
 DAY = timedelta(days=1)
 MICRO = timedelta(microseconds=1)
@@ -166,3 +173,115 @@ def test_an_empty_older_row_is_missing_not_zeros():
     assert result is not None
     assert result.supply[-2] is None and result.close[-2] is None
     assert result.status[-2] == "absent"
+
+
+def test_reference_reproduces_the_frontend_expected():
+    view = json.loads((SAMPLE / "cost-basis-history-sample.json").read_text())
+    expected = json.loads((SAMPLE / "cost-basis-history-expected.json").read_text())
+    assert [reference(view, r) for r in (0, 50, 25, 10)] == expected
+    assert reference(view, 0) == {
+        "range": 0,
+        "r0": 0,
+        "r1": 249,
+        "n": 1250,
+        "floor": 87116.49,
+        "cap": 197436.37,
+        "top": 765418.85,
+        "key": ["−87k", "115k", "142k", "170k", "197k+"],
+        "label": "75–95% · 87k–197k+",
+    }
+    # Only + - * / floor and ceil, no libm result, so it is the same bytes on every platform: the
+    # file is the reference's output as it is now, and a drift of either shows here.
+    committed = (SAMPLE / "cost-basis-history-expected.json").read_text()
+    rendered = json.dumps(
+        [reference(view, r) for r in (0, 50, 25, 10)], indent=1, ensure_ascii=False
+    )
+    assert committed == rendered + "\n"
+
+
+def test_reference_matches_the_independently_computed_table():
+    # PLAN-SR8 Task 3 Step 5: rows r0-r1, cell count, floor, cap and key of Range All, +-50%, +-25%
+    # and +-10%, computed separately when the plan was written and when it was reviewed. Spot is
+    # 81,217.6, the close of 10-16, and the largest cell 765,418.85 in all four.
+    view = json.loads((SAMPLE / "cost-basis-history-sample.json").read_text())
+    assert view["close"][-1] == 81217.6
+    table = {
+        0: (0, 249, 1250, 87116.49, 197436.37, "−87k 115k 142k 170k 197k+"),
+        50: (79, 242, 820, 100984.37, 211844.19, "−101k 129k 156k 184k 212k+"),
+        25: (119, 202, 420, 142883.05, 238690.49, "−143k 167k 191k 215k 239k+"),
+        10: (144, 177, 170, 160548.58, 302419.22, "−161k 196k 231k 267k 302k+"),
+    }
+    for range_pct, (r0, r1, n, floor, cap, key) in table.items():
+        found = reference(view, range_pct)
+        assert (found["r0"], found["r1"], found["n"]) == (r0, r1, n), range_pct
+        assert (found["floor"], found["cap"], found["top"]) == (floor, cap, 765418.85), range_pct
+        assert " ".join(found["key"]) == key, range_pct
+        # Rows of $500 from $1,000: the y range of the table.
+        assert (1000 + 500 * r0, 1000 + 500 * (r1 + 1)) == {
+            0: (1000, 126000),
+            50: (40500, 122500),
+            25: (60500, 102500),
+            10: (73000, 90000),
+        }[range_pct]
+
+
+def test_reference_follows_the_original_at_its_edges():
+    view = json.loads((SAMPLE / "cost-basis-history-sample.json").read_text())
+    # 0 and 100 are exactly no change: nothing dropped or clipped, and the label says so.
+    whole = reference(view, 0, lo=0, hi=100)
+    assert (whole["floor"], whole["cap"], whole["top"]) == (0, 765418.85, 765418.85)
+    assert whole["key"] == ["0", "191k", "383k", "574k", "765k"]
+    assert whole["label"] == "full range"
+    # Millions take two decimals; under a thousand, a whole number.
+    tiny = {**view, "supply": [None] * 29 + [[0.0, 0.5, 2.0, 1_234_567.0]], "floors": [1, 2, 3, 4]}
+    found = reference(tiny, 0, lo=50, hi=99)
+    assert (found["r0"], found["r1"], found["n"]) == (1, 3, 3)
+    assert found["key"][0] == "−2" and found["key"][-1] == "1.23M"
+    # A cell of the data's own precision, 0.005 BTC, holds no coins.
+    precise = {**tiny, "supply": [None] * 29 + [[0.005, 0.5, 2.0, 1_234_567.0]]}
+    assert (reference(precise, 0)["r0"], reference(precise, 0)["n"]) == (1, 3)
+    # A Range around spot that leaves no two rows keeps the occupied rows.
+    assert (reference(tiny, 10)["r0"], reference(tiny, 10)["r1"]) == (1, 3)
+    # Without any stored day there is nothing to scale: the whole grid, and no cell.
+    empty = {**view, "supply": [None] * 30, "close": [None] * 30}
+    found = reference(empty, 50)
+    assert (found["r0"], found["r1"], found["n"]) == (0, 249, 0)
+    assert (found["floor"], found["cap"], found["top"]) == (0, 1e-9, 1)
+
+
+def test_reference_rounds_as_javascript_does():
+    # Math.round: a half goes up, also below zero, and 0.49999999999999994 stays under it.
+    assert [js_round(x) for x in (0.5, 2.5, 940.5, -2.5, 0.49999999999999994, 1.4)] == [
+        1,
+        3,
+        941,
+        -2,
+        0,
+        1,
+    ]
+    # toFixed rounds the exact binary value, a tie up: 1.125 is exact, 1.005 just under.
+    assert [fmt_btc(1_125_000), fmt_btc(1_005_000), fmt_btc(999.5), fmt_btc(1_499.9)] == [
+        "1.13M",
+        "1.00M",
+        "1000",
+        "1k",
+    ]
+
+
+def test_reference_reads_spot_and_the_range_as_the_original_does():
+    view = json.loads((SAMPLE / "cost-basis-history-sample.json").read_text())
+    rows = [None] * 30
+    close: list[float | None] = [None] * 30
+    floors = [1000 + 500 * i for i in range(8)]
+    # Spot is the close of the last day with a snapshot, not of the last day.
+    rows[27], close[27] = [1.0] * 8, 2000.0
+    found = reference({**view, "supply": rows, "close": close, "floors": floors}, 10)
+    assert (found["r0"], found["r1"]) == (1, 3)
+    # A Range that leaves a single row keeps the occupied rows: only b > a narrows them. At spot
+    # 5,200, -10% falls in the top row ($4,500-$5,000), so both ends are row 7.
+    close[27] = 5200.0
+    found = reference({**view, "supply": rows, "close": close, "floors": floors}, 10)
+    assert (found["r0"], found["r1"]) == (0, 7)
+    # At 100 the cap is the largest cell, even when the floor already reaches it.
+    found = reference({**view, "supply": rows, "close": close, "floors": floors}, 0, 99, 100)
+    assert (found["floor"], found["cap"], found["top"]) == (1.0, 1.0, 1.0)

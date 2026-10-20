@@ -2,6 +2,7 @@ import { z } from "zod";
 import { demarkConfigSchema, demarkResultSchema } from "./demark-contract";
 import {
   ageCohortsSchema,
+  costBasisHistorySchema,
   costBasisViewSchema,
   costFlowSchema,
   cycleViewSchema,
@@ -9,6 +10,7 @@ import {
   sellerPressureSchema,
   sellSideSchema,
   sizeCohortsSchema,
+  type CostBasisHistoryView,
 } from "./onchain-contract";
 import {
   perpStatesViewSchema,
@@ -163,10 +165,11 @@ async function query<T>(
   path: string,
   schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   init?: RequestInit,
+  timeoutMs = 5000,
 ): Promise<T> {
   let response: Response;
   try {
-    const timeout = AbortSignal.timeout(5000);
+    const timeout = AbortSignal.timeout(timeoutMs);
     response = await fetch(PREFIX + path, {
       ...init,
       cache: "no-store",
@@ -228,6 +231,17 @@ export const getCostFlow = (signal?: AbortSignal) =>
   query("/onchain/cost-flow", costFlowSchema, { signal });
 export const getSizeCohorts = (signal?: AbortSignal) =>
   query("/onchain/size-cohorts", sizeCohortsSchema, { signal });
+// Up to 3 MB for All before compression: the timeout covers reading the body too.
+export const getCostBasisHistory = (
+  span: CostBasisHistoryView["span"],
+  signal?: AbortSignal,
+) =>
+  query(
+    `/onchain/cost-basis-history?${new URLSearchParams({ span })}`,
+    costBasisHistorySchema,
+    { signal },
+    span === "all" ? 30_000 : 15_000,
+  );
 export const getPerpStates = (
   exchange: PerpStatesView["exchange"],
   window: PerpStatesView["window"],

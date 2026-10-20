@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import historySample from "./cost-basis-history-sample.json";
 import s1 from "./cost-flow-sample-0512.json";
 import s2 from "./cost-flow-sample.json";
 import {
+  costBasisHistorySchema,
+  type CostBasisHistoryView,
   costBasisSample,
   costBasisViewSchema,
   costFlowSchema,
@@ -783,6 +786,99 @@ describe("on-chain size-cohort contract", () => {
       loss: null,
     });
     expect(view.no_block).toEqual(["7d"]);
+  });
+});
+
+describe("on-chain cost-basis history contract", () => {
+  // The service's answer for span=30 on the golden sample (see test_onchain_api.py).
+  const sample = historySample as unknown as CostBasisHistoryView;
+  const firstPending = sample.status.indexOf("pending");
+  const lastClosed = sample.status.lastIndexOf("closed");
+  const withDay = (i: number, change: Partial<Record<"close" | "supply" | "status", unknown>>) => ({
+    ...sample,
+    close: sample.close.map((v, j) => (j === i && "close" in change ? change.close : v)),
+    supply: sample.supply.map((v, j) => (j === i && "supply" in change ? change.supply : v)),
+    status: sample.status.map((v, j) => (j === i && "status" in change ? change.status : v)),
+  });
+
+  it("accepts the sample payload", () => {
+    const view = costBasisHistorySchema.parse(historySample);
+    expect(view.span).toBe("30");
+    expect(view.days).toHaveLength(30);
+    expect(view.floors).toHaveLength(250);
+    expect(view.status.at(-1)).toBe("forming");
+    expect(view.supply.filter((row) => row !== null)).toHaveLength(5);
+    expect(view.backfill_error).toBeNull();
+    expect(view.last_error).toBeNull();
+  });
+
+  it("accepts an unavailable payload without columns", () => {
+    const empty = {
+      ...sample,
+      data_state: "unavailable",
+      reasons: ["urpd_missing"],
+      latest_day: null,
+      computed_at: null,
+      floors: [],
+      days: [],
+      close: [],
+      supply: [],
+      status: [],
+    };
+    expect(costBasisHistorySchema.parse(empty).days).toEqual([]);
+  });
+
+  it("refuses a row narrower than the grid", () => {
+    const row = sample.supply[lastClosed] as number[];
+    expect(row).toHaveLength(250);
+    const narrow = withDay(lastClosed, { supply: row.slice(0, 249) });
+    expect(costBasisHistorySchema.safeParse(narrow).success).toBe(false);
+    const wide = withDay(lastClosed, { supply: [...row, 1] });
+    expect(costBasisHistorySchema.safeParse(wide).success).toBe(false);
+  });
+
+  it("refuses a pending day with numbers, or a closed one without", () => {
+    const row = sample.supply[lastClosed];
+    expect(sample.status[firstPending]).toBe("pending");
+    const filled = withDay(firstPending, { supply: row, close: 1 });
+    expect(costBasisHistorySchema.safeParse(filled).success).toBe(false);
+    expect(
+      costBasisHistorySchema.safeParse(withDay(firstPending, { close: 1 })).success,
+    ).toBe(false);
+    expect(
+      costBasisHistorySchema.safeParse(withDay(firstPending, { supply: row })).success,
+    ).toBe(false);
+    // Marking it closed makes the same numbers valid: the status and the data agree again.
+    expect(
+      costBasisHistorySchema.safeParse(
+        withDay(firstPending, { supply: row, close: 1, status: "closed" }),
+      ).success,
+    ).toBe(true);
+    const hollow = withDay(lastClosed, { supply: null, close: null });
+    expect(costBasisHistorySchema.safeParse(hollow).success).toBe(false);
+    const absent = sample.status.indexOf("absent");
+    const zeros = withDay(absent, { supply: Array(250).fill(0), close: 0 });
+    expect(costBasisHistorySchema.safeParse(zeros).success).toBe(false);
+  });
+
+  it("refuses a column one short", () => {
+    for (const column of ["close", "supply", "status"] as const) {
+      // Short at the end, every remaining entry still lines up with its day; short at the start,
+      // every one is moved.
+      for (const short of [sample[column].slice(0, -1), sample[column].slice(1)]) {
+        const view = { ...sample, [column]: short };
+        expect(costBasisHistorySchema.safeParse(view).success).toBe(false);
+      }
+    }
+  });
+
+  it("refuses an unknown span or status, or a fractional floor", () => {
+    expect(costBasisHistorySchema.safeParse({ ...sample, span: "7" }).success).toBe(false);
+    expect(
+      costBasisHistorySchema.safeParse(withDay(lastClosed, { status: "final" })).success,
+    ).toBe(false);
+    const floors = [1000.5, ...sample.floors.slice(1)];
+    expect(costBasisHistorySchema.safeParse({ ...sample, floors }).success).toBe(false);
   });
 });
 

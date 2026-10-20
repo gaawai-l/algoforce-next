@@ -15,6 +15,7 @@ import httpx
 from fastapi import FastAPI, Header, Query, Request, Response
 from fastapi import HTTPException as APIException
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -97,6 +98,9 @@ def create_app(
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"]
     )
+    # The on-chain histories run to megabytes of JSON (Chart 8's All is about 3 MB) and compress
+    # to well under half; small bodies are left as they are.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
     @app.middleware("http")
     async def trace(
