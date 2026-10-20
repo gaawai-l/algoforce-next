@@ -30,7 +30,7 @@ BANDS = (
     "addrs_10k_btc_to_100k_btc",
     "addrs_over_100k_btc",
 )
-# The original's windows in hours (line 327), in the order of a PNL row.
+# The original's windows in hours (line 325), in the order of a PNL row.
 WINDOWS = (("1d", 24), ("7d", 168), ("30d", 720), ("90d", 2160))
 # The cumulatives at SE. Whole dollars and halves stay exact below it, so each difference is too.
 BASE = 1e12

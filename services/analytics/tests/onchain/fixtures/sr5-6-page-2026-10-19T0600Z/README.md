@@ -40,8 +40,9 @@ saved files, with the same result.
   - `under 1k sats`, 1d profit: page 89, oracle 88;
   - `10M sats–1 BTC`, 90d profit: page 2425253219, oracle 2425253218.
 
-  The original rounds with JavaScript `Math.round` (`raw/script_3_app.js` line 335), which takes a
-  half up; the oracle used Python `round()`, which takes it to even. The raw differences of those
+  The original rounds with JavaScript `Math.round` (`raw/script_3_app.js` line 333 for profit and
+  loss, line 336 for the realized cap), which takes a half up; the oracle used Python `round()`,
+  which takes it to even. The raw differences of those
   two cells are exactly 88.5 and 2425253218.5, confirmed by a second BRK fetch at 06:25Z
   (SR-6.md lines 43-45).
 

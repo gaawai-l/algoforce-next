@@ -5,9 +5,11 @@ supply and the realized cap at the newest hour, and for each window the change o
 of the realized profit and loss cumulatives since the hour `hours` before it. Supplies are kept to
 0.01 BTC as `+x.toFixed(2)` keeps them, dollars whole as `Math.round` rounds them.
 
-One deliberate departure: where either end of a difference is null or has no row, the original
-subtracts null as 0 and shows the whole cumulative as the change. Here that cell is None. An anchor
-hour without a block, null in every series, is also listed in `no_block`, so the page can say why.
+One deliberate departure: the original has no missing cell. A null anchor is subtracted as 0, so
+the whole cumulative shows as the change; a null newest value throws for the supply (line 335) and
+gives 0 for the realized cap (line 336); an out-of-range index gives NaN. Here a cell with either
+end null or without a row is None. An anchor hour without a block, null in every series, is also
+listed in `no_block`, so the page can say why.
 """
 
 import math

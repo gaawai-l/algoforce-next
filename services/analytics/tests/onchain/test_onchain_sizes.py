@@ -148,6 +148,26 @@ def test_a_partly_null_anchor_is_not_a_no_block_hour():
     assert result.no_block == []
 
 
+@pytest.mark.parametrize("kept", [f"{SIZE_BANDS[-1]}{CAP}", f"{BAND_6}{SUPPLY}"])
+def test_one_known_value_at_an_anchor_is_not_a_no_block_hour(kept: str):
+    flat = computed(flat_rows())
+    rows = flat_rows()
+    for name in SIZE_SERIES:
+        if name != kept:
+            with_value(rows, name, SE - HOUR * 168, None)
+    result = computed(rows)
+    # 47 of the 48 series are null there: gaps, not an hour without a block.
+    assert result.no_block == []
+    field = {SUPPLY: "supply_change", PROFIT: "profit", LOSS: "loss"}
+    missing = {
+        (place, f"7d {field[suffix]}"): None
+        for place, band in enumerate(SIZE_BANDS)
+        for suffix in (SUPPLY, PROFIT, LOSS)
+        if f"{band}{suffix}" != kept
+    }
+    assert cells(result) == cells(flat) | missing
+
+
 def test_a_null_last_value_leaves_only_that_series_missing():
     flat = computed(flat_rows())
     result = computed(with_value(flat_rows(), f"{BAND_6}{SUPPLY}", SE, None))
@@ -195,6 +215,10 @@ def test_last_at_is_the_newest_hour_every_series_has():
     result = computed(rows)
     assert result.last_at == SE
     assert cells(result) == cells(computed(flat_rows()))
+    # A series in the middle ending an hour early sets the end for all of them.
+    rows = flat_rows()
+    rows[f"{BAND_6}{SUPPLY}"] = rows[f"{BAND_6}{SUPPLY}"][:-1]
+    assert computed(rows).last_at == SE - HOUR
 
 
 def test_nothing_to_read_is_none():
