@@ -128,6 +128,48 @@ describe("wheelhouse copy", () => {
       );
   });
 
+  it("says why Chart 8's backfill waits, in both languages", () => {
+    // backfill_error is a BRK code, and the next round's backfill comes with the next hourly
+    // refresh; last_error may be sync_failed, and a retryable failure retries in 5 minutes.
+    expect(phrase("en", "cbh.paused", { code: "brk_unavailable" })).toBe(
+      "history fetch paused: BRK returned brk_unavailable; retrying next hour",
+    );
+    expect(phrase("zh", "cbh.paused", { code: "brk_unavailable" })).toBe(
+      "历史回填暂停：BRK 返回 brk_unavailable，下一小时重试",
+    );
+    expect(phrase("en", "cbh.held", { code: "sync_failed" })).toBe(
+      "history fetch paused: the last refresh failed (sync_failed); it resumes after the next successful refresh",
+    );
+    expect(phrase("zh", "cbh.held", { code: "sync_failed" })).toBe(
+      "历史回填暂停：上一轮刷新失败（sync_failed），下一次刷新成功后继续",
+    );
+    for (const locale of ["en", "zh"] as const) {
+      expect(messages[locale]["cbh.held"]).not.toMatch(/BRK|hour|小时/);
+    }
+    expect(phrase("en", "cbh.noneStored")).toBe(
+      "None of the days in view has a stored snapshot: missing, not zero",
+    );
+    expect(phrase("zh", "cbh.noneStored")).toBe("视图内没有任何一天存有快照：表示缺失，不是 0");
+  });
+
+  it("names Chart 8's controls in Chinese where its Chinese copy refers to them", () => {
+    const controls = {
+      "cbh.span": "时间跨度",
+      "cbh.range": "价格范围",
+      "cbh.contrast": "对比度",
+      "cbh.all": "全部",
+      "cbh.reset": "还原缩放",
+      "cbh.belowFloor": "低于下限",
+    } as const;
+    for (const [key, name] of Object.entries(controls))
+      expect(messages.zh[key as keyof typeof controls]).toBe(name);
+    for (const name of ["时间跨度", "价格范围", "对比度", "“全部”", "“还原缩放”"])
+      expect(messages.zh["cbh.how"]).toContain(name);
+    expect(messages.zh["cbh.lower"]).toContain("“低于下限”");
+    for (const key of ["cbh.how", "cbh.lower", "cbh.upper", "cbh.aria", "cbh.caption"] as const)
+      expect(messages.zh[key], key).not.toMatch(/Span|Range|Contrast|Reset zoom|\bAll\b/);
+  });
+
   it("keeps the confirmed English market title and translates it", () => {
     expect(phrase("en", "page.title")).toBe("Market intelligence");
     expect(phrase("zh", "page.title")).toBe("市场分析");

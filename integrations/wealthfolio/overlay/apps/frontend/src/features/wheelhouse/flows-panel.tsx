@@ -1,6 +1,7 @@
 import { useSearchParams } from "react-router-dom";
 import { AgeCohortChart } from "./age-cohort-chart";
 import type { Stream } from "./client";
+import { CostBasisHistoryChart } from "./cost-basis-history-chart";
 import { CostFlowCharts } from "./cost-flow-charts";
 import { useWheelhouseText } from "./i18n";
 import { PerpStates } from "./perp-states";
@@ -60,7 +61,10 @@ export function FlowsPanel({ symbol }: { symbol: Stream["symbol"] }) {
           <AgeCohortChart />
         </>
       ) : flow === "costbasis" ? (
-        <CostFlowCharts />
+        <>
+          <CostFlowCharts />
+          <CostBasisHistoryChart />
+        </>
       ) : flow === "sizes" ? (
         <SizeCohortsCharts />
       ) : (

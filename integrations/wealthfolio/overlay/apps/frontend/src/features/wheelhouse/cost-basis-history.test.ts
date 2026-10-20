@@ -20,6 +20,7 @@ import {
   dayLabel,
   dayTicks,
   fmtBucket,
+  fmtDays,
   fmtK,
   fmtSupply,
   keyLabels,
@@ -549,5 +550,12 @@ describe("cost-basis history (Chart 8)", () => {
       zx: null,
       zy: null,
     });
+  });
+
+  it("groups the day counts the UI prints", () => {
+    // Brief (Task 5): the span lengths in "loading N days…" and the coverage line read en-US.
+    expect(fmtDays(1461)).toBe("1,461");
+    expect(fmtDays(365)).toBe("365");
+    expect(fmtDays(0)).toBe("0");
   });
 });

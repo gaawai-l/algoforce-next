@@ -10,7 +10,10 @@ import { tickSpec } from "./sell-side";
 // Deliberate departures: every calendar day keeps its column, and a missing day stays null and is
 // left out of every quantile and range, where the original drops it from the window (plan R9); a
 // cell at or under the floor gets its own darker step instead of the empty ground (plan R11); the
-// ramp is the local cyan one (plan R14).
+// ramp is the local cyan one (plan R14); with no stored cell holding coins there are no rows to
+// draw, a brief decision where the original keeps the whole grid (A:3966); and a dragged box takes
+// the days of the column bands it covers (plan R13a), where the original rounds px / width *
+// (n - 1) (A:4210).
 
 export type SpanKey = CostBasisHistoryView["span"];
 export type DayStatus = CostBasisHistoryView["status"][number];
@@ -69,8 +72,9 @@ export function visibleWindow(
 }
 
 // The rows drawn: the occupied ones of the stored days, narrowed by a dragged band, else by Range
-// around the last stored day's close, either only when it keeps two rows or more; null when no
-// cell holds coins (A:3960-3985). A band that keeps nothing is dropped.
+// around the last stored day's close, either only when it keeps two rows or more (A:3960-3985). A
+// band that keeps nothing is dropped. Null when no cell holds coins: a brief decision, where the
+// original draws the whole grid (A:3966).
 export function occupiedRows(
   floors: number[],
   vis: Visible,
@@ -183,6 +187,8 @@ export const fmtSupply = (v: number) =>
   v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `${Math.round(v / 1e3)}k` : `${Math.round(v)}`;
 export const fmtK = (v: number) => `$${(v / 1000).toFixed(v < 10000 ? 1 : 0)}k`;
 export const fmtBucket = (v: number) => `$${(v / 1000).toFixed(1)}k`;
+// A count of days, grouped as "1,461".
+export const fmtDays = (n: number) => n.toLocaleString("en-US");
 
 // The key: where each step starts, a minus (U+2212) on the first while the floor drops cells, and
 // the cap with a plus while it clips them (A:4117-4130).
@@ -216,7 +222,9 @@ export function clampHandle(
 // A box of 6 px or more on either axis zooms (A:4189).
 const DRAG_MIN = 6;
 
-// A dragged box as whole days and a price band (A:4200-4219); null for a click.
+// A dragged box as whole days and a price band (A:4200-4219); null for a click, and a null axis
+// for one the box leaves as it was. The days are the column bands the box covers (plan R13a), not
+// A:4210's rounding of px / width * (n - 1).
 export function zoomFromDrag(
   box: { x0: number; x1: number; y0: number; y1: number },
   plot: { width: number; height: number },

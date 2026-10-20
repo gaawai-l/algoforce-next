@@ -321,12 +321,15 @@ export function Segments<T extends string | number>({
   value,
   name,
   onPick,
+  title,
 }: {
   label: string;
   options: readonly T[];
   value: T;
   name: (option: T) => string;
   onPick: (option: T) => void;
+  // A tooltip for an option whose short name needs one.
+  title?: (option: T) => string | undefined;
 }) {
   return (
     <div className="wh-ss-control">
@@ -337,6 +340,7 @@ export function Segments<T extends string | number>({
             key={String(option)}
             type="button"
             aria-pressed={option === value}
+            title={title?.(option)}
             onClick={() => onPick(option)}
           >
             {name(option)}
