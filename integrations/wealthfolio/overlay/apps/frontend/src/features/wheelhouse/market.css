@@ -1715,6 +1715,10 @@
     11px "JetBrains Mono",
     monospace;
 }
+/* A label moved inside its bar's end reads dark on the bar colour (about 6:1 on either). */
+.wh-sc-val--in {
+  fill: var(--wh-surface);
+}
 .wh-sc-row {
   fill: var(--wh-sc-ink);
   font:
