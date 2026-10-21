@@ -39,7 +39,7 @@
 | 图 5 Net Supply Change By Size Cohorts | BRK hour1：12 档 `addrs_*` 的供应 | 不缺 | **已做**（2026-10-20，Flows → Size cohorts），见 [PLAN-SR5-6.md](PLAN-SR5-6.md) |
 | 图 6 Net Realized P&L By Size Cohorts | BRK hour1：12 档的已实现盈亏与已实现市值 | 不缺 | **已做**（2026-10-20，Flows → Size cohorts，接在图 5 下面），见 [PLAN-SR5-6.md](PLAN-SR5-6.md) |
 | 图 7 Supply by Cost Basis | BRK URPD | 不缺 | 做成了价格图右侧的刻度轨（已确认的 UI 方案），**不是原图样式** |
-| 图 8 Cost Basis Distribution, All Coins | BRK：365 个日快照（All 档 1461 个） | 不缺，但首次要取 365 次 | **已做**（2026-10-20，Flows → Cost basis），见 [PLAN-SR8.md](PLAN-SR8.md)；首次回填约 1,456 个请求，按每轮 120 个约 12–13 小时补齐 |
+| 图 8 Cost Basis Distribution, All Coins | BRK：365 个日快照（All 档 1461 个） | 不缺，但首次要取 365 次 | **已做**（2026-10-20，Flows → Cost basis），见 [PLAN-SR8.md](PLAN-SR8.md)；首次回填约 1,456 个请求，按每轮 120 个约 12–13 小时补齐；验证实例实测 13 轮补齐（2026-10-21，[SR8-VERIFICATION](SR8-VERIFICATION.md)） |
 | 表 2 Price Levels | BRK URPD | 不缺 | **已做**，与原站逐格一致 |
 | Analyst Take | 人工撰写；原站模板本身是空的 | — | 没做 |
 | 页头周期 | — | — | state-report 线上**没有**周期元素（"周期"只是站名的一部分）；周期显示在 onchain-seller、perp-squeeze 的页头，本地已做（cycle badge），与两页逐日一致 |

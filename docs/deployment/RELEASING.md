@@ -74,8 +74,8 @@ perps worker 启动时不从库里重新派生：启动后立即开始的第一�
 - **第一轮回填**：下一个 HH:12 那一轮成功后开始回填，日志出现 `onchain_urpd_history copied=… fetched=120 absent=… duration_ms=…`。`duration_ms` 是回填自己的用时，首轮实测约 270 秒；同一轮的 `onchain_sync_ok duration_ms` 包含回填，所以也会到这个量级。
 - **接口**：用合法钱包会话（与 `verify.py --session-file` 相同）请求 `/api/wheelhouse/v1/onchain/cost-basis-history`：`data_state` 不是 `unavailable`，`backfill_error` 和 `last_error` 都为 null。
 - **偶尔暂停属正常**：BRK 慢时一轮到 5 分钟就停，日志记 `onchain_urpd_history_paused reason=deadline`，`backfill_error` 仍为 null，余下的下一轮接着取，只是补得慢一些。
-- **补齐时间**：365D 约 3 小时（第 3 轮）补齐，All 约 13 小时（第 13 轮）；BRK 慢时轮数更多。
-- **磁盘**：`onchain.sqlite` 约增加 9.5 MB（历史表约 6 MB，派生载荷约 3.3 MB）。
+- **补齐时间**：365D 在第 3 轮补齐，All 在第 13 轮；BRK 慢时轮数更多。验证实例实测（2026-10-20 至 10-21）：首轮之后约 1 小时 40 分补齐 365D，约 11 小时 40 分补齐 All；首轮回填约 270 秒，之后各轮 86–158 秒，没有 `paused`。
+- **磁盘**：`onchain.sqlite` 约增加 6.6 MB（实测：历史表 3.7 MB，派生载荷 2.9 MB；计划估计 9.5 MB）。
 
 ## 失败与回滚
 
