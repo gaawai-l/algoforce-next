@@ -1,3 +1,4 @@
+import gzip
 import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -39,6 +40,8 @@ SAMPLE = (
     / "integrations/wealthfolio/overlay/apps/frontend/src/features/wheelhouse"
 )
 D = date(2026, 10, 16)
+# PLAN-SR8 Task 7: the original page and the service read at one moment, see its README.
+ACCEPTANCE = Path(__file__).parent / "fixtures" / "sr8-acceptance-2026-10-21"
 DAY = timedelta(days=1)
 MICRO = timedelta(microseconds=1)
 
@@ -285,3 +288,38 @@ def test_reference_reads_spot_and_the_range_as_the_original_does():
     # At 100 the cap is the largest cell, even when the floor already reaches it.
     found = reference({**view, "supply": rows, "close": close, "floors": floors}, 0, 99, 100)
     assert (found["floor"], found["cap"], found["top"]) == (1.0, 1.0, 1.0)
+
+
+def test_sr8_acceptance_readings():
+    # The service's ?span=365 body at the moment the original page was read. Both sides leave out
+    # the forming last column; 30D and 90D are the last columns of 365D, as the service slices them.
+    view = json.loads(gzip.decompress((ACCEPTANCE / "local-span365.json.gz").read_bytes()))
+    expected = json.loads((ACCEPTANCE / "reference-output.json").read_text())
+    original = json.loads((ACCEPTANCE / "original-readings.json").read_text())
+    assert view["status"][-1] == "forming"
+    settings = {
+        "30D": (30, 0),
+        "90D": (90, 0),
+        "365D": (365, 0),
+        "365D ±50%": (365, 50),
+        "365D ±25%": (365, 25),
+        "365D ±10%": (365, 10),
+    }
+    assert list(expected) == list(original["settings"]) == list(settings)
+    found = {}
+    for key, (span, range_pct) in settings.items():
+        cut = {**view, **{k: view[k][-span:-1] for k in ("days", "close", "supply", "status")}}
+        mine, page = reference(cut, range_pct), original["settings"][key]
+        assert (cut["days"][0], cut["days"][-1]) == (page["first"], page["last"]), key
+        # The same rows and cells; floor and cap within the original's Float32 against our 2dp.
+        assert (mine["r0"], mine["r1"], mine["n"]) == (page["r0"], page["r1"], page["n"]), key
+        assert abs(mine["floor"] - page["floor"]) <= 0.05, key
+        assert abs(mine["cap"] - page["cap"]) <= 0.05, key
+        found[key] = mine
+    assert found == expected
+    # The $60k, $74k, $82k and $100k cells of four closed days.
+    for day, page in original["probes"].items():
+        i = view["days"].index(day)
+        assert view["close"][i] == page["close"], day
+        cells = [view["supply"][i][at(floor)] for floor in (60000, 74000, 82000, 100000)]
+        assert all(abs(a - b) <= 0.035 for a, b in zip(cells, page["cells"], strict=True)), day
