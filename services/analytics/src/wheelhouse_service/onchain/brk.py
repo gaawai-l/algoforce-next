@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 import httpx
-from pydantic import AwareDatetime, ConfigDict, ValidationError
+from pydantic import ConfigDict, ValidationError, model_validator
 
 from ..market import Model
 
@@ -18,6 +18,8 @@ MAX_POINTS = 18_000
 # BRK also refuses a `series` parameter over about 2,048 characters once decoded: on 2026-10-19 a
 # list of 1,997 passed and one of 2,053 did not.
 MAX_SERIES_CHARS = 2_000
+# And, since its upgrade of 2026-10-30, more than 32 series in one request.
+MAX_SERIES = 32
 START = date(2013, 1, 1)
 # Position 0 of both day1 and hour1.
 EPOCH = datetime(2009, 1, 1, tzinfo=UTC)
@@ -136,6 +138,32 @@ SIZE_SUFFIXES = (
     "_realized_cap",
 )
 SIZE_SERIES = tuple(f"{band}{suffix}" for band in SIZE_BANDS for suffix in SIZE_SUFFIXES)
+# BRK renamed its cohorts in the upgrade of 2026-10-30 (`/version` "66f66db" on 2026-11-04): the age
+# cohorts `utxos_X_old` became `age_X`, and the wallet-size bands `addrs_*` became `balance_*` on a
+# finer grid. The names above stay the local ones, the keys of the store and of the payloads; only
+# requests use BRK's. "under 1k sats" has no band of its own any more: it is the sum of three.
+REMOTE_COHORTS: dict[str, tuple[str, ...]] = {
+    **{
+        cohort: ("age_" + cohort.removeprefix("utxos_").removesuffix("_old"),)
+        for cohort in AGE_COHORTS
+    },
+    "addrs_under_1k_sats": (
+        "balance_1_to_10_sats",
+        "balance_10_to_100_sats",
+        "balance_100_to_1k_sats",
+    ),
+    "addrs_1k_sats_to_10k_sats": ("balance_1k_to_10k_sats",),
+    "addrs_10k_sats_to_100k_sats": ("balance_10k_to_100k_sats",),
+    "addrs_100k_sats_to_1m_sats": ("balance_100k_to_1m_sats",),
+    "addrs_1m_sats_to_10m_sats": ("balance_1m_to_10m_sats",),
+    "addrs_10m_sats_to_1btc": ("balance_10m_to_100m_sats",),
+    "addrs_1btc_to_10btc": ("balance_1_to_10_btc",),
+    "addrs_10btc_to_100btc": ("balance_10_to_100_btc",),
+    "addrs_100btc_to_1k_btc": ("balance_100_to_1k_btc",),
+    "addrs_1k_btc_to_10k_btc": ("balance_1k_to_10k_btc",),
+    "addrs_10k_btc_to_100k_btc": ("balance_10k_to_100k_btc",),
+    "addrs_over_100k_btc": ("balance_over_100k_btc",),
+}
 # The day1 range the age floor of Chart 4 scans for the last day price traded through each row.
 # Requested on its own inside the day1 stage: it failing, or one of them missing, only takes
 # Chart 4 down.
@@ -173,7 +201,6 @@ class SeriesData(BrkModel):
     index: Index
     start: int
     end: int
-    stamp: AwareDatetime
     data: list[float | None]
 
 
@@ -191,6 +218,26 @@ class Urpd(BrkModel):
     close: float
     total_supply: float
     buckets: list[UrpdBucket]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _columns(cls, value: Any) -> Any:
+        """BRK's reply since its upgrade: the total as `supply`, the buckets as columns with the
+        floor as `price`. The stored form, a list of buckets, passes through unchanged."""
+        if not isinstance(value, dict) or not isinstance(value.get("buckets"), dict):
+            return value
+        columns = value["buckets"]
+        buckets = [
+            {"price_floor": price, "supply": supply, "realized_cap": cap, "unrealized_pnl": pnl}
+            for price, supply, cap, pnl in zip(
+                columns["price"],
+                columns["supply"],
+                columns["realized_cap"],
+                columns["unrealized_pnl"],
+                strict=True,
+            )
+        ]
+        return {**value, "total_supply": value["supply"], "buckets": buckets}
 
 
 class SeriesBatch(Model):
@@ -232,6 +279,27 @@ def _failure(response: httpx.Response) -> BrkError:
     if status == 429 or status >= 500:
         return BrkError("brk_unavailable", True)
     return BrkError("brk_bad_request", False)
+
+
+def remote_names(name: str) -> tuple[str, ...]:
+    """The BRK series `name` is read from: one, or the parts it is the sum of."""
+    for cohort, remote in REMOTE_COHORTS.items():
+        if name == cohort or name.startswith(cohort + "_"):
+            return tuple(part + name[len(cohort) :] for part in remote)
+    return (name,)
+
+
+def _summed(parts: Sequence[SeriesData]) -> SeriesData:
+    """One series from `parts` over the same positions; a point any part lacks stays None."""
+    first = parts[0]
+    if any((part.start, part.end) != (first.start, first.end) for part in parts):
+        raise BrkError("brk_unavailable", True)
+    data: list[float | None] = []
+    for values in zip(*(part.data for part in parts), strict=True):
+        known = [value for value in values if value is not None]
+        data.append(sum(known) if len(known) == len(values) else None)
+    # Any part changing its version changes this one's, so the store refetches it.
+    return first.model_copy(update={"version": sum(part.version for part in parts), "data": data})
 
 
 def _chunks(names: Sequence[str], size: int) -> list[list[str]]:
@@ -280,22 +348,36 @@ class BrkClient:
         A negative `start` asks BRK for the last `-start` points; each response still carries the
         absolute position of its first point.
         """
-        size = max(1, MAX_POINTS // max(1, self._points(index, start)))
+        size = min(MAX_SERIES, max(1, MAX_POINTS // max(1, self._points(index, start))))
+        parts = {name: remote_names(name) for name in names}
+        wanted = list(dict.fromkeys(part for remote in parts.values() for part in remote))
+        fetched: dict[str, SeriesData] = {}
+        absent: list[str] = []
+        for chunk in _chunks(wanted, size):
+            self._collect(chunk, index, start, fetched, absent)
         found: dict[str, SeriesData] = {}
         missing: list[str] = []
-        for chunk in _chunks(names, size):
-            self._collect(chunk, index, start, found, missing)
+        for name, remote in parts.items():
+            if any(part not in fetched for part in remote):
+                missing.append(name)
+            elif len(remote) == 1:
+                found[name] = fetched[remote[0]]
+            else:
+                found[name] = _summed([fetched[part] for part in remote])
         return SeriesBatch(found=found, missing=missing)
 
     def urpd(self, cohort: str, day: date, agg: str = "lin500") -> Urpd | None:
+        (remote,) = remote_names(cohort)
         try:
-            response = self._get(f"/api/urpd/{cohort}/{day.isoformat()}", {"agg": agg})
+            response = self._get(f"/api/urpd/{remote}/{day.isoformat()}", {"agg": agg})
         except _NotFound:
             return None
         try:
-            return Urpd.model_validate(_json(response))
+            urpd = Urpd.model_validate(_json(response))
         except ValidationError as exc:
             raise BrkError("brk_unavailable", True) from exc
+        # Stored and looked up under the local name.
+        return urpd.model_copy(update={"cohort": cohort})
 
     def _points(self, index: Index, start: int | date) -> int:
         """Points one series returns for `start`, assuming the latest position is now."""

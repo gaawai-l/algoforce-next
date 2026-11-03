@@ -18,6 +18,7 @@ from onchain_fixture import (
     golden_urpd,
     load_series,
     load_urpd,
+    local_name,
     seed_golden,
 )
 
@@ -29,6 +30,7 @@ from wheelhouse_service.onchain.brk import (
     DAY1_SERIES,
     HOUR1_BACKFILL,
     HOUR1_SERIES,
+    MAX_SERIES,
     MAX_SERIES_CHARS,
     SELL_SIDE_SERIES,
     SIZE_SERIES,
@@ -36,6 +38,7 @@ from wheelhouse_service.onchain.brk import (
     BrkClient,
     SeriesData,
     Urpd,
+    remote_names,
 )
 from wheelhouse_service.onchain.costbasis import BUCKETS, MIN_PRICE, PAST_DAYS, StoredCostBasis
 from wheelhouse_service.onchain.costbasis_history import (
@@ -108,7 +111,7 @@ def rewritten(
         names = request.url.params["series"].split(",")
         body = json.loads(response.content)
         for name, item in zip(names, body, strict=True):
-            edit(name, item)
+            edit(local_name(name), item)
         return httpx.Response(200, json=body)
 
     return httpx.MockTransport(handler)
@@ -151,7 +154,8 @@ def urpd_calls(
     found = []
     for path, params in calls:
         if path.startswith("/api/urpd/"):
-            _, _, _, cohort, day = path.split("/")
+            _, _, _, remote, day = path.split("/")
+            cohort = local_name(remote)
             if include_ages or not cohort.startswith("utxos_"):
                 found.append((cohort, day, params["agg"]))
     return found
@@ -199,7 +203,8 @@ def hour1_calls(calls: list[tuple[str, dict[str, str]]]) -> list[dict[str, str]]
 
 
 def requested(calls: list[dict[str, str]]) -> set[str]:
-    return {name for params in calls for name in params["series"].split(",")}
+    """The local names of the series `calls` asked for."""
+    return {local_name(name) for params in calls for name in params["series"].split(",")}
 
 
 def test_first_run_backfills_and_derives(tmp_path: Path):
@@ -277,7 +282,7 @@ def test_incremental_run_starts_three_positions_back(tmp_path: Path):
     assert requested(bulk) == set(DAY1_FETCH)
     for params in bulk:
         for name in params["series"].split(","):
-            assert params["start"] == str(starts[name])
+            assert params["start"] == str(starts[local_name(name)])
     assert [store.last_position(name, "day1") for name in DAY1_SERIES] == [6497] * 6
     assert [value for _, value in store.read_series("true_market_mean", "day1")][-1] is not None
     assert [value for _, value in store.read_series("sth_realized_price", "day1")][-1] is not None
@@ -567,8 +572,9 @@ def test_first_run_backfills_hour1_from_minus_3000(tmp_path: Path):
     assert all(params["start"] == str(-HOUR1_BACKFILL) for params in hour1)
     assert requested(hour1) == set(HOUR1)
     # 3,000 points per series is over the weight cap past 6 series a request: the 29 series of the
-    # first stage take 5 requests, the 126 of the age cohorts' stage 21, and the 48 size series 8.
-    assert len(hour1) == 5 + 21 + 8
+    # first stage take 5 requests, the 126 of the age cohorts' stage 21, and the 48 size series,
+    # 56 names on the wire, 10.
+    assert len(hour1) == 5 + 21 + 10
     assert [store.last_position(name, "hour1") for name in HOUR1_SERIES] == [155937] * 11
     pressure = pressure_of(store)
     assert pressure.last_at == datetime(2026, 10, 16, 9, tzinfo=UTC)
@@ -631,7 +637,7 @@ def test_incremental_hour1_starts_three_back(tmp_path: Path):
     assert requested(hour1) == set(HOUR1)
     for params in hour1:
         for name in params["series"].split(","):
-            assert params["start"] == str(starts[name])
+            assert params["start"] == str(starts[local_name(name)])
     assert [store.last_position(name, "hour1") for name in HOUR1_SERIES] == [155937] * 11
     assert store.read_series("price_close", "hour1")[-1][1] is not None
     assert store.read_series("sth_supply_in_loss", "hour1")[-1][1] is not None
@@ -1141,10 +1147,10 @@ def test_a_missing_sell_side_series_keeps_the_pressure(tmp_path: Path):
 
 
 def bulk_names(request: httpx.Request) -> set[str]:
-    """The series a bulk request asks for; none for any other request."""
+    """The local names of the series a bulk request asks for; none for any other request."""
     if request.url.path != "/api/series/bulk":
         return set()
-    return set(request.url.params["series"].split(","))
+    return {local_name(name) for name in request.url.params["series"].split(",")}
 
 
 def failing_for(names: Set[str], **options: Any) -> httpx.MockTransport:
@@ -1558,17 +1564,18 @@ def test_size_requests_stay_under_the_url_limit(tmp_path: Path):
     run(store, incremental, later)
 
     def size_requests(calls: list[tuple[str, dict[str, str]]]) -> list[dict[str, str]]:
-        return [params for params in hour1_calls(calls) if "addrs_" in params["series"]]
+        return [params for params in hour1_calls(calls) if "balance_" in params["series"]]
 
+    # Under 1k sats is three of BRK's bands, so the 48 series are 56 names on the wire.
+    wire = [part for name in SIZE_SERIES for part in remote_names(name)]
+    assert len(wire) == 56
     backfill = size_requests(backfill_calls)
-    assert len(backfill) == 8
-    assert all(len(params["series"].split(",")) == 6 for params in backfill)
+    assert len(backfill) == 10
+    assert [len(params["series"].split(",")) for params in backfill] == [6] * 9 + [2]
     assert all(params["start"] == str(-HOUR1_BACKFILL) for params in backfill)
     increment = size_requests(incremental_calls)
-    assert len(increment) == 2
-    assert [name for params in increment for name in params["series"].split(",")] == list(
-        SIZE_SERIES
-    )
+    assert [len(params["series"].split(",")) for params in increment] == [MAX_SERIES, 24]
+    assert [name for params in increment for name in params["series"].split(",")] == wire
     assert all(params["start"] == "155934" for params in increment)
     assert all(len(params["series"]) <= MAX_SERIES_CHARS for params in backfill + increment)
     # Why the hourly increment is split: all 48 names would not fit in one request.
@@ -2125,7 +2132,8 @@ def night_brk(
         response = inner.handler(request)
         path = request.url.path
         if path.startswith("/api/urpd/"):
-            _, _, _, cohort, day = path.split("/")
+            _, _, _, remote, day = path.split("/")
+            cohort = local_name(remote)
             when = date.fromisoformat(day)
             if (cohort, when, request.url.params["agg"]) in failing:
                 return httpx.Response(500)
@@ -2804,7 +2812,7 @@ def test_day1_stage_fetches_the_daily_range(tmp_path: Path):
     again, calls = brk_transport()
     assert run(store, again, NOW + timedelta(hours=1)) is True
     assert [params["series"] for params in day1_calls(calls)] == [
-        ",".join(DAY1_SERIES),
+        ",".join(part for name in DAY1_SERIES for part in remote_names(name)),
         "price_high,price_low",
     ]
 
@@ -3134,7 +3142,7 @@ def test_a_failed_refetch_of_an_age_snapshot_keeps_the_grids(
 
     def handler(request: httpx.Request) -> httpx.Response:
         response = inner.handler(request)
-        if request.url.path == f"/api/urpd/{moved}/{D.isoformat()}":
+        if request.url.path == f"/api/urpd/{remote_names(moved)[0]}/{D.isoformat()}":
             seen.append(request)
             if len(seen) == 2:
                 return httpx.Response(500)

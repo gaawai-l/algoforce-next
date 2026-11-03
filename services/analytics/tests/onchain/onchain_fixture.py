@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from wheelhouse_service.onchain.brk import Index, SeriesData, Urpd
+from wheelhouse_service.onchain.brk import REMOTE_COHORTS, Index, SeriesData, Urpd
 from wheelhouse_service.onchain.costbasis import PAST_DAYS
 from wheelhouse_service.onchain.levels import LINE_SERIES
 from wheelhouse_service.onchain.store import OnchainStore
@@ -39,6 +39,8 @@ WEIGHT_PER_POINT = 16
 # Observed on 2026-10-19: a decoded `series` parameter of 1,997 characters passed and one of 2,053
 # was refused with HTTP 400 ("series: Given parameter is too long").
 SERIES_CHARS_CAP = 2_048
+# Observed on 2026-11-04, after BRK's upgrade: "series: At most 32 series may be requested".
+SERIES_COUNT_CAP = 32
 
 
 def _raw(filename: str) -> dict[str, Any]:
@@ -102,16 +104,42 @@ def _position(start: str) -> int:
         return (date.fromisoformat(start) - EPOCH).days
 
 
+def _local(remote: str) -> tuple[str, int, int]:
+    """The fixture name a BRK name after the upgrade was captured under, and which of how many
+    parts of it the name is."""
+    for cohort, parts in REMOTE_COHORTS.items():
+        for n, part in enumerate(parts):
+            if remote == part or remote.startswith(part + "_"):
+                return cohort + remote[len(part) :], n, len(parts)
+    return remote, 0, 1
+
+
+def local_name(remote: str) -> str:
+    """The local name of a series or URPD cohort a request carries."""
+    return _local(remote)[0]
+
+
 def _bulk(params: dict[str, str], missing: Set[str]) -> httpx.Response:
     if len(params["series"]) > SERIES_CHARS_CAP:
         return _error(400, "bad_request", "invalid_request")
     names = params["series"].split(",")
-    if not missing.isdisjoint(names):
+    if len(names) > SERIES_COUNT_CAP:
+        return _error(400, "bad_request", "invalid_request")
+    locals_ = [_local(name) for name in names]
+    if not missing.isdisjoint(name for name, _, _ in locals_):
         return _error(404, "series_not_found")
     start = _position(params["start"])
     body = []
-    for name in names:
+    for name, part, parts in locals_:
         raw = _raw(f"{params['index']}_{name}.json")
+        if part < parts - 1:
+            # The captures predate the split of a band into parts: the last part replays the whole
+            # band and the others hold 0 (null where it is null), so their sum is the capture.
+            raw = {
+                **raw,
+                "version": 0,
+                "data": [None if value is None else 0.0 for value in raw["data"]],
+            }
         # A negative start is the last -start points. Either way the body carries the absolute
         # position of its first row. A fixture holds only what was captured, so a request that
         # reaches back further than that gets the fixture from its own start.
@@ -167,7 +195,8 @@ def brk_transport(
                 return httpx.Response(503)
             return _bulk(params, missing)
         if path.startswith("/api/urpd/"):
-            _, _, _, cohort, day = path.split("/")
+            _, _, _, remote, day = path.split("/")
+            cohort, _, _ = _local(remote)
             agg = params["agg"]
             if (cohort, agg) in urpd_fail:
                 return httpx.Response(500)
