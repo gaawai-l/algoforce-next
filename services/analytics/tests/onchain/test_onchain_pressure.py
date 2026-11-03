@@ -118,6 +118,13 @@ def no_block_hour(cols: Columns, hour: int) -> None:
     no_block(cols, hour)
 
 
+def priced_no_block_hour(cols: Columns, hour: int) -> None:
+    """An hour without a block as BRK has it since its upgrade of 2026-10-30: the close of the hour
+    before, every other value null."""
+    no_block_hour(cols, hour)
+    cols[PRICE][hour] = cols[PRICE][hour - 1]
+
+
 def flagged(result: Pressure) -> list[tuple[str, datetime]]:
     """The points marked as without a block or behind a gap, as (chart, time)."""
     charts = {
@@ -639,12 +646,15 @@ def test_o3_keeps_the_v1_handling_of_an_under_1h_null():
     )
 
 
+@pytest.mark.parametrize("blockless", [no_block_hour, priced_no_block_hour])
 @pytest.mark.parametrize("hours", [1, 2])
-def test_o3_drops_hours_without_a_block_that_open_the_window(hours: int):
+def test_o3_drops_hours_without_a_block_that_open_the_window(
+    hours: int, blockless: Callable[[Columns, int], None]
+):
     # The window holds the last lookback(O3) hours, so with 5 more it opens at hour 5.
     cols = columns(lookback(O3) + 5)
     for hour in range(5, 5 + hours):
-        no_block_hour(cols, hour)
+        blockless(cols, hour)
     result = computed(cols, O3)
     # Nothing can be carried over into the window: the first hour with a block opens it and only
     # serves as the previous row.
@@ -680,6 +690,22 @@ def test_o3_keeps_the_newest_row_without_a_price_as_the_newest_hour():
     bare = computed(unpriced, O3)
     assert (bare.kept, bare.latest_at) == (9, at(9))
     assert all(p.value is None and p.gap for p in bare.price)
+
+
+def test_o3_hour_without_a_block_keeps_its_row_when_brk_carried_the_price_over():
+    # Only the price has a value, the close of the hour before: still no block.
+    cols = columns(12)
+    priced_no_block_hour(cols, 5)
+    priced_no_block_hour(cols, 6)
+    result = computed(cols, O3)
+    assert result.kept == 11
+    assert [p.at for p in result.loss if p.no_block] == [at(5), at(6)]
+    assert {p.at: (p.lth, p.sth) for p in result.loss}[at(7)] == (1_000.0, 2_500.0)
+    assert {p.at: p.value for p in result.price}[at(6)] == 100_004.0
+    assert result.xgap == 0
+    assert result.qc == []
+    # v1 drops them as before: their cumulatives are null.
+    assert computed(cols).qc == ["hour_gap"]
 
 
 def test_o3_qc_hour_gap_fails_on_any_missing_hour():

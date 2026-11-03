@@ -291,7 +291,9 @@ def _roll[P: (PressureLossPoint, PressurePoint)](
 def _carry_over_no_block(
     series: dict[str, Series], hours: list[datetime]
 ) -> tuple[list[datetime], set[datetime]]:
-    """O3: an hour without a block, every series null there, takes every value of the hour before.
+    """O3: an hour without a block, every series but the price null there, takes every value of
+    the hour before. BRK leaves the price null too up to 0.12.2 and carries the close of the hour
+    before over since its upgrade of 2026-10-30.
 
     `series` is filled in place, so the flows of such an hour are 0 and the next hour's differences
     read as usual. Hours without a block at the start of the window have nothing to carry over and
@@ -300,7 +302,7 @@ def _carry_over_no_block(
     """
 
     def empty(at: datetime) -> bool:
-        return all(series[name].get(at) is None for name in HOUR1_SERIES)
+        return all(series[name].get(at) is None for name in HOUR1_SERIES if name != PRICE)
 
     start = next((i for i, at in enumerate(hours) if not empty(at)), len(hours))
     hours = hours[start:]
