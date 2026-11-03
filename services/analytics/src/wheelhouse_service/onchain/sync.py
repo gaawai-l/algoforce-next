@@ -253,9 +253,10 @@ class OnchainSync:
             # Every series is rebuilt in one transaction; the old data stays readable until then.
             self.store.set_state(refreshing="true")
             self._replace(DAY1_SERIES, "day1", at, missing)
-            # A new BRK may have computed the closed days' snapshots again, so none of the stored
-            # ones counts as final any more: the URPD stage fetches each one it needs again.
-            self.store.expire_urpd()
+            # A new BRK may have computed the closed days' snapshots again; then none of the stored
+            # ones counts as final any more, and the URPD stage fetches each one it needs again.
+            if self._urpd_recomputed():
+                self.store.expire_urpd()
         else:
             self._increment(DAY1_SERIES, "day1", at, missing)
         # The series stage is done, so nothing is being rebuilt any more.
@@ -471,6 +472,30 @@ class OnchainSync:
                     logger.warning("onchain_urpd_past_failed code=%s", exc.code)
         self.store.prune_urpd(keep)
         return urpd
+
+    def _urpd_recomputed(self) -> bool:
+        """Whether a new BRK computed the stored snapshots again.
+
+        bitview.space deploys several times a day, mostly without touching past snapshots, so one
+        final stored snapshot, the oldest all-coins one, is asked for again and compared instead of
+        fetching every one again on each deploy. True when that cannot be told.
+        """
+        for day in self.store.urpd_days(URPD_COHORT, URPD_AGG):
+            fetched_at = self.store.urpd_fetched_at(URPD_COHORT, day, URPD_AGG)
+            stored = self.store.urpd(URPD_COHORT, day, URPD_AGG)
+            if stored is None or fetched_at is None or fetched_at < final_from(day):
+                continue
+            try:
+                fresh = self.client.urpd(URPD_COHORT, day, URPD_AGG)
+            except BrkError:
+                return True
+            return (
+                fresh is None
+                or fresh.total_supply != stored.total_supply
+                or fresh.buckets != stored.buckets
+            )
+        # Nothing stored is final: whatever is stored is fetched again anyway.
+        return False
 
     def _closed_days(self, at: datetime) -> list[date]:
         """The closed days under O1, whose snapshots F and its grid are read from; else none."""

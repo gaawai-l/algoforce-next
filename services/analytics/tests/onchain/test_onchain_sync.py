@@ -355,31 +355,83 @@ def test_version_change_failure_keeps_old_data(tmp_path: Path):
     assert len(store.read_series("price_close", "day1")) == 5037
 
 
-def test_brk_version_change_fetches_every_stored_snapshot_again(tmp_path: Path):
-    store = OnchainStore(tmp_path / "onchain.sqlite")
-    transport, _ = brk_transport()
-    run(store, transport, NOW)
-    rows = urpd_rows(store)
-    past = {row for row in rows if row[1] < (D - timedelta(days=1)).isoformat()}
-    assert past
+def recomputed(transport: httpx.MockTransport) -> httpx.MockTransport:
+    """`transport` as a BRK that computed every URPD snapshot again: the same total, but 0.5 BTC
+    moved from the first bucket to the second."""
 
-    def fetched(at: datetime) -> set[tuple[str, str, str]]:
-        return {
-            row
-            for row in urpd_rows(store)
-            if store.urpd_fetched_at(row[0], date.fromisoformat(row[1]), row[2]) == at
-        }
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = transport.handler(request)
+        if not request.url.path.startswith("/api/urpd/") or response.status_code != 200:
+            return response
+        body = json.loads(response.content)
+        body["buckets"][0]["supply"] -= 0.5
+        body["buckets"][1]["supply"] += 0.5
+        return httpx.Response(200, json=body)
+
+    return httpx.MockTransport(handler)
+
+
+def fetched_at(store: OnchainStore, at: datetime) -> set[tuple[str, str, str]]:
+    """The stored snapshots last fetched at `at`."""
+    return {
+        row
+        for row in urpd_rows(store)
+        if store.urpd_fetched_at(row[0], date.fromisoformat(row[1]), row[2]) == at
+    }
+
+
+def past_rows(store: OnchainStore) -> set[tuple[str, str, str]]:
+    """The stored snapshots of days before yesterday: final when the first run fetched them."""
+    return {row for row in urpd_rows(store) if row[1] < (D - timedelta(days=1)).isoformat()}
+
+
+def test_brk_version_change_fetches_every_stored_snapshot_again_once_brk_recomputed(
+    tmp_path: Path,
+):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    run(store, brk_transport()[0], NOW)
+    rows = urpd_rows(store)
+    assert past_rows(store)
 
     # The past days were final when fetched, so the same BRK leaves them as they are.
     second = NOW + timedelta(hours=1)
     run(store, brk_transport()[0], second)
-    assert fetched(second).isdisjoint(past)
+    assert fetched_at(store, second).isdisjoint(past_rows(store))
 
-    # A new BRK may have computed them again (the upgrade of 2026-10-30 moved up to 32,000 BTC
-    # between lin500 buckets of a closed day): each one is fetched from it.
+    # A new BRK that computed them again (the upgrade of 2026-10-30 moved up to 32,000 BTC between
+    # lin500 buckets of a closed day): each one is fetched from it.
     third = second + timedelta(hours=1)
-    assert run(store, brk_transport(version="0.13.0")[0], third) is True
-    assert fetched(third) == rows
+    assert run(store, recomputed(brk_transport(version="0.13.0")[0]), third) is True
+    assert fetched_at(store, third) == rows
+
+
+def test_brk_version_change_keeps_the_snapshots_brk_did_not_recompute(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    run(store, brk_transport()[0], NOW)
+    past = past_rows(store)
+
+    # A new deploy, as bitview.space has several a day, that left the snapshots as they were: one
+    # final snapshot, the oldest all-coins lin500, is asked for again and compared.
+    later = NOW + timedelta(hours=1)
+    bumped, calls = brk_transport(version="0.13.0")
+    assert run(store, bumped, later) is True
+    assert fetched_at(store, later).isdisjoint(past)
+    oldest = min(day for cohort, day, agg in past if (cohort, agg) == ("all", "lin500"))
+    asked = [row for row in urpd_calls(calls) if row in past]
+    assert asked == [("all", oldest, "lin500")]
+
+
+def test_brk_version_change_fetches_the_snapshots_again_when_the_sample_fails(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    run(store, brk_transport()[0], NOW)
+    past = past_rows(store)
+
+    # Whether BRK computed them again cannot be told, so they count as not final.
+    later = NOW + timedelta(hours=1)
+    run(store, brk_transport(version="0.13.0", fail_paths={"/api/urpd"})[0], later)
+    assert {
+        store.urpd_fetched_at(cohort, date.fromisoformat(day), agg) for cohort, day, agg in past
+    } == {datetime(2009, 1, 1, tzinfo=UTC)}
 
 
 def test_urpd_failure_after_replacement_still_derives_and_does_not_repeat_it(tmp_path: Path):
