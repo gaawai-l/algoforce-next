@@ -247,7 +247,8 @@ class OnchainSync:
         # take a day BRK could still revise for closed.
         closed = closed_day(at)
         version = self.client.version()
-        changed = version != self.store.state()["brk_version"]
+        previous = self.store.state()["brk_version"]
+        changed = version != previous
         missing: set[str] = set()
         if changed:
             # Every series is rebuilt in one transaction; the old data stays readable until then.
@@ -255,7 +256,8 @@ class OnchainSync:
             self._replace(DAY1_SERIES, "day1", at, missing)
             # A new BRK may have computed the closed days' snapshots again; then none of the stored
             # ones counts as final any more, and the URPD stage fetches each one it needs again.
-            if self._urpd_recomputed():
+            # The first round has no BRK before it to compare with.
+            if previous is not None and self._urpd_recomputed():
                 self.store.expire_urpd()
         else:
             self._increment(DAY1_SERIES, "day1", at, missing)
