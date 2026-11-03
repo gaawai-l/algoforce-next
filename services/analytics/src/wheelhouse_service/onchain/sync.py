@@ -253,6 +253,9 @@ class OnchainSync:
             # Every series is rebuilt in one transaction; the old data stays readable until then.
             self.store.set_state(refreshing="true")
             self._replace(DAY1_SERIES, "day1", at, missing)
+            # A new BRK may have computed the closed days' snapshots again, so none of the stored
+            # ones counts as final any more: the URPD stage fetches each one it needs again.
+            self.store.expire_urpd()
         else:
             self._increment(DAY1_SERIES, "day1", at, missing)
         # The series stage is done, so nothing is being rebuilt any more.

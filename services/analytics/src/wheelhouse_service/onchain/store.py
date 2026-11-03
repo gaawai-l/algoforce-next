@@ -208,6 +208,13 @@ class OnchainStore:
         """The first of `candidates` whose URPD_SET snapshots are all stored and final."""
         return next((day for day in candidates if not self.urpd_not_final(day)), None)
 
+    def expire_urpd(self) -> None:
+        """Count every stored snapshot as fetched before its day was final, so that it is fetched
+        again; until then it still serves as the latest stored one."""
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("UPDATE urpd SET fetched_at=?", (timestamp(EPOCH),))
+
     def prune_urpd(self, keep: Set[date]) -> None:
         """Delete the snapshots of every day not in `keep`."""
         days = [day.isoformat() for day in keep]

@@ -355,6 +355,33 @@ def test_version_change_failure_keeps_old_data(tmp_path: Path):
     assert len(store.read_series("price_close", "day1")) == 5037
 
 
+def test_brk_version_change_fetches_every_stored_snapshot_again(tmp_path: Path):
+    store = OnchainStore(tmp_path / "onchain.sqlite")
+    transport, _ = brk_transport()
+    run(store, transport, NOW)
+    rows = urpd_rows(store)
+    past = {row for row in rows if row[1] < (D - timedelta(days=1)).isoformat()}
+    assert past
+
+    def fetched(at: datetime) -> set[tuple[str, str, str]]:
+        return {
+            row
+            for row in urpd_rows(store)
+            if store.urpd_fetched_at(row[0], date.fromisoformat(row[1]), row[2]) == at
+        }
+
+    # The past days were final when fetched, so the same BRK leaves them as they are.
+    second = NOW + timedelta(hours=1)
+    run(store, brk_transport()[0], second)
+    assert fetched(second).isdisjoint(past)
+
+    # A new BRK may have computed them again (the upgrade of 2026-10-30 moved up to 32,000 BTC
+    # between lin500 buckets of a closed day): each one is fetched from it.
+    third = second + timedelta(hours=1)
+    assert run(store, brk_transport(version="0.13.0")[0], third) is True
+    assert fetched(third) == rows
+
+
 def test_urpd_failure_after_replacement_still_derives_and_does_not_repeat_it(tmp_path: Path):
     store = OnchainStore(tmp_path / "onchain.sqlite")
 
