@@ -12,8 +12,32 @@ EPOCH = date(2009, 1, 1)  # index 0 of bitview's day1 series
 Daily = dict[str, list[float | None]]
 
 
+# BRK's upgrade of 2026-10-30 renamed the age cohorts (`utxos_X_old_*` became `age_X_*`) and
+# dropped the two unrealized-to-market-cap ratios, which are now the quotient of two series. The
+# local names, the ones the indicators and fixtures use, stay; only requests use BRK's.
+RATIOS = {
+    "unrealized_profit_to_mcap_ratio": ("unrealized_profit", "market_cap"),
+    "unrealized_loss_to_mcap_ratio": ("unrealized_loss", "market_cap"),
+}
+
+
 class OnchainError(Exception):
     pass
+
+
+def remote_names(name: str) -> tuple[str, ...]:
+    if name in RATIOS:
+        return RATIOS[name]
+    if name.startswith("utxos_") and "_old_" in name:
+        return ("age_" + name.removeprefix("utxos_").replace("_old_", "_", 1),)
+    return (name,)
+
+
+def _ratio(numerator: list[float | None], denominator: list[float | None]) -> list[float | None]:
+    return [
+        None if n is None or not d else n / d
+        for n, d in zip(numerator, denominator, strict=False)
+    ]
 
 
 def fetch_daily(names: Sequence[str], *, since: date, now: datetime) -> Daily:
@@ -33,11 +57,16 @@ def fetch_daily(names: Sequence[str], *, since: date, now: datetime) -> Daily:
             raise OnchainError(f"unexpected bitview payload for {name}")
         return [None if v is None else float(v) for v in body["data"]]
 
+    wanted = list(dict.fromkeys(part for name in names for part in remote_names(name)))
     try:
         with httpx.Client(timeout=15) as client, ThreadPoolExecutor(max_workers=6) as pool:
-            fetched = list(pool.map(lambda n: one(client, n), names))
+            remote = dict(zip(wanted, pool.map(lambda n: one(client, n), wanted), strict=True))
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         raise OnchainError(str(exc)) from exc
+    fetched = [
+        _ratio(*(remote[part] for part in parts)) if len(parts) == 2 else remote[parts[0]]
+        for parts in map(remote_names, names)
+    ]
     complete = (now.astimezone(UTC).date() - EPOCH).days - start
     length = min([complete, *(len(values) for values in fetched)])
     if length <= 0:

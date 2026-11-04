@@ -104,6 +104,36 @@ def test_fetch_drops_the_partial_current_day(monkeypatch):
     assert bitview.last_day(START, series) == date(2026, 9, 27)
 
 
+def test_fetch_asks_for_brk_names_and_derives_the_ratios(monkeypatch):
+    start = (START - EPOCH).days
+    values = {
+        "age_1d_to_1w_realized_price": [70.0, 71.0],
+        "unrealized_profit": [40.0, None],
+        "market_cap": [100.0, 100.0],
+    }
+    asked = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        name = request.url.path.split("/")[3]
+        asked.append(name)
+        return httpx.Response(200, json={"index": "day1", "start": start, "data": values[name]})
+
+    real = httpx.Client
+    monkeypatch.setattr(
+        bitview.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
+    )
+    series = fetch_daily(
+        ["utxos_1d_to_1w_old_realized_price", "unrealized_profit_to_mcap_ratio"],
+        since=START,
+        now=CHECKED,
+    )
+    assert sorted(asked) == sorted(values)
+    assert series == {
+        "utxos_1d_to_1w_old_realized_price": [70.0, 71.0],
+        "unrealized_profit_to_mcap_ratio": [0.4, None],
+    }
+
+
 def test_endpoint_serves_cached_cycle(tmp_path):
     calls = []
 
