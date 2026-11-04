@@ -1144,6 +1144,16 @@ export interface components {
                 [key: string]: number | null;
             };
         };
+        /** CyclePressurePoint */
+        CyclePressurePoint: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Value */
+            value: number;
+        };
         /** CycleResult */
         CycleResult: {
             cycle: components["schemas"]["Cycle"];
@@ -2403,6 +2413,32 @@ export interface components {
             /** Level */
             level: ("extreme" | "warning" | "none") | null;
         };
+        /** PressurePoint */
+        PressurePoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Value */
+            value: number | null;
+            /**
+             * No Block
+             * @default false
+             */
+            no_block: boolean;
+            /**
+             * Gap
+             * @default false
+             */
+            gap: boolean;
+            /** P95 */
+            p95: number | null;
+            /** P75 */
+            p75: number | null;
+            /** Level */
+            level: ("extreme" | "warning" | "none") | null;
+        };
         /** PrevCountdown */
         PrevCountdown: {
             /**
@@ -2695,11 +2731,11 @@ export interface components {
             /** Loss */
             loss: components["schemas"]["PressureLossPoint"][];
             /** Share */
-            share: components["schemas"]["wheelhouse_service__onchain__pressure__PressurePoint"][];
+            share: components["schemas"]["PressurePoint"][];
             /** Supply */
-            supply: components["schemas"]["wheelhouse_service__onchain__pressure__PressurePoint"][];
+            supply: components["schemas"]["PressurePoint"][];
             /** Price */
-            price: components["schemas"]["wheelhouse_service__onchain__pressure__PressurePoint"][];
+            price: components["schemas"]["PressurePoint"][];
             loss_levels: components["schemas"]["PressureLevels"] | null;
             share_levels: components["schemas"]["PressureLevels"] | null;
             supply_levels: components["schemas"]["PressureLevels"] | null;
@@ -2781,7 +2817,7 @@ export interface components {
             /** Value */
             value: number;
             /** History */
-            history: components["schemas"]["wheelhouse_service__indicators__cycle__alphabtc__PressurePoint"][];
+            history: components["schemas"]["CyclePressurePoint"][];
             /** Warn */
             warn: number;
             /** Confirm */
@@ -3322,42 +3358,6 @@ export interface components {
             inverted: boolean;
             /** History */
             history: components["schemas"]["SpreadPoint"][];
-        };
-        /** PressurePoint */
-        wheelhouse_service__indicators__cycle__alphabtc__PressurePoint: {
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /** Value */
-            value: number;
-        };
-        /** PressurePoint */
-        wheelhouse_service__onchain__pressure__PressurePoint: {
-            /**
-             * At
-             * Format: date-time
-             */
-            at: string;
-            /** Value */
-            value: number | null;
-            /**
-             * No Block
-             * @default false
-             */
-            no_block: boolean;
-            /**
-             * Gap
-             * @default false
-             */
-            gap: boolean;
-            /** P95 */
-            p95: number | null;
-            /** P75 */
-            p75: number | null;
-            /** Level */
-            level: ("extreme" | "warning" | "none") | null;
         };
     };
     responses: never;

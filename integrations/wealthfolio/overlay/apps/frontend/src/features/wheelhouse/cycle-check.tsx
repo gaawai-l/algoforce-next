@@ -33,7 +33,7 @@ export function CycleCheck() {
 
   return (
     <details className="wh-regime" open>
-      <summary>{text("cycle.title")}</summary>
+      <summary>{text("cycleCheck.title")}</summary>
       {cycle.error ? (
         <p className="wh-regime-error" role="alert">
           {String((cycle.error as Error).message)}
@@ -42,38 +42,38 @@ export function CycleCheck() {
         <p className="wh-regime-note">{text("service.connecting")}</p>
       ) : data.status === "unavailable" || !states || !index || !pressure ? (
         <p className="wh-regime-error" role="alert">
-          {text("cycle.unavailable")}
+          {text("cycleCheck.unavailable")}
           {data.error ? `: ${data.error}` : ""}
         </p>
       ) : (
         <>
           <div className="wh-regime-head">
             <div className="wh-regime-pill">
-              <span>{text("cycle.stateLabel")}</span>
-              <strong>{tk(`cycle.state.${states.state}`)}</strong>
+              <span>{text("cycleCheck.stateLabel")}</span>
+              <strong>{tk(`cycleCheck.state.${states.state}`)}</strong>
               <em>
-                {text("cycle.stateValue", {
-                  state: tk(`cycle.state.${states.state}`),
+                {text("cycleCheck.stateValue", {
+                  state: tk(`cycleCheck.state.${states.state}`),
                   days: states.days,
                   since: states.since,
                 })}
               </em>
             </div>
             <div className="wh-regime-pill">
-              <span>{text("cycle.indexLabel")}</span>
+              <span>{text("cycleCheck.indexLabel")}</span>
               <strong>{Math.round(index.composite)}</strong>
-              <em>{tk(`cycle.zone.${index.zone}`)}</em>
+              <em>{tk(`cycleCheck.zone.${index.zone}`)}</em>
             </div>
             <div className="wh-regime-pill">
-              <span>{text("cycle.pressureLabel")}</span>
+              <span>{text("cycleCheck.pressureLabel")}</span>
               <strong>
-                {text("cycle.pressureValue", {
+                {text("cycleCheck.pressureValue", {
                   value: pressure.value.toFixed(1),
-                  stage: tk(`cycle.stage.${pressure.stage}`),
+                  stage: tk(`cycleCheck.stage.${pressure.stage}`),
                 })}
               </strong>
               <em>
-                {text("cycle.pressureLines", {
+                {text("cycleCheck.pressureLines", {
                   warn: pressure.warn,
                   confirm: pressure.confirm,
                 })}
@@ -82,27 +82,27 @@ export function CycleCheck() {
           </div>
           {data.status === "stale" ? (
             <p className="wh-regime-error" role="alert">
-              {text("cycle.status.stale")}
+              {text("cycleCheck.status.stale")}
             </p>
           ) : null}
           <p className="wh-regime-note">
-            {text("cycle.note", { day: data.as_of ?? "—" })}
+            {text("cycleCheck.note", { day: data.as_of ?? "—" })}
           </p>
           <div className="wh-regime-scroll">
             <table className="wh-regime-table">
               <tbody>
                 {COMPONENTS.map((key) => (
                   <tr key={key}>
-                    <th scope="row">{tk(`cycle.component.${key}`)}</th>
+                    <th scope="row">{tk(`cycleCheck.component.${key}`)}</th>
                     <td>{Math.round(index.components[key])}</td>
                   </tr>
                 ))}
                 <tr>
-                  <th scope="row">{text("cycle.composite")}</th>
+                  <th scope="row">{text("cycleCheck.composite")}</th>
                   <td>{Math.round(index.composite)}</td>
                 </tr>
                 <tr>
-                  <th scope="row">{text("cycle.change")}</th>
+                  <th scope="row">{text("cycleCheck.change")}</th>
                   <td>
                     {CHANGES.map((key) => signed(index.change[key])).join(
                       " / ",
@@ -113,7 +113,7 @@ export function CycleCheck() {
             </table>
           </div>
           <p className="wh-regime-note">
-            {text("cycle.stats.note", {
+            {text("cycleCheck.stats.note", {
               changes: states.changes,
               multiplier: states.multiplier,
               depth: pct(states.depth),
@@ -124,12 +124,12 @@ export function CycleCheck() {
             <table className="wh-regime-table">
               <thead>
                 <tr>
-                  <th scope="col">{text("cycle.stats.state")}</th>
-                  <th scope="col">{text("cycle.stats.runs")}</th>
-                  <th scope="col">{text("cycle.stats.days")}</th>
-                  <th scope="col">{text("cycle.stats.mean")}</th>
-                  <th scope="col">{text("cycle.stats.median")}</th>
-                  <th scope="col">{text("cycle.stats.max")}</th>
+                  <th scope="col">{text("cycleCheck.stats.state")}</th>
+                  <th scope="col">{text("cycleCheck.stats.runs")}</th>
+                  <th scope="col">{text("cycleCheck.stats.days")}</th>
+                  <th scope="col">{text("cycleCheck.stats.mean")}</th>
+                  <th scope="col">{text("cycleCheck.stats.median")}</th>
+                  <th scope="col">{text("cycleCheck.stats.max")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -138,7 +138,7 @@ export function CycleCheck() {
                     key={row.state}
                     aria-current={row.state === states.state || undefined}
                   >
-                    <th scope="row">{tk(`cycle.state.${row.state}`)}</th>
+                    <th scope="row">{tk(`cycleCheck.state.${row.state}`)}</th>
                     <td>{row.runs}</td>
                     <td>{row.days}</td>
                     <td>{row.mean_days ?? "—"}</td>

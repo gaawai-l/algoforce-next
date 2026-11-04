@@ -3115,6 +3115,26 @@
         ],
         "title": "CycleIndex"
       },
+      "CyclePressurePoint": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "value"
+        ],
+        "title": "CyclePressurePoint"
+      },
       "CycleResult": {
         "properties": {
           "cycle": {
@@ -6931,6 +6951,86 @@
         ],
         "title": "PressureLossPoint"
       },
+      "PressurePoint": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "no_block": {
+            "type": "boolean",
+            "title": "No Block",
+            "default": false
+          },
+          "gap": {
+            "type": "boolean",
+            "title": "Gap",
+            "default": false
+          },
+          "p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95"
+          },
+          "p75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P75"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "extreme",
+                  "warning",
+                  "none"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "at",
+          "value",
+          "no_block",
+          "gap",
+          "p95",
+          "p75",
+          "level"
+        ],
+        "title": "PressurePoint"
+      },
       "PrevCountdown": {
         "properties": {
           "side": {
@@ -7801,21 +7901,21 @@
           },
           "share": {
             "items": {
-              "$ref": "#/components/schemas/wheelhouse_service__onchain__pressure__PressurePoint"
+              "$ref": "#/components/schemas/PressurePoint"
             },
             "type": "array",
             "title": "Share"
           },
           "supply": {
             "items": {
-              "$ref": "#/components/schemas/wheelhouse_service__onchain__pressure__PressurePoint"
+              "$ref": "#/components/schemas/PressurePoint"
             },
             "type": "array",
             "title": "Supply"
           },
           "price": {
             "items": {
-              "$ref": "#/components/schemas/wheelhouse_service__onchain__pressure__PressurePoint"
+              "$ref": "#/components/schemas/PressurePoint"
             },
             "type": "array",
             "title": "Price"
@@ -8084,7 +8184,7 @@
           },
           "history": {
             "items": {
-              "$ref": "#/components/schemas/wheelhouse_service__indicators__cycle__alphabtc__PressurePoint"
+              "$ref": "#/components/schemas/CyclePressurePoint"
             },
             "type": "array",
             "title": "History"
@@ -9687,106 +9787,6 @@
           "history"
         ],
         "title": "YieldSpread"
-      },
-      "wheelhouse_service__indicators__cycle__alphabtc__PressurePoint": {
-        "properties": {
-          "day": {
-            "type": "string",
-            "format": "date",
-            "title": "Day"
-          },
-          "value": {
-            "type": "number",
-            "title": "Value"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "day",
-          "value"
-        ],
-        "title": "PressurePoint"
-      },
-      "wheelhouse_service__onchain__pressure__PressurePoint": {
-        "properties": {
-          "at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "At"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
-          },
-          "no_block": {
-            "type": "boolean",
-            "title": "No Block",
-            "default": false
-          },
-          "gap": {
-            "type": "boolean",
-            "title": "Gap",
-            "default": false
-          },
-          "p95": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "P95"
-          },
-          "p75": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "P75"
-          },
-          "level": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "extreme",
-                  "warning",
-                  "none"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Level"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "at",
-          "value",
-          "no_block",
-          "gap",
-          "p95",
-          "p75",
-          "level"
-        ],
-        "title": "PressurePoint"
       }
     }
   }

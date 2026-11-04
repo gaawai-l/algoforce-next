@@ -290,14 +290,14 @@ PRESSURE_CONFIRM = 75.0
 PRESSURE_DAYS = 30
 
 
-class PressurePoint(Model):
+class CyclePressurePoint(Model):
     day: date
     value: float
 
 
 class ShortTermPressure(Model):
     value: float
-    history: list[PressurePoint]
+    history: list[CyclePressurePoint]
     warn: float
     confirm: float
     thresholds_confirmed: bool
@@ -306,7 +306,7 @@ class ShortTermPressure(Model):
 
 def short_term_pressure(first: date, series: Mapping[str, Values]) -> ShortTermPressure:
     points = [
-        PressurePoint(day=first + timedelta(days=i), value=profit / supply * 100)
+        CyclePressurePoint(day=first + timedelta(days=i), value=profit / supply * 100)
         for i, (profit, supply) in enumerate(
             zip(*(series[k] for k in PRESSURE_SERIES), strict=True)
         )
