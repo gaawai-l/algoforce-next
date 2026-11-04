@@ -89,6 +89,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/wheelhouse/v1/market-cycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Market Cycle */
+        get: operations["market_cycle_api_wheelhouse_v1_market_cycle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/wheelhouse/v1/macro-watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Macro Watch */
+        get: operations["macro_watch_api_wheelhouse_v1_macro_watch_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/wheelhouse/v1/workspace": {
         parameters: {
             query?: never;
@@ -1095,6 +1129,21 @@ export interface components {
              */
             created_at: string;
         };
+        /** CycleIndex */
+        CycleIndex: {
+            components: components["schemas"]["IndexComponents"];
+            /** Composite */
+            composite: number;
+            /**
+             * Zone
+             * @enum {string}
+             */
+            zone: "low" | "transition_low" | "mid" | "transition_high" | "top";
+            /** Change */
+            change: {
+                [key: string]: number | null;
+            };
+        };
         /** CycleResult */
         CycleResult: {
             cycle: components["schemas"]["Cycle"];
@@ -1130,6 +1179,31 @@ export interface components {
             events: components["schemas"]["LedgerEvent-Output"][];
             /** Issues */
             issues: string[];
+        };
+        /** CycleStates */
+        CycleStates: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "advance" | "breakout" | "pressure" | "repair" | "breakdown" | "capitulation";
+            /**
+             * Since
+             * Format: date
+             */
+            since: string;
+            /** Days */
+            days: number;
+            /** Changes */
+            changes: number;
+            /** Depth */
+            depth: number;
+            /** Spread */
+            spread: number;
+            /** Multiplier */
+            multiplier: number;
+            /** Stats */
+            stats: components["schemas"]["StateStats"][];
         };
         /** CycleView */
         CycleView: {
@@ -1604,6 +1678,18 @@ export interface components {
             then_day: string;
             then: components["schemas"]["CohortColumns"];
         };
+        /** Fomc */
+        Fomc: {
+            /**
+             * Decision At
+             * Format: date-time
+             */
+            decision_at: string;
+            /** Meeting */
+            meeting: string;
+            /** Projections */
+            projections: boolean;
+        };
         /** FxRate */
         FxRate: {
             /** Currency */
@@ -1656,6 +1742,17 @@ export interface components {
             doi: boolean;
             /** Sums */
             sums: boolean;
+        };
+        /** IndexComponents */
+        IndexComponents: {
+            /** Unrealized */
+            unrealized: number;
+            /** Realized */
+            realized: number;
+            /** Supply */
+            supply: number;
+            /** Young Vs Seasoned */
+            young_vs_seasoned: number;
         };
         /** Instrument */
         "Instrument-Input": {
@@ -1908,6 +2005,20 @@ export interface components {
             /** Opening Event Id */
             opening_event_id: string;
         };
+        /** MacroWatch */
+        MacroWatch: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            fomc: components["schemas"]["Fomc"] | null;
+            /** Fomc Error */
+            fomc_error: string | null;
+            spread: components["schemas"]["YieldSpread"] | null;
+            /** Spread Error */
+            spread_error: string | null;
+        };
         /**
          * MarketCheck
          * @description What `/future-markets` says about one of the symbols read here.
@@ -1966,6 +2077,31 @@ export interface components {
             timeframes: components["schemas"]["TimeframeContext"][];
             intraday: components["schemas"]["RegimeState"];
             swing: components["schemas"]["RegimeState"];
+        };
+        /** MarketCycle */
+        MarketCycle: {
+            /**
+             * Source
+             * @constant
+             */
+            source: "bitview";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "fresh" | "stale" | "unavailable";
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** As Of */
+            as_of: string | null;
+            states: components["schemas"]["CycleStates"] | null;
+            index: components["schemas"]["CycleIndex"] | null;
+            pressure: components["schemas"]["ShortTermPressure"] | null;
+            /** Error */
+            error: string | null;
         };
         /** ModelLine */
         ModelLine: {
@@ -2250,32 +2386,6 @@ export interface components {
             lth: number | null;
             /** Sth */
             sth: number | null;
-            /**
-             * No Block
-             * @default false
-             */
-            no_block: boolean;
-            /**
-             * Gap
-             * @default false
-             */
-            gap: boolean;
-            /** P95 */
-            p95: number | null;
-            /** P75 */
-            p75: number | null;
-            /** Level */
-            level: ("extreme" | "warning" | "none") | null;
-        };
-        /** PressurePoint */
-        PressurePoint: {
-            /**
-             * At
-             * Format: date-time
-             */
-            at: string;
-            /** Value */
-            value: number | null;
             /**
              * No Block
              * @default false
@@ -2585,11 +2695,11 @@ export interface components {
             /** Loss */
             loss: components["schemas"]["PressureLossPoint"][];
             /** Share */
-            share: components["schemas"]["PressurePoint"][];
+            share: components["schemas"]["wheelhouse_service__onchain__pressure__PressurePoint"][];
             /** Supply */
-            supply: components["schemas"]["PressurePoint"][];
+            supply: components["schemas"]["wheelhouse_service__onchain__pressure__PressurePoint"][];
             /** Price */
-            price: components["schemas"]["PressurePoint"][];
+            price: components["schemas"]["wheelhouse_service__onchain__pressure__PressurePoint"][];
             loss_levels: components["schemas"]["PressureLevels"] | null;
             share_levels: components["schemas"]["PressureLevels"] | null;
             supply_levels: components["schemas"]["PressureLevels"] | null;
@@ -2665,6 +2775,24 @@ export interface components {
             active: boolean;
             /** Completed */
             completed: boolean;
+        };
+        /** ShortTermPressure */
+        ShortTermPressure: {
+            /** Value */
+            value: number;
+            /** History */
+            history: components["schemas"]["wheelhouse_service__indicators__cycle__alphabtc__PressurePoint"][];
+            /** Warn */
+            warn: number;
+            /** Confirm */
+            confirm: number;
+            /** Thresholds Confirmed */
+            thresholds_confirmed: boolean;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "none" | "warning" | "confirmed";
         };
         /** Signal */
         Signal: {
@@ -2784,6 +2912,34 @@ export interface components {
             mode: string;
             /** Bar Count */
             bar_count: number;
+        };
+        /** SpreadPoint */
+        SpreadPoint: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Spread */
+            spread: number;
+        };
+        /** StateStats */
+        StateStats: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "advance" | "breakout" | "pressure" | "repair" | "breakdown" | "capitulation";
+            /** Runs */
+            runs: number;
+            /** Days */
+            days: number;
+            /** Mean Days */
+            mean_days: number | null;
+            /** Median Days */
+            median_days: number | null;
+            /** Max Days */
+            max_days: number | null;
         };
         /** StorageStats */
         StorageStats: {
@@ -3149,6 +3305,60 @@ export interface components {
             refresh_job: components["schemas"]["Job"] | null;
             schedule: components["schemas"]["Schedule"] | null;
         };
+        /** YieldSpread */
+        YieldSpread: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Ten Year */
+            ten_year: number;
+            /** One Year */
+            one_year: number;
+            /** Spread */
+            spread: number;
+            /** Inverted */
+            inverted: boolean;
+            /** History */
+            history: components["schemas"]["SpreadPoint"][];
+        };
+        /** PressurePoint */
+        wheelhouse_service__indicators__cycle__alphabtc__PressurePoint: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Value */
+            value: number;
+        };
+        /** PressurePoint */
+        wheelhouse_service__onchain__pressure__PressurePoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Value */
+            value: number | null;
+            /**
+             * No Block
+             * @default false
+             */
+            no_block: boolean;
+            /**
+             * Gap
+             * @default false
+             */
+            gap: boolean;
+            /** P95 */
+            p95: number | null;
+            /** P75 */
+            p75: number | null;
+            /** Level */
+            level: ("extreme" | "warning" | "none") | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -3305,6 +3515,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    market_cycle_api_wheelhouse_v1_market_cycle_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketCycle"];
+                };
+            };
+        };
+    };
+    macro_watch_api_wheelhouse_v1_macro_watch_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MacroWatch"];
                 };
             };
         };

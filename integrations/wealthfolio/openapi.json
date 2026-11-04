@@ -251,6 +251,42 @@
         }
       }
     },
+    "/api/wheelhouse/v1/market-cycle": {
+      "get": {
+        "summary": "Market Cycle",
+        "operationId": "market_cycle_api_wheelhouse_v1_market_cycle_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketCycle"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/wheelhouse/v1/macro-watch": {
+      "get": {
+        "summary": "Macro Watch",
+        "operationId": "macro_watch_api_wheelhouse_v1_macro_watch_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacroWatch"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/wheelhouse/v1/workspace": {
       "get": {
         "summary": "Workspace",
@@ -3034,6 +3070,51 @@
         ],
         "title": "Cycle"
       },
+      "CycleIndex": {
+        "properties": {
+          "components": {
+            "$ref": "#/components/schemas/IndexComponents"
+          },
+          "composite": {
+            "type": "number",
+            "title": "Composite"
+          },
+          "zone": {
+            "type": "string",
+            "enum": [
+              "low",
+              "transition_low",
+              "mid",
+              "transition_high",
+              "top"
+            ],
+            "title": "Zone"
+          },
+          "change": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Change"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "components",
+          "composite",
+          "zone",
+          "change"
+        ],
+        "title": "CycleIndex"
+      },
       "CycleResult": {
         "properties": {
           "cycle": {
@@ -3176,6 +3257,67 @@
           "issues"
         ],
         "title": "CycleResult"
+      },
+      "CycleStates": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "advance",
+              "breakout",
+              "pressure",
+              "repair",
+              "breakdown",
+              "capitulation"
+            ],
+            "title": "State"
+          },
+          "since": {
+            "type": "string",
+            "format": "date",
+            "title": "Since"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "changes": {
+            "type": "integer",
+            "title": "Changes"
+          },
+          "depth": {
+            "type": "number",
+            "title": "Depth"
+          },
+          "spread": {
+            "type": "number",
+            "title": "Spread"
+          },
+          "multiplier": {
+            "type": "integer",
+            "title": "Multiplier"
+          },
+          "stats": {
+            "items": {
+              "$ref": "#/components/schemas/StateStats"
+            },
+            "type": "array",
+            "title": "Stats"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "since",
+          "days",
+          "changes",
+          "depth",
+          "spread",
+          "multiplier",
+          "stats"
+        ],
+        "title": "CycleStates"
       },
       "CycleView": {
         "properties": {
@@ -4532,6 +4674,31 @@
         ],
         "title": "FlowWindow"
       },
+      "Fomc": {
+        "properties": {
+          "decision_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Decision At"
+          },
+          "meeting": {
+            "type": "string",
+            "title": "Meeting"
+          },
+          "projections": {
+            "type": "boolean",
+            "title": "Projections"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decision_at",
+          "meeting",
+          "projections"
+        ],
+        "title": "Fomc"
+      },
       "FxRate": {
         "properties": {
           "currency": {
@@ -4681,6 +4848,35 @@
         ],
         "title": "Imputed",
         "description": "Which features the original's rules set to 0 for missing inputs."
+      },
+      "IndexComponents": {
+        "properties": {
+          "unrealized": {
+            "type": "number",
+            "title": "Unrealized"
+          },
+          "realized": {
+            "type": "number",
+            "title": "Realized"
+          },
+          "supply": {
+            "type": "number",
+            "title": "Supply"
+          },
+          "young_vs_seasoned": {
+            "type": "number",
+            "title": "Young Vs Seasoned"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "unrealized",
+          "realized",
+          "supply",
+          "young_vs_seasoned"
+        ],
+        "title": "IndexComponents"
       },
       "Instrument-Input": {
         "properties": {
@@ -5491,6 +5687,67 @@
         ],
         "title": "Lot"
       },
+      "MacroWatch": {
+        "properties": {
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "fomc": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Fomc"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fomc_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fomc Error"
+          },
+          "spread": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/YieldSpread"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spread_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spread Error"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "checked_at",
+          "fomc",
+          "fomc_error",
+          "spread",
+          "spread_error"
+        ],
+        "title": "MacroWatch"
+      },
       "MarketCheck": {
         "properties": {
           "venue": {
@@ -5626,6 +5883,95 @@
           "swing"
         ],
         "title": "MarketContext"
+      },
+      "MarketCycle": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "const": "bitview",
+            "title": "Source"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "states": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CycleStates"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "index": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CycleIndex"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pressure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShortTermPressure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "status",
+          "checked_at",
+          "as_of",
+          "states",
+          "index",
+          "pressure",
+          "error"
+        ],
+        "title": "MarketCycle"
       },
       "ModelLine": {
         "properties": {
@@ -6585,86 +6931,6 @@
         ],
         "title": "PressureLossPoint"
       },
-      "PressurePoint": {
-        "properties": {
-          "at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "At"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
-          },
-          "no_block": {
-            "type": "boolean",
-            "title": "No Block",
-            "default": false
-          },
-          "gap": {
-            "type": "boolean",
-            "title": "Gap",
-            "default": false
-          },
-          "p95": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "P95"
-          },
-          "p75": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "P75"
-          },
-          "level": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "extreme",
-                  "warning",
-                  "none"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Level"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "at",
-          "value",
-          "no_block",
-          "gap",
-          "p95",
-          "p75",
-          "level"
-        ],
-        "title": "PressurePoint"
-      },
       "PrevCountdown": {
         "properties": {
           "side": {
@@ -7535,21 +7801,21 @@
           },
           "share": {
             "items": {
-              "$ref": "#/components/schemas/PressurePoint"
+              "$ref": "#/components/schemas/wheelhouse_service__onchain__pressure__PressurePoint"
             },
             "type": "array",
             "title": "Share"
           },
           "supply": {
             "items": {
-              "$ref": "#/components/schemas/PressurePoint"
+              "$ref": "#/components/schemas/wheelhouse_service__onchain__pressure__PressurePoint"
             },
             "type": "array",
             "title": "Supply"
           },
           "price": {
             "items": {
-              "$ref": "#/components/schemas/PressurePoint"
+              "$ref": "#/components/schemas/wheelhouse_service__onchain__pressure__PressurePoint"
             },
             "type": "array",
             "title": "Price"
@@ -7809,6 +8075,53 @@
           "completed"
         ],
         "title": "SetupRun"
+      },
+      "ShortTermPressure": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/wheelhouse_service__indicators__cycle__alphabtc__PressurePoint"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "warn": {
+            "type": "number",
+            "title": "Warn"
+          },
+          "confirm": {
+            "type": "number",
+            "title": "Confirm"
+          },
+          "thresholds_confirmed": {
+            "type": "boolean",
+            "title": "Thresholds Confirmed"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "none",
+              "warning",
+              "confirmed"
+            ],
+            "title": "Stage"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "value",
+          "history",
+          "warn",
+          "confirm",
+          "thresholds_confirmed",
+          "stage"
+        ],
+        "title": "ShortTermPressure"
       },
       "Signal": {
         "properties": {
@@ -8189,6 +8502,94 @@
           "bar_count"
         ],
         "title": "SnapshotSummary"
+      },
+      "SpreadPoint": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "spread": {
+            "type": "number",
+            "title": "Spread"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "spread"
+        ],
+        "title": "SpreadPoint"
+      },
+      "StateStats": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "advance",
+              "breakout",
+              "pressure",
+              "repair",
+              "breakdown",
+              "capitulation"
+            ],
+            "title": "State"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "mean_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Days"
+          },
+          "median_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Days"
+          },
+          "max_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Days"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "runs",
+          "days",
+          "mean_days",
+          "median_days",
+          "max_days"
+        ],
+        "title": "StateStats"
       },
       "StorageStats": {
         "properties": {
@@ -9243,6 +9644,149 @@
           "schedule"
         ],
         "title": "Workspace"
+      },
+      "YieldSpread": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "ten_year": {
+            "type": "number",
+            "title": "Ten Year"
+          },
+          "one_year": {
+            "type": "number",
+            "title": "One Year"
+          },
+          "spread": {
+            "type": "number",
+            "title": "Spread"
+          },
+          "inverted": {
+            "type": "boolean",
+            "title": "Inverted"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/SpreadPoint"
+            },
+            "type": "array",
+            "title": "History"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "ten_year",
+          "one_year",
+          "spread",
+          "inverted",
+          "history"
+        ],
+        "title": "YieldSpread"
+      },
+      "wheelhouse_service__indicators__cycle__alphabtc__PressurePoint": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "value"
+        ],
+        "title": "PressurePoint"
+      },
+      "wheelhouse_service__onchain__pressure__PressurePoint": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "no_block": {
+            "type": "boolean",
+            "title": "No Block",
+            "default": false
+          },
+          "gap": {
+            "type": "boolean",
+            "title": "Gap",
+            "default": false
+          },
+          "p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95"
+          },
+          "p75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P75"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "extreme",
+                  "warning",
+                  "none"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "at",
+          "value",
+          "no_block",
+          "gap",
+          "p95",
+          "p75",
+          "level"
+        ],
+        "title": "PressurePoint"
       }
     }
   }
