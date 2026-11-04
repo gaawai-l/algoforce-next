@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .bitview import fetch_daily
 from .calculation import data_state
 from .context import MarketContext, build_context
 from .contracts import ErrorBody, Integrations, ServiceStatus
@@ -46,7 +47,6 @@ from .onchain.api import create_router as onchain_router
 from .onchain.brk import BrkClient
 from .perps.api import create_router as perps_router
 from .perps.collector import Connection
-from .bitview import fetch_daily
 from .portfolio.api import create_router as portfolio_router
 from .repository import Repository
 from .rules import Rules

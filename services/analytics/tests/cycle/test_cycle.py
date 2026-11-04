@@ -9,10 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from wheelhouse_service import bitview
+from wheelhouse_service.bitview import EPOCH, OnchainError, fetch_daily
 from wheelhouse_service.cycle import SERIES, build_cycle, compose_cycle
 from wheelhouse_service.http import create_app
 from wheelhouse_service.indicators.cycle.alphabtc import START, short_term_pressure, zone
-from wheelhouse_service.bitview import EPOCH, OnchainError, fetch_daily
 
 FIXTURE = Path(__file__).parent / "fixtures" / "bitview-2026-09-27T163948Z.json"
 CHECKED = datetime(2026, 9, 28, 1, 0, tzinfo=UTC)

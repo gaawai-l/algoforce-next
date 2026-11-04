@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
+from .bitview import Daily, OnchainError, fetch_daily, last_day
 from .indicators.cycle.alphabtc import (
     INDEX_SERIES,
     PRESSURE_SERIES,
@@ -20,7 +21,6 @@ from .indicators.cycle.alphabtc import (
     states,
 )
 from .indicators.demark.models import Model
-from .bitview import Daily, OnchainError, fetch_daily, last_day
 
 SERIES = (*STATE_SERIES, *INDEX_SERIES, *PRESSURE_SERIES)
 Fetch = Callable[..., Daily]
