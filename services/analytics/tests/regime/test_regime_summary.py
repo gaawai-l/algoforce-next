@@ -5,9 +5,12 @@ from decimal import Decimal
 import pytest
 from regime_fixture import (
     FIXTURE,
+    FIXTURE_0350,
     FIXTURE_0400,
+    FIXTURE_0407,
     FIXTURE_0416,
-    FIXTURE_0928,
+    FIXTURE_0431,
+    FIXTURE_0915,
     TIMEFRAMES,
     V2,
     load_fixture,
@@ -22,25 +25,12 @@ STRUCTURAL = (
     "side", "regime", "phase", "step", "target", "setupStep", "countdownStep",
     "barsSinceQualified13", "lastSignal", "prev", "second", "rounds",
 )
-# Fields where Binance and TradingSignal's feed put a bar on different candles.
-FEED_SENSITIVE = {
-    # 5m's previous SELL 13 sits 2-7 USDT from its thresholds.
-    FIXTURE: {"5m": {"prev", "barsSinceQualified13"}},
-    # 15m's SELL 13 lands one bar later on Binance, as in the golden sample.
-    FIXTURE_0928: {"15m": {"prev", "barsSinceQualified13"}},
-    FIXTURE_0400: {"15m": {"prev", "barsSinceQualified13"}},
-    FIXTURE_0416: {"15m": {"prev", "barsSinceQualified13"}},
-}
-# 5m's last SELL 13 is the golden sample's one, 28 bars apart between the feeds.
-RISK_FEED_SENSITIVE = {FIXTURE_0416: {"5m": {"risk13Ts"}}}
-PRICE_FEED_SENSITIVE = {
-    # The countdown's lowest true lows differ by 3.8 USDT, so the feeds pick different
-    # extreme bars (Binance's carries a 170 USDT wick).
-    FIXTURE_0928: {"5m": {"riskLevel"}},
-    FIXTURE_0416: {"5m": {"riskLevel"}},
-}
 PRICES = ("riskLevel", "risk9", "setupClose", "close13", "tdst")
-FIXTURES = (FIXTURE, FIXTURE_0928, FIXTURE_0400, FIXTURE_0416)
+# TradingSignal computed this risk block one 5m bar after its across block (setup 4 vs 3).
+RISK_ONE_BAR_LATER = {(FIXTURE_0915, "5m")}
+FIXTURES = (
+    FIXTURE, FIXTURE_0350, FIXTURE_0400, FIXTURE_0407, FIXTURE_0416, FIXTURE_0431, FIXTURE_0915
+)
 CASES = [(path, tf) for path in FIXTURES for tf in TIMEFRAMES]
 
 
@@ -64,37 +54,26 @@ def test_structure_matches_tradingsignal(path, tf):
     expected = load_fixture(path)["timeframes"][tf]
     across, risk = _replay(tf, path)
     for key in STRUCTURAL:
-        if key in FEED_SENSITIVE[path].get(tf, set()):
-            continue
         assert _strip(across.get(key)) == _strip(expected["across"].get(key)), key
-    for key in ("provisional", "risk13Ts", "risk9Ts", "side", "setupRun"):
-        if key in RISK_FEED_SENSITIVE.get(path, {}).get(tf, set()):
-            continue
+    for key in ("provisional", "risk13Ts", "risk9Ts", "side"):
         assert risk[key] == expected["risk"][key], key
     assert risk["nextBarNeeds"]["direction"] == expected["risk"]["nextBarNeeds"]["direction"]
+    if (path, tf) in RISK_ONE_BAR_LATER:
+        return
+    assert risk["setupRun"] == expected["risk"]["setupRun"]
+    need = Decimal(str(expected["risk"]["nextBarNeeds"]["price"]))
+    assert abs(Decimal(risk["nextBarNeeds"]["price"]) - need) < Decimal("1e-6")
 
 
 @pytest.mark.parametrize(("path", "tf"), CASES)
-def test_prices_differ_only_by_feed(path, tf):
+def test_prices_match_tradingsignal(path, tf):
     expected = load_fixture(path)["timeframes"][tf]["risk"]
     _, risk = _replay(tf, path)
     for key in PRICES:
         assert (risk[key] is None) == (expected[key] is None), key
-        if risk[key] is not None and key not in PRICE_FEED_SENSITIVE.get(path, {}).get(tf, ()):
-            # Binance vs TradingSignal's feed: largest observed gap is 64.54 (4h risk9).
-            assert abs(Decimal(risk[key]) - Decimal(str(expected[key]))) <= 70, key
-
-
-def test_15m_prices_are_exact_on_tradingsignal_candles():
-    expected = load_fixture()["timeframes"]["15m"]["risk"]
-    _, risk = _replay("15m")
-    for key in ("risk9", "setupClose", "riskLevel", "tdst"):
-        assert abs(Decimal(risk[key]) - Decimal(str(expected[key]))) < Decimal("1e-6"), key
-
-
-def test_5m_previous_thirteen_is_the_locally_observed_one():
-    across, _ = _replay("5m")
-    assert across["prev"] == {"side": "SELL", "countdown": 13, "qualified": True, "barsAgo": 35}
+        if risk[key] is not None:
+            # TradingSignal serialises floats (84632.79999999999); prices have one decimal.
+            assert abs(Decimal(risk[key]) - Decimal(str(expected[key]))) < Decimal("1e-6"), key
 
 
 def test_no_observed_sequence_returns_none():
