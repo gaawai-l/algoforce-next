@@ -169,6 +169,31 @@ class Table(Model):
     latest_uncovered: bool
 
 
+class BlockTests(Model):
+    """QFI derivatives-perpetual-regime-classification boolean and sign tests on a block."""
+
+    short_liquidations_top_decile: bool
+    long_liquidations_top_decile: bool
+    short_liquidations_3x_long: bool
+    long_liquidations_3x_short: bool
+    price_up_top_quarter: bool
+    price_down_top_quarter: bool
+    price_move_top_quarter: bool
+    oi_rise_top_quarter: bool
+    oi_fall_top_quarter: bool
+    price_change_sign: Literal[-1, 0, 1]
+    taker_delta_sign: Literal[-1, 0, 1]
+
+
+class IntraweekAnswer(Model):
+    """QFI intraweek (30-day Reference window on 4h blocks) classification and thresholds."""
+
+    as_of: AwareDatetime | None
+    state: State | None
+    thresholds: Thresholds
+    tests: BlockTests | None
+
+
 class StatesResult(Model):
     window: Window
     last: AwareDatetime
@@ -294,6 +319,31 @@ def _block(grid: Grid, i0: int, i1: int, w: int, *, o6: bool = False) -> Block:
         delta_sum=_sum_present(vd),
         lliq_sum=_sum_present(longs),
         sliq_sum=_sum_present(shorts),
+    )
+
+
+def _sign(val: float) -> Literal[-1, 0, 1]:
+    if val > 0:
+        return 1
+    return -1 if val < 0 else 0
+
+
+def block_tests(b: Block, t: Thresholds) -> BlockTests | None:
+    """Boolean and sign tests explaining why `b` got its state against `t`."""
+    if t.s_liq is None or t.l_liq is None or t.oi is None or t.px is None:
+        return None
+    return BlockTests(
+        short_liquidations_top_decile=b.sliq >= t.s_liq,
+        long_liquidations_top_decile=b.lliq >= t.l_liq,
+        short_liquidations_3x_long=b.sliq >= 3 * b.lliq,
+        long_liquidations_3x_short=b.lliq >= 3 * b.sliq,
+        price_up_top_quarter=b.dpx >= t.px,
+        price_down_top_quarter=b.dpx <= -t.px,
+        price_move_top_quarter=abs(b.dpx) >= t.px,
+        oi_rise_top_quarter=b.doi >= t.oi,
+        oi_fall_top_quarter=b.doi <= -t.oi,
+        price_change_sign=_sign(b.dpx),
+        taker_delta_sign=_sign(b.delta),
     )
 
 
@@ -512,4 +562,49 @@ def compute_states(grid: Grid, window: Window, *, rules: Rules) -> StatesResult:
         collecting=collecting,
         qc=qc,
         series_missing=series_missing,
+    )
+
+
+def compute_intraweek(grid: Grid, *, rules: Rules) -> IntraweekAnswer:
+    """QFI intraweek (30-day Reference window on 4h blocks) classification and thresholds."""
+    o1, o6 = "O1" in rules, "O6" in rules
+    w = WINDOW_BUCKETS["4h"]
+    need = COLLECTING_DAYS * BLOCKS_PER_DAY["4h"]
+    ref_30 = grid.last // DAY * DAY - 30 * DAY
+    all_spans, _ = _spans(grid, w)
+    starts = [grid.start + i0 * STEP for i0, _ in all_spans]
+    first_30 = bisect_left(starts, ref_30)
+    every = [_block(grid, i0, i1, w, o6=o6) for i0, i1 in all_spans]
+    blocks_30 = every[first_30:]
+    closed_30 = len(blocks_30) - 1 if o1 and blocks_30 and blocks_30[-1].forming else len(blocks_30)
+    latest = blocks_30[closed_30 - 1] if closed_30 else None
+    if o6 and latest is not None:
+        closed_idx = first_30 + closed_30
+        past_30 = every[bisect_left(starts, int(latest.t0.timestamp()) - 30 * DAY) : closed_idx - 1]
+        t_30 = _past_thresholds(past_30, need)
+        imputed = latest.imputed.dpx or latest.imputed.doi or latest.imputed.sums
+        st_30 = _classify(latest, t_30, o6=True) if (latest.covered and not imputed) else None
+    else:
+        sample_30 = blocks_30[:closed_30]
+        liq_30 = [b for b in sample_30 if b.liq_covered]
+        t_30 = Thresholds(
+            s_liq=quantile([b.sliq for b in liq_30], 0.90),
+            l_liq=quantile([b.lliq for b in liq_30], 0.90),
+            oi=quantile([abs(b.doi) for b in sample_30], 0.75),
+            px=quantile([abs(b.dpx) for b in sample_30], 0.75),
+            n_liq=len(liq_30),
+            n_px=len(sample_30),
+            n_oi=len(sample_30),
+        )
+        coll_30 = sum(b.covered for b in sample_30) < need
+        st_30 = (
+            _classify(latest, t_30)
+            if (latest is not None and latest.covered and not coll_30)
+            else None
+        )
+    return IntraweekAnswer(
+        as_of=latest.t0 if latest else None,
+        state=st_30,
+        thresholds=t_30,
+        tests=block_tests(latest, t_30) if (latest and st_30 is not None) else None,
     )

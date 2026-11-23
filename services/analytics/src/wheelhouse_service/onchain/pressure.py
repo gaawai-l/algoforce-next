@@ -7,8 +7,9 @@ it, a level against them and, back from the current reading, a run.
 """
 
 import math
+import statistics
 from bisect import bisect_left, insort
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 from itertools import pairwise
 from typing import Literal, NamedTuple
@@ -19,6 +20,15 @@ from ..market import Model
 from ..rules import Rule, Rules
 from ..stats import quantile_r7
 from .brk import HOUR1_SERIES
+
+SellerHorizon = Literal["intraday", "intraweek", "intramonth", "intracycle"]
+SellerCategory = Literal["extreme", "warning", "normal", "quiet"]
+SELLER_HORIZON_STEPS: dict[SellerHorizon, tuple[int, int, timedelta]] = {
+    "intraday": (1, 7, timedelta(hours=1)),
+    "intraweek": (4, 30, timedelta(hours=1)),
+    "intramonth": (24, 90, timedelta(hours=1)),
+    "intracycle": (1, 1460, timedelta(days=7)),
+}
 
 # Only the most recent hours count, whatever else the store holds: see `lookback`.
 V1_LOOKBACK = 2600
@@ -96,6 +106,32 @@ class PressurePoint(Model):
     p95: float | None = None
     p75: float | None = None
     level: Level | None = None
+
+
+class SellerComponents(Model):
+    realized_loss: float
+    sth_loss_share: float
+    sth_supply_in_loss: float
+
+
+class SellerStrengthPoint(Model):
+    at: AwareDatetime
+    raw: float
+    strength: float | None
+    category: SellerCategory | None
+
+
+class SellerHorizonAnswer(Model):
+    horizon: SellerHorizon
+    as_of: AwareDatetime
+    strength: float
+    raw: float
+    category: SellerCategory
+    components: SellerComponents
+    loss_levels: PressureLevels
+    share_levels: PressureLevels
+    supply_levels: PressureLevels
+    supported: bool = False
 
 
 class Pressure(Model):
@@ -503,3 +539,252 @@ def seller_pressure(
         share_run=share_run,
         supply_run=supply_run,
     )
+
+
+def seller_category(strength: float) -> SellerCategory:
+    """Category of a seller strength in [0, 1] under QFI default levels (0.95 / 0.75 / 0.25)."""
+    if strength >= 0.95:
+        return "extreme"
+    if strength >= 0.75:
+        return "warning"
+    if strength < 0.25:
+        return "quiet"
+    return "normal"
+
+
+def _build_qfi_points(
+    series: Mapping[str, Series], grid: Sequence[datetime], w: int
+) -> dict[int, dict[str, float | datetime | None]]:
+    """Build QFI seller points at step difference `w` on `grid` (unrounded floats)."""
+    pts: dict[int, dict[str, float | datetime | None]] = {}
+    for i in range(w, len(grid)):
+        at = grid[i]
+        prev = grid[i - w]
+        px = series[PRICE].get(at)
+        if px is None:
+            continue
+
+        def diff(key: str, _at: datetime = at, _prev: datetime = prev) -> float | None:
+            c1, c0 = series[key].get(_at), series[key].get(_prev)
+            return max(0.0, c1 - c0) if (c1 is not None and c0 is not None) else None
+
+        ll = diff(LTH_LOSS)
+        lp = diff(LTH_PROFIT)
+        sl_raw = diff(STH_LOSS)
+        sp_raw = diff(STH_PROFIT)
+        if ll is None or lp is None or sl_raw is None or sp_raw is None:
+            continue
+        yl = diff(YOUNG_LOSS)
+        yp = diff(YOUNG_PROFIT)
+        if yl is None or yp is None:
+            yl = yp = 0.0
+        sl = max(0.0, sl_raw - yl)
+        sp = max(0.0, sp_raw - yp)
+        sil_0, sil_y = series[STH_IN_LOSS].get(at), series[YOUNG_IN_LOSS].get(at)
+        sip_0, sip_y = series[STH_IN_PROFIT].get(at), series[YOUNG_IN_PROFIT].get(at)
+        sil = (sil_0 - sil_y) if (sil_0 is not None and sil_y is not None) else None
+        sip = (sip_0 - sip_y) if (sip_0 is not None and sip_y is not None) else None
+        pts[i] = {
+            "at": at,
+            "px": px,
+            "ll": ll,
+            "lp": lp,
+            "sl": sl,
+            "sp": sp,
+            "tot": ll + lp + sl_raw + sp_raw,
+            "sil": sil,
+            "sip": sip,
+        }
+    return pts
+
+
+def _apply_noise_filter(
+    series: Mapping[str, Series],
+    grid: Sequence[datetime],
+    pts_1: dict[int, dict[str, float | datetime | None]],
+    pts_4: dict[int, dict[str, float | datetime | None]],
+    pts_24: dict[int, dict[str, float | datetime | None]],
+) -> list[datetime]:
+    """Apply QFI local-last-seller noise filter in place to w=1, 4, 24 point sets."""
+    n = len(grid)
+    flagged: list[datetime] = []
+    for h in range(721, n):
+        if h not in pts_1:
+            continue
+        p = pts_1[h]
+        prev_tots = [
+            float(pts_1[k]["tot"])  # type: ignore[arg-type]
+            for k in range(h - 720, h)
+            if k in pts_1 and pts_1[k]["tot"] is not None
+        ]
+        if len(prev_tots) < 360:
+            continue
+        m_val = statistics.median(prev_tots)
+        max_leg = max(float(p["ll"]), float(p["lp"]), float(p["sl"]), float(p["sp"]))  # type: ignore[arg-type]
+        if max_leg <= 50.0 * m_val:
+            continue
+        px_prev = series[PRICE].get(grid[h - 1])
+        px_curr = series[PRICE].get(grid[h])
+        px_next = series[PRICE].get(grid[h + 1]) if (h + 1 < n) else None
+        r_h = abs(px_curr / px_prev - 1.0) if (px_curr and px_prev) else 0.0
+        r_next = abs(px_next / px_curr - 1.0) if (px_next and px_curr) else 0.0
+        if max(r_h, r_next) < 0.01:
+            flagged.append(grid[h])
+            for leg in ("ll", "lp", "sl", "sp"):
+                leg_val = float(p[leg])  # type: ignore[arg-type]
+                if leg_val > 10.0 * m_val:
+                    prev_vals: list[float] = []
+                    k = h - 1
+                    while k >= 1 and len(prev_vals) < 24:
+                        if k in pts_1:
+                            prev_vals.append(float(pts_1[k][leg]))  # type: ignore[arg-type]
+                        k -= 1
+                    if not prev_vals:
+                        continue
+                    repl = statistics.median(prev_vals)
+                    excess = leg_val - repl
+                    for w_pts, w_len in ((pts_1, 1), (pts_4, 4), (pts_24, 24)):
+                        for j in range(h, min(n, h + w_len)):
+                            if j in w_pts:
+                                cur = float(w_pts[j][leg])  # type: ignore[arg-type]
+                                w_pts[j][leg] = max(0.0, cur - excess)
+    return flagged
+
+
+def _rank_rows(
+    rows: Sequence[tuple[datetime, float]], window: timedelta, step: timedelta
+) -> dict[datetime, float]:
+    """Empirical CDF rank in (t - window, t] inclusive, requiring a full window back."""
+    if not rows:
+        return {}
+    out: dict[datetime, float] = {}
+    t_first = rows[0][0]
+    j = 0
+    for i, (t, val) in enumerate(rows):
+        if t_first > t - window + step:
+            continue
+        while rows[j][0] <= t - window:
+            j += 1
+        win = [v for _, v in rows[j : i + 1]]
+        out[t] = sum(1 for v in win if v <= val) / len(win)
+    return out
+
+
+def _window_levels(rows: Sequence[tuple[datetime, float]], window: timedelta) -> PressureLevels:
+    if not rows:
+        return PressureLevels(p95=None, p75=None, n=0)
+    last_t = rows[-1][0]
+    vals = sorted(v for t, v in rows if last_t - window < t <= last_t)
+    return PressureLevels(p95=quantile_r7(vals, 0.95), p75=quantile_r7(vals, 0.75), n=len(vals))
+
+
+def _compute_seller_horizon(
+    horizon: SellerHorizon,
+    pts: Mapping[int, Mapping[str, float | datetime | None]],
+    window_days: int,
+    step: timedelta,
+) -> SellerHorizonAnswer | None:
+    if not pts:
+        return None
+    win = timedelta(days=window_days)
+    ordered = [pts[i] for i in sorted(pts.keys())]
+    c1: list[tuple[datetime, float]] = []
+    c2: list[tuple[datetime, float]] = []
+    c3: list[tuple[datetime, float]] = []
+    for p in ordered:
+        at = p["at"]
+        assert isinstance(at, datetime)
+        ll, lp, sl, sp = float(p["ll"]), float(p["lp"]), float(p["sl"]), float(p["sp"])  # type: ignore[arg-type]
+        c1.append((at, ll + sl))
+        tot = lp + ll + sp + sl
+        if tot > 0:
+            c2.append((at, sl / tot))
+        sil, sip = p["sil"], p["sip"]
+        if isinstance(sil, float) and isinstance(sip, float) and (sil + sip) > 0:
+            c3.append((at, sil / (sil + sip)))
+    r1 = _rank_rows(c1, win, step)
+    r2 = _rank_rows(c2, win, step)
+    r3 = _rank_rows(c3, win, step)
+    raw_rows = [
+        (t, (r1[t] + r2[t] + r3[t]) / 3.0) for t, _ in c1 if t in r1 and t in r2 and t in r3
+    ]
+    if not raw_rows:
+        return None
+    str_map = _rank_rows(raw_rows, win, step)
+    answered = [(t, raw_val, str_map[t]) for t, raw_val in raw_rows if t in str_map]
+    if not answered:
+        return None
+    last_t, last_raw, last_str = answered[-1]
+    return SellerHorizonAnswer(
+        horizon=horizon,
+        as_of=last_t,
+        strength=last_str,
+        raw=last_raw,
+        category=seller_category(last_str),
+        components=SellerComponents(
+            realized_loss=r1[last_t],
+            sth_loss_share=r2[last_t],
+            sth_supply_in_loss=r3[last_t],
+        ),
+        loss_levels=_window_levels(c1, win),
+        share_levels=_window_levels(c2, win),
+        supply_levels=_window_levels(c3, win),
+        supported=False,
+    )
+
+
+def seller_horizons(
+    hour1_rows: Mapping[str, Sequence[tuple[datetime, float | None]]],
+    week1_rows: Mapping[str, Sequence[tuple[datetime, float | None]]] | None = None,
+    *,
+    closed_at: datetime | None = None,
+    closed_week: datetime | None = None,
+    noise_filter: bool = True,
+) -> tuple[list[SellerHorizonAnswer], list[datetime]]:
+    """Compute QFI onchain-local-last-seller v3/v7 answers across horizons."""
+    stamps = [at for name in HOUR1_SERIES if name in hour1_rows for at, _ in hour1_rows[name]]
+    if not stamps:
+        return [], []
+    last_h = min(max(stamps), closed_at) if closed_at is not None else max(stamps)
+    first_h = min(stamps)
+    n_hours = int((last_h - first_h) // HOUR) + 1
+    grid_h = [first_h + HOUR * i for i in range(n_hours)]
+    series_h: dict[str, Series] = {
+        name: {at: val for at, val in hour1_rows.get(name, ()) if at <= last_h}
+        for name in HOUR1_SERIES
+    }
+    pts_1 = _build_qfi_points(series_h, grid_h, 1)
+    pts_4 = _build_qfi_points(series_h, grid_h, 4)
+    pts_24 = _build_qfi_points(series_h, grid_h, 24)
+    flagged: list[datetime] = []
+    if noise_filter:
+        flagged = _apply_noise_filter(series_h, grid_h, pts_1, pts_4, pts_24)
+
+    answers: list[SellerHorizonAnswer] = []
+    for hz, pts, days in (
+        ("intraday", pts_1, 7),
+        ("intraweek", pts_4, 30),
+        ("intramonth", pts_24, 90),
+    ):
+        ans = _compute_seller_horizon(hz, pts, days, HOUR)  # type: ignore[arg-type]
+        if ans is not None:
+            answers.append(ans)
+
+    if week1_rows:
+        w_stamps = [at for name in HOUR1_SERIES if name in week1_rows for at, _ in week1_rows[name]]
+        if w_stamps:
+            last_w = min(max(w_stamps), closed_week) if closed_week is not None else max(w_stamps)
+            first_w = min(w_stamps)
+            week_step = timedelta(days=7)
+            n_weeks = int((last_w - first_w) // week_step) + 1
+            grid_w = [first_w + week_step * i for i in range(n_weeks)]
+            series_w: dict[str, Series] = {
+                name: {at: val for at, val in week1_rows.get(name, ()) if at <= last_w}
+                for name in HOUR1_SERIES
+            }
+            pts_w = _build_qfi_points(series_w, grid_w, 1)
+            ans_w = _compute_seller_horizon("intracycle", pts_w, 1460, week_step)
+            if ans_w is not None:
+                answers.append(ans_w)
+
+    return answers, flagged

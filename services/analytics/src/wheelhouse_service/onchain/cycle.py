@@ -5,11 +5,14 @@ from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import Literal
 
+from pydantic import AwareDatetime
+
 from ..market import Model
 from ..rules import Rule, Rules
 
 CycleState = Literal["advance", "breakout", "pressure", "repair", "breakdown", "capitulation"]
 ComponentName = Literal["depth", "pvs", "spread"]
+RegimeHorizon = Literal["intraday", "intraweek", "intramonth", "intracycle"]
 
 # Each state as (depth > 0, pvs > 0, spread > 0).
 SIGNS: dict[CycleState, tuple[bool, bool, bool]] = {
@@ -23,6 +26,12 @@ SIGNS: dict[CycleState, tuple[bool, bool, bool]] = {
 NAMES: tuple[ComponentName, ...] = ("depth", "pvs", "spread")
 # In the units of the components: 100 * ln(price ratio).
 DEADBANDS: dict[ComponentName, float] = {"depth": 7.0, "pvs": 6.8, "spread": 1.25}
+REGIME_SUPPORTED: dict[RegimeHorizon, bool] = {
+    "intraday": True,
+    "intraweek": True,
+    "intramonth": False,
+    "intracycle": False,
+}
 
 
 class Component(Model):
@@ -30,6 +39,28 @@ class Component(Model):
     value: float
     deadband: float
     supports: bool
+
+
+class RegimeReading(Model):
+    """QFI onchain-market-regime reading: raw state, strength (0-1), weakest edge and neighbour."""
+
+    state: CycleState
+    strength: float
+    raw: float
+    weakest: ComponentName
+    neighbour: CycleState
+    depth: float
+    pvs: float
+    spread: float
+    depth_ratio: float
+    pvs_ratio: float
+    spread_ratio: float
+
+
+class RegimeHorizonAnswer(RegimeReading):
+    horizon: RegimeHorizon
+    as_of: AwareDatetime
+    supported: bool
 
 
 class Episode(Model):
@@ -62,6 +93,69 @@ def raw_state(depth: float, pvs: float, spread: float) -> CycleState:
             return state
     # Cannot happen when pvs = depth - spread.
     raise ValueError(f"inconsistent signs for depth={depth}, pvs={pvs}, spread={spread}")
+
+
+def regime_reading(depth: float, pvs: float, spread: float) -> RegimeReading:
+    """QFI onchain-market-regime reading: raw state, strength (0-1), weakest edge and neighbour."""
+    state = raw_state(depth, pvs, spread)
+    signs = SIGNS[state]
+    ratios: dict[ComponentName, float] = {
+        "depth": abs(depth) / DEADBANDS["depth"],
+        "pvs": abs(pvs) / DEADBANDS["pvs"],
+        "spread": abs(spread) / DEADBANDS["spread"],
+    }
+    weakest = min(NAMES, key=lambda name: ratios[name])
+    raw = ratios[weakest]
+    strength = min(1.0, raw)
+    idx = NAMES.index(weakest)
+    flipped = (
+        not signs[0] if idx == 0 else signs[0],
+        not signs[1] if idx == 1 else signs[1],
+        not signs[2] if idx == 2 else signs[2],
+    )
+    neighbour = next(k for k, v in SIGNS.items() if v == flipped)
+    return RegimeReading(
+        state=state,
+        strength=strength,
+        raw=raw,
+        weakest=weakest,
+        neighbour=neighbour,
+        depth=depth,
+        pvs=pvs,
+        spread=spread,
+        depth_ratio=ratios["depth"],
+        pvs_ratio=ratios["pvs"],
+        spread_ratio=ratios["spread"],
+    )
+
+
+def classify_horizon(
+    horizon: RegimeHorizon,
+    rows: Sequence[tuple[AwareDatetime, float | None, float | None, float | None]],
+    *,
+    closed_before: AwareDatetime | None = None,
+) -> RegimeHorizonAnswer | None:
+    """Classify the latest closed bar of `horizon` from `(at, W, STH, TMM)` rows in time order."""
+    last: tuple[AwareDatetime, float, float, float] | None = None
+    for at, w, sth, tmm in rows:
+        if w is None or sth is None or tmm is None or min(w, sth, tmm) <= 0:
+            continue
+        if closed_before is not None and at > closed_before:
+            continue
+        last = (at, w, sth, tmm)
+    if last is None:
+        return None
+    at, w, sth, tmm = last
+    depth = 100.0 * math.log(w / tmm)
+    spread = 100.0 * math.log(sth / tmm)
+    pvs = depth - spread
+    reading = regime_reading(depth, pvs, spread)
+    return RegimeHorizonAnswer(
+        **reading.model_dump(),
+        horizon=horizon,
+        as_of=at,
+        supported=REGIME_SUPPORTED[horizon],
+    )
 
 
 def gate(current: CycleState, depth: float, pvs: float, spread: float) -> CycleState:
